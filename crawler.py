@@ -54,6 +54,8 @@ def detect_category(title: str) -> str:
     if any(k in title for k in ['적합성평가', '기자재', '시험기관', '인증']): return '기술기준'
     if any(k in title for k in ['ITU', 'WRC', 'IMT', '6G', '5G', 'AI']): return 'ITU·WRC'
     if any(k in title for k in ['기술기준', '무선설비', '무선국', '단말']): return '기술기준'
+    if any(k in title for k in ['전기통신사업', '통신사업', '망중립', '번호이동']): return '전기통신사업'
+    if any(k in title for k in ['정보통신망', '정보보호', '사이버', '개인정보']): return '정보통신망'
     return '기타'
 
 
@@ -92,7 +94,6 @@ def crawl_rra() -> list:
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
 
-            # 테이블 행 탐색
             rows = soup.select('table.board_list tbody tr, table tbody tr')[:15]
             for row in rows:
                 tds = row.find_all('td')
@@ -109,7 +110,6 @@ def crawl_rra() -> list:
                     continue
                 if href.startswith('/'):
                     href = 'https://www.rra.go.kr' + href
-                # 날짜는 보통 마지막 td
                 date_str = tds[-2].get_text(strip=True) if len(tds) >= 3 else ''
                 items.append({
                     'title': title,
@@ -161,7 +161,6 @@ def crawl_msit() -> list:
                 title = title_tag.get_text(strip=True)
                 if not title:
                     continue
-                # 전파 관련 키워드 필터
                 if not any(kw in title for kw in RADIO_KEYWORDS):
                     continue
                 href = title_tag.get('href', '')
@@ -177,7 +176,7 @@ def crawl_msit() -> list:
                     'is_read': False,
                     'published_at': parse_date(date_str),
                 })
-            print(f'[MSIT] {label}: 전파 관련 {len([i for i in items if i["source"]=="과기정통부"])}건')
+            print(f'[MSIT] {label}: 관련 {len([i for i in items if i["source"]=="과기정통부"])}건')
         except Exception as e:
             print(f'[MSIT 오류] {label}: {e}')
     return items
@@ -261,7 +260,6 @@ def send_email(new_items: list):
     today = datetime.now(KST).strftime('%Y.%m.%d')
 
     if not new_items:
-        # 신규 없어도 요약 메일 발송 (확인용)
         subject = f'[전파정책 AI] {today} — 신규 고시·뉴스 없음'
         body_html = f'''
 <html><body style="font-family:sans-serif;max-width:600px;margin:auto;padding:20px">
@@ -275,7 +273,6 @@ def send_email(new_items: list):
     else:
         subject = f'[전파정책 AI] {today} 신규 {len(new_items)}건 — 확인 필요'
 
-        # 카테고리별 분류
         by_cat: dict = {}
         for item in new_items:
             cat = item.get('category', '기타')
@@ -283,7 +280,7 @@ def send_email(new_items: list):
 
         cat_icons = {
             '주파수': '📶', '전자파': '⚡', '기술기준': '📋',
-            'ITU·WRC': '🌐', '기타': '📌'
+            'ITU·WRC': '🌐', '전기통신사업': '📡', '정보통신망': '🔒', '기타': '📌'
         }
 
         rows_html = ''
