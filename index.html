@@ -561,11 +561,7 @@ async function sendChat() {
     appendMsg('ai', answer);
 
     if (sb) {
-      await sb.from('chat_logs').insert({
-        question: text,
-        answer: answer,
-        category: detectCategory(text)
-      }).catch(() => {});
+      try { await sb.from('chat_logs').insert({ question: text, answer: answer, category: detectCategory(text) }); } catch(e) {}
       refreshDashboard();
     }
   } catch(e) {
@@ -653,7 +649,7 @@ async function loadNews() {
 }
 
 async function markRead(id) {
-  if (sb) await sb.from('news_feed').update({ is_read: true }).eq('id', id).catch(() => {});
+  if (sb) { try { await sb.from('news_feed').update({ is_read: true }).eq('id', id); } catch(e) {} }
 }
 
 function filterNews(el, cat) {
