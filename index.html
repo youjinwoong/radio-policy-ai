@@ -196,6 +196,7 @@ textarea:focus { border-color: var(--accent); }
       <div class="nav-label">지식 베이스</div>
       <div class="nav-item" onclick="go('law',this)"><i class="ti ti-file-text"></i>국내 법령·고시</div>
       <div class="nav-item" onclick="go('itu',this)"><i class="ti ti-world"></i>ITU-R 문서</div>
+      <div class="nav-item" onclick="go('press',this)"><i class="ti ti-speakerphone"></i>정부 보도자료</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">모니터링</div>
@@ -392,6 +393,31 @@ textarea:focus { border-color: var(--accent); }
           <div class="news-item"><div class="news-dot dot-new"></div><div><div class="news-title">과기정통부, 6GHz 대역 주파수 분배 공청회 개최 예정</div><div class="news-meta">디지털타임스 · 2026.05.18 · 주파수</div></div></div>
           <div class="news-item"><div class="news-dot dot-read"></div><div><div class="news-title">6G 표준화 로드맵 — ITU-R M.2160 이후 일정 확정</div><div class="news-meta">전자신문 · 2026.05.01 · 5G·6G</div></div></div>
           <div class="news-item"><div class="news-dot dot-read"></div><div><div class="news-title">주파수할당 신청 절차 개정 고시 시행 (제2026-23호)</div><div class="news-meta">과기정통부 · 2026.04.16 · 주파수</div></div></div>
+        </div>
+      </div>
+
+      <!-- 보도자료 지식베이스 -->
+      <div class="panel" id="panel-press">
+        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+          <span style="font-size:12px;color:var(--text-secondary)">출처: 과기정통부 · 국립전파연구원 보도자료 (RAG 인덱싱)</span>
+          <span class="badge badge-teal" style="margin-left:auto">Supabase 연동</span>
+        </div>
+        <div class="section-title">연도별 보도자료</div>
+        <div class="card" id="press-list">
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-news"></i></div>
+            <div style="flex:1"><div class="file-name">2024년 보도자료</div><div class="file-size">과기정통부 · 주파수, 기술기준, ITU 등</div></div><span class="badge badge-teal">검색가능</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-news"></i></div>
+            <div style="flex:1"><div class="file-name">2025년 보도자료</div><div class="file-size">과기정통부 · 주파수, 기술기준, ITU 등</div></div><span class="badge badge-teal">검색가능</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-news"></i></div>
+            <div style="flex:1"><div class="file-name">2026년 보도자료</div><div class="file-size">과기정통부 · 주파수, 기술기준, ITU 등</div></div><span class="badge badge-teal">검색가능</span></div>
+        </div>
+        <div class="section-title" style="margin-top:16px">활용 안내</div>
+        <div class="card" style="cursor:default">
+          <p style="font-size:12px;color:var(--text-secondary);line-height:1.7">
+            보도자료 전문은 <strong>AI 자문</strong>에서 키워드로 검색됩니다.<br>
+            예: <span style="color:var(--accent);cursor:pointer" onclick="askQ('6GHz 주파수 보도자료 내용은?')">6GHz 주파수 보도자료 내용은?</span><br>
+            예: <span style="color:var(--accent);cursor:pointer" onclick="askQ('2025년 주파수 할당 보도자료 요약해줘')">2025년 주파수 할당 보도자료 요약해줘</span>
+          </p>
         </div>
       </div>
 
@@ -844,51 +870,89 @@ function clearApiKeys() {
   document.getElementById('inp-claude-key').value = '';
   sb = null;
   updateStatusDots();
-  showApiAlert('warn', 'API 키가 초기화되었습니다.');
+  showApiAlert('ok', 'API 키가 삭제되었습니다.');
 }
 
 function showApiAlert(type, msg) {
   const el = document.getElementById('api-alert');
-  const icon = type === 'ok' ? 'circle-check' : 'alert-triangle';
-  el.innerHTML = '<div class="alert-box alert-' + type + '"><i class="ti ti-' + icon + '"></i>' + msg + '</div>';
-  setTimeout(function() { el.innerHTML = ''; }, 5000);
+  if (!el) return;
+  el.innerHTML = '<div style="padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:10px;background:' +
+    (type === 'ok' ? '#d1fae5;color:#065f46' : '#fef3c7;color:#92400e') + '">' + msg + '</div>';
 }
 
 function updateStatusDots() {
   const cfg = getConfig();
-  const sbOk = !!(sb && cfg.sbUrl && cfg.sbKey);
+  const sbOk = !!sb;
   const aiOk = !!cfg.claudeKey;
-  document.getElementById('sb-dot').className = 'conn-dot' + (sbOk ? ' ok' : '');
-  document.getElementById('sb-status').textContent = sbOk ? 'Supabase 연결됨' : 'Supabase 미연결';
-  document.getElementById('ai-dot').className = 'conn-dot' + (aiOk ? ' ok' : '');
-  document.getElementById('ai-status').textContent = aiOk ? 'Claude API 설정됨' : 'Claude API 미설정';
+  const ragOk = sbOk;
+
+  const sbDot = document.getElementById('sb-dot');
+  const aiDot = document.getElementById('ai-dot');
   const ragDot = document.getElementById('rag-dot');
+  const sbStatus = document.getElementById('sb-status');
+  const aiStatus = document.getElementById('ai-status');
   const ragStatus = document.getElementById('rag-status');
-  if (ragDot) { ragDot.className = 'conn-dot' + (sbOk ? ' ok' : ''); }
-  if (ragStatus) { ragStatus.textContent = sbOk ? 'RAG 활성 (키워드 검색)' : 'RAG 비활성'; }
+
+  if (sbDot) sbDot.style.background = sbOk ? 'var(--green)' : '#d1d5db';
+  if (aiDot) aiDot.style.background = aiOk ? 'var(--green)' : '#d1d5db';
+  if (ragDot) ragDot.style.background = ragOk ? 'var(--green)' : '#d1d5db';
+  if (sbStatus) sbStatus.textContent = sbOk ? 'Supabase 연결됨' : 'Supabase 미연결';
+  if (aiStatus) aiStatus.textContent = aiOk ? 'Claude API 설정됨' : 'Claude API 미설정';
+  if (ragStatus) ragStatus.textContent = ragOk ? 'RAG 활성 (키워드 검색)' : 'RAG 키워드 검색';
 }
 
 // ════════════════════════════════════════════
 //  Navigation
 // ════════════════════════════════════════════
-const titles = { home:'대시보드', chat:'AI 자문', law:'국내 법령·고시', itu:'ITU-R 문서', news:'보도자료·뉴스', settings:'설정' };
-function go(id, el) {
+function go(page, navEl) {
   document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
   document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
-  document.getElementById('panel-' + id).classList.add('active');
-  if (el) el.classList.add('active');
-  document.getElementById('topbar-title').textContent = titles[id] || '';
-  if (id === 'settings') loadSettingsUI();
-  if (id === 'news') loadNews();
+  var panel = document.getElementById('panel-' + page);
+  if (panel) panel.classList.add('active');
+  if (navEl) navEl.classList.add('active');
+
+  if (page === 'news') loadNews();
+  if (page === 'settings') loadSettingsUI();
+  if (page === 'press') loadPressFromSupabase();
 }
 
 // ════════════════════════════════════════════
-// Init
-(function init() {
+//  보도자료 지식베이스 (Supabase RAG 카테고리)
+// ════════════════════════════════════════════
+let pressLoaded = false;
+async function loadPressFromSupabase() {
+  if (pressLoaded || !sb) return;
+  const listEl = document.getElementById('press-list');
+  if (!listEl) return;
+  try {
+    const { data, error } = await sb
+      .from('document_chunks')
+      .select('doc_name, doc_category, chunk_index')
+      .eq('doc_category', '보도자료')
+      .eq('chunk_index', 0)
+      .order('doc_name', { ascending: false })
+      .limit(50);
+    if (error || !data || data.length === 0) return;
+    pressLoaded = true;
+    listEl.innerHTML = data.map(function(d) {
+      var name = d.doc_name.replace(/\.[^.]+$/, '');
+      return '<div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-news"></i></div>' +
+        '<div style="flex:1"><div class="file-name">' + name + '</div>' +
+        '<div class="file-size">보도자료 · RAG 인덱싱 완료</div></div>' +
+        '<span class="badge badge-teal">검색가능</span></div>';
+    }).join('');
+  } catch(e) { console.warn('보도자료 로드 오류:', e); }
+}
+
+// ════════════════════════════════════════════
+//  Init
+// ════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
   initSupabase();
   updateStatusDots();
-  if (sb) refreshDashboard();
-})();
+  loadSettingsUI();
+  refreshDashboard();
+});
 </script>
 </body>
 </html>
