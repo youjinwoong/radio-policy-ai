@@ -122,6 +122,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .msg-ai code { background: var(--bg-tertiary); padding: 1px 5px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace; }
 .msg-name { font-size: 11px; font-weight: 600; margin-bottom: 5px; color: var(--text-secondary); }
 .msg-loading { align-self: flex-start; background: var(--bg-secondary); padding: 12px 16px; border-radius: var(--radius-md); display: flex; gap: 5px; align-items: center; }
+.rag-sources { margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--border-light); font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.rag-sources i { font-size: 12px; color: var(--accent); }
+.rag-tag { background: var(--accent-light); color: var(--accent-dark); border-radius: 4px; padding: 1px 6px; font-size: 11px; }
 .dot-anim { width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); animation: bounce 1.2s infinite; }
 .dot-anim:nth-child(2) { animation-delay: 0.2s; }
 .dot-anim:nth-child(3) { animation-delay: 0.4s; }
@@ -203,6 +206,7 @@ textarea:focus { border-color: var(--accent); }
       <div class="version">v0.2 — 실제 연동</div>
       <div class="conn-status"><div class="conn-dot" id="sb-dot"></div><span id="sb-status">Supabase 미연결</span></div>
       <div class="conn-status" style="margin-top:2px"><div class="conn-dot" id="ai-dot"></div><span id="ai-status">Claude API 미설정</span></div>
+      <div class="conn-status" style="margin-top:2px"><div class="conn-dot" id="rag-dot"></div><span id="rag-status">RAG 키워드 검색</span></div>
     </div>
   </div>
 
@@ -389,6 +393,7 @@ textarea:focus { border-color: var(--accent); }
             <input class="input-field" id="inp-sb-key" type="password" placeholder="sb_publishable_..." />
             <span class="input-label">Claude API Key</span>
             <input class="input-field" id="inp-claude-key" type="password" placeholder="sk-ant-..." />
+
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary" onclick="saveApiKeys()"><i class="ti ti-device-floppy"></i>저장 및 연결</button>
@@ -459,6 +464,73 @@ function initSupabase() {
 }
 
 // ════════════════════════════════════════════
+//  RAG — 키워드 기반 Supabase 검색 (Voyage AI 불필요)
+// ════════════════════════════════════════════
+let lastRagSources = [];
+
+function extractKeywords(text) {
+  // 한국어 조사·어미·불용어 제거
+  var stopwords = ['이','가','은','는','을','를','의','에','에서','으로','로','과','와','도',
+    '만','그','이것','저것','그것','있다','없다','하다','되다','이다','어떻게','어떤',
+    '무엇','언제','어디','왜','누가','대해','관해','통해','위해','따라','대한','관한',
+    '통한','위한','있는','없는','하는','되는','인','이란','이라는','라는','라고',
+    '이고','이며','하고','이나','이나','또는','그리고','하지만','그러나','따라서'];
+  var words = text.split(/[\s,\.·\·\(\)\[\]\「\」\『\』\<\>\:;\!\?]+/)
+    .map(function(w) { return w.replace(/[^가-힣a-zA-Z0-9\.]/g, '').trim(); })
+    .filter(function(w) { return w.length >= 2 && !stopwords.includes(w); });
+  // 법령 키워드 우선 (조문번호, 주제어)
+  var priority = words.filter(function(w) {
+    return /제\d+조|주파수|할당|재할당|전자파|ITU|5G|6G|EMC|SAR|고시|시행령|시행규칙|적합성|기술기준|무선국|면허|허가|신청|승인|폐업|폐지|이용기간/.test(w);
+  });
+  var rest = words.filter(function(w) { return !priority.includes(w); });
+  var all = priority.concat(rest);
+  // 중복 제거
+  return all.filter(function(v, i, a) { return a.indexOf(v) === i; }).slice(0, 5);
+}
+
+async function searchKeywords(query) {
+  if (!sb) return [];
+  var keywords = extractKeywords(query);
+  if (keywords.length === 0) return [];
+
+  var seen = new Set();
+  var results = [];
+
+  // 키워드별로 검색 (최대 3개 키워드)
+  for (var ki = 0; ki < Math.min(keywords.length, 3); ki++) {
+    var kw = keywords[ki];
+    if (kw.length < 2) continue;
+    try {
+      var resp = await sb
+        .from('document_chunks')
+        .select('id, doc_name, doc_category, content')
+        .ilike('content', '%' + kw + '%')
+        .limit(3);
+      if (resp.data) {
+        for (var ri = 0; ri < resp.data.length; ri++) {
+          var row = resp.data[ri];
+          if (!seen.has(row.id)) {
+            seen.add(row.id);
+            results.push(row);
+          }
+        }
+      }
+    } catch(e) { console.warn('키워드 검색 오류:', kw, e); }
+  }
+  console.log('키워드 검색:', keywords.slice(0,3).join(', '), '->', results.length + '개 청크');
+  return results.slice(0, 5);
+}
+
+function buildRagContext(chunks) {
+  if (!chunks || chunks.length === 0) return '';
+  const items = chunks.map(function(c, i) {
+    var sim = c.similarity ? ' (유사도: ' + (c.similarity * 100).toFixed(0) + '%)' : '';
+    return '[참조 ' + (i+1) + '] 출처: ' + c.doc_name + ' (' + c.doc_category + ')' + sim + '\n' + c.content;
+  });
+  return '\n\n---\n\n[RAG 검색 결과 — 질문과 관련된 실제 법령·고시 원문]\n아래 내용은 질문과 의미적으로 유사한 문서 청크를 검색한 결과입니다. 반드시 아래 원문을 최우선으로 인용하고, 조항 번호와 내용이 일치하는지 확인하여 답변하세요:\n\n' + items.join('\n\n---\n\n');
+}
+
+// ════════════════════════════════════════════
 //  Claude API
 // ════════════════════════════════════════════
 let chatHistory = [];
@@ -467,6 +539,18 @@ let isSending = false;
 async function callClaude(userText) {
   const { claudeKey } = getConfig();
   if (!claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다. 설정 탭에서 입력해주세요.');
+
+  // RAG: 관련 문서 청크 검색
+  lastRagSources = [];
+  const ragChunks = await searchKeywords(userText);
+  if (ragChunks.length > 0) {
+    lastRagSources = ragChunks.map(function(c) { return c.doc_name; });
+    console.log('RAG 검색 결과:', ragChunks.length + '개 청크 (' + lastRagSources.join(', ') + ')');
+  }
+
+  // 시스템 프롬프트에 RAG 컨텍스트 추가
+  const ragContext = buildRagContext(ragChunks);
+  const systemWithRag = SYSTEM_PROMPT + ragContext;
 
   chatHistory.push({ role: 'user', content: userText });
 
@@ -481,7 +565,7 @@ async function callClaude(userText) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: SYSTEM_PROMPT,
+      system: systemWithRag,
       messages: chatHistory
     })
   });
@@ -489,7 +573,7 @@ async function callClaude(userText) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     chatHistory.pop();
-    throw new Error(err.error?.message || `API 오류 (HTTP ${res.status})`);
+    throw new Error(err.error?.message || 'API 오류 (HTTP ' + res.status + ')');
   }
 
   const data = await res.json();
@@ -558,15 +642,33 @@ async function sendChat() {
   try {
     const answer = await callClaude(text);
     loader.remove();
-    appendMsg('ai', answer);
+    const msgEl = appendMsg('ai', answer);
+
+    // RAG 출처 표시
+    if (lastRagSources && lastRagSources.length > 0) {
+      const unique = lastRagSources.filter(function(v, i, a) { return a.indexOf(v) === i; });
+      const srcDiv = document.createElement('div');
+      srcDiv.className = 'rag-sources';
+      srcDiv.innerHTML = '<i class="ti ti-database"></i>참조 문서: ' + unique.map(function(s) {
+        return '<span class="rag-tag">' + s + '</span>';
+      }).join(' ');
+      msgEl.appendChild(srcDiv);
+    }
 
     if (sb) {
-      try { await sb.from('chat_logs').insert({ question: text, answer: answer, category: detectCategory(text) }); } catch(e) {}
+      try {
+        await sb.from('chat_logs').insert({
+          question: text,
+          answer: answer,
+          category: detectCategory(text),
+          sources: lastRagSources
+        });
+      } catch(e) {}
       refreshDashboard();
     }
   } catch(e) {
     loader.remove();
-    appendMsg('ai', `⚠️ ${e.message}`);
+    appendMsg('ai', '⚠️ ' + e.message);
   } finally {
     isSending = false;
     input.disabled = false;
@@ -666,7 +768,7 @@ function loadSettingsUI() {
   const cfg = getConfig();
   if (cfg.sbUrl) document.getElementById('inp-sb-url').value = cfg.sbUrl;
   if (cfg.sbKey) document.getElementById('inp-sb-key').value = cfg.sbKey;
-lue = cfg.claudeKey;
+  if (cfg.claudeKey) document.getElementById('inp-claude-key').value = cfg.claudeKey;
   document.getElementById('system-prompt-display').value = SYSTEM_PROMPT;
 }
 
@@ -675,10 +777,10 @@ function saveApiKeys() {
   const sbKey = document.getElementById('inp-sb-key').value.trim();
   const claudeKey = document.getElementById('inp-claude-key').value.trim();
   if (!sbUrl || !sbKey || !claudeKey) {
-    showApiAlert('warn', '세 가지 항목을 모두 입력해주세요.');
+    showApiAlert('warn', 'Supabase URL, Supabase Key, Claude API Key는 필수입니다.');
     return;
   }
-  saveConfig({ sbUrl, sbKey, claudeKey });
+  saveConfig({ sbUrl: sbUrl, sbKey: sbKey, claudeKey: claudeKey });
   sb = null;
   initSupabase();
   updateStatusDots();
@@ -713,7 +815,8 @@ async function testConnection() {
   } else {
     results.push('Claude API Key 미설정');
   }
-  const ok = results.every(function(r) { return r.includes('성공'); });
+
+  const ok = results.every(function(r) { return r.includes('성공') || r.includes('미설정'); });
   showApiAlert(ok ? 'ok' : 'warn', results.join(' · '));
   updateStatusDots();
 }
@@ -744,6 +847,10 @@ function updateStatusDots() {
   document.getElementById('sb-status').textContent = sbOk ? 'Supabase 연결됨' : 'Supabase 미연결';
   document.getElementById('ai-dot').className = 'conn-dot' + (aiOk ? ' ok' : '');
   document.getElementById('ai-status').textContent = aiOk ? 'Claude API 설정됨' : 'Claude API 미설정';
+  const ragDot = document.getElementById('rag-dot');
+  const ragStatus = document.getElementById('rag-status');
+  if (ragDot) { ragDot.className = 'conn-dot' + (sbOk ? ' ok' : ''); }
+  if (ragStatus) { ragStatus.textContent = sbOk ? 'RAG 활성 (키워드 검색)' : 'RAG 비활성'; }
 }
 
 // ════════════════════════════════════════════
@@ -761,8 +868,7 @@ function go(id, el) {
 }
 
 // ════════════════════════════════════════════
-//  Init
-// ════════════════════════════════════════════
+// Init
 (function init() {
   initSupabase();
   updateStatusDots();
