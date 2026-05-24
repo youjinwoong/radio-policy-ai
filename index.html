@@ -516,6 +516,42 @@ textarea:focus { border-color: var(--accent); }
         </div>
       </div>
 
+      <!-- 기술 용어 위키 -->
+      <div class="panel" id="panel-terms">
+        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--text-secondary)">이동통신·전파 분야 기술 용어 자동 수집 위키</span>
+          <span class="badge badge-purple" style="margin-left:auto" id="terms-count-badge">—</span>
+        </div>
+
+        <!-- 필터 + 검색 -->
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+          <input type="text" id="terms-search-input" placeholder="용어 검색..." style="flex:1;min-width:140px;padding:7px 12px;font-size:12px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none" oninput="filterTerms(this.value)"/>
+          <select id="terms-cat-filter" onchange="filterTerms(document.getElementById('terms-search-input').value)" style="padding:7px 10px;font-size:12px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none">
+            <option value="">전체 분야</option>
+            <option value="주파수">주파수</option>
+            <option value="네트워크">네트워크</option>
+            <option value="위성">위성</option>
+            <option value="단말">단말</option>
+            <option value="규제">규제</option>
+            <option value="기타">기타</option>
+          </select>
+          <button class="btn" onclick="filterTerms('')">초기화</button>
+        </div>
+
+        <!-- 용어 카드 목록 -->
+        <div id="terms-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;max-height:480px;overflow-y:auto"></div>
+
+        <!-- 용어 상세 모달 -->
+        <div id="terms-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;align-items:center;justify-content:center">
+          <div style="background:var(--bg-primary);border:0.5px solid var(--border-mid);border-radius:var(--radius-lg);padding:24px;max-width:680px;width:90%;max-height:85vh;overflow-y:auto;position:relative">
+            <button onclick="closeTermsModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:18px;color:var(--text-secondary);cursor:pointer">✕</button>
+            <div id="terms-modal-content"></div>
+          </div>
+        </div>
+      </div>
+
+
+
       <!-- 설정 -->
       <div class="panel" id="panel-settings">
         <!-- API 키 설정 -->
@@ -691,6 +727,157 @@ function buildRagContext(chunks) {
 // ════════════════════════════════════════════
 let chatHistory = [];
 let isSending = false;
+
+
+// ════════════════════════════════════════════
+//  기술 용어 위키
+// ════════════════════════════════════════════
+let termsData = [];
+let termsLoaded = false;
+
+async function loadTerms() {
+  if (!sb) { document.getElementById('terms-list').innerHTML = '<div style="padding:20px;color:var(--text-tertiary);font-size:12px">Supabase 연결 필요 (설정 탭에서 API 키 입력)</div>'; return; }
+  try {
+    var resp = await sb.from('tech_terms').select('id,term,term_en,category,definition,description,diagram_html,source,related_terms,is_reviewed,created_at').order('created_at', { ascending: false });
+    termsData = resp.data || [];
+    termsLoaded = true;
+    var badge = document.getElementById('terms-count-badge');
+    if (badge) badge.textContent = termsData.length + '개 용어';
+    renderTerms(termsData);
+  } catch(e) {
+    console.warn('tech_terms 로드 실패:', e);
+    document.getElementById('terms-list').innerHTML = '<div style="padding:20px;color:var(--text-tertiary);font-size:12px">tech_terms 테이블 없음 — Supabase에서 SQL 실행 필요</div>';
+  }
+}
+
+function renderTerms(items) {
+  var el = document.getElementById('terms-list');
+  if (!el) return;
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div style="padding:20px;color:var(--text-tertiary);font-size:12px;grid-column:1/-1">검색 결과가 없습니다.</div>';
+    return;
+  }
+  var catColor = {주파수:'badge-purple', 네트워크:'badge-teal', 위성:'badge-blue', 단말:'badge-amber', 규제:'badge-red', 기타:'badge-amber'};
+  el.innerHTML = items.map(function(t) {
+    var cc = catColor[t.category] || 'badge-amber';
+    var reviewed = t.is_reviewed ? '<span style="color:var(--green);font-size:10px">✓ 검토완료</span>' : '';
+    return '<div class="card" style="cursor:pointer;padding:12px 14px" onclick="openTermsModal(&quot;' + t.id + '&quot;)">' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+        '<span style="font-size:14px;font-weight:600;color:var(--text-primary)">' + t.term + '</span>' +
+        (t.term_en ? '<span style="font-size:11px;color:var(--text-tertiary)">(' + t.term_en + ')</span>' : '') +
+        '<span class="badge ' + cc + '" style="margin-left:auto">' + (t.category||'기타') + '</span>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">' + (t.definition || '(설명 없음)') + '</div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between">' +
+        '<span style="font-size:11px;color:var(--text-tertiary)">' + (t.source||'') + '</span>' +
+        reviewed +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function filterTerms(query) {
+  if (!termsLoaded) return;
+  var cat = document.getElementById('terms-cat-filter').value;
+  var q = (query||'').toLowerCase().trim();
+  var filtered = termsData.filter(function(t) {
+    var matchCat = !cat || t.category === cat;
+    var matchQ = !q || (t.term||'').toLowerCase().includes(q) ||
+      (t.term_en||'').toLowerCase().includes(q) ||
+      (t.definition||'').toLowerCase().includes(q) ||
+      (t.description||'').toLowerCase().includes(q);
+    return matchCat && matchQ;
+  });
+  renderTerms(filtered);
+}
+
+function openTermsModal(id) {
+  var t = termsData.find(function(x) { return x.id === id; });
+  if (!t) return;
+  var catColor = {주파수:'badge-purple', 네트워크:'badge-teal', 위성:'badge-blue', 단말:'badge-amber', 규제:'badge-red', 기타:'badge-amber'};
+  var cc = catColor[t.category] || 'badge-amber';
+  var related = (t.related_terms||[]).map(function(r) {
+    return '<span class="badge badge-amber" style="cursor:pointer" onclick="closeTermsModal();document.getElementById(&quot;terms-search-input&quot;).value=&quot;' + r + '&quot;;filterTerms(&quot;' + r + '&quot;)">' + r + '</span>';
+  }).join(' ');
+
+  var html = '<div style="margin-bottom:16px">' +
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+      '<span style="font-size:20px;font-weight:700;color:var(--text-primary)">' + t.term + '</span>' +
+      (t.term_en ? '<span style="font-size:13px;color:var(--text-secondary)">' + t.term_en + '</span>' : '') +
+      '<span class="badge ' + cc + '">' + (t.category||'기타') + '</span>' +
+    '</div>' +
+    (t.source ? '<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">📌 출처: ' + t.source + '</div>' : '') +
+  '</div>' +
+  (t.definition ? '<div style="font-size:13px;font-weight:500;margin-bottom:12px;padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md)">' + t.definition + '</div>' : '') +
+  (t.description ? '<div style="font-size:13px;color:var(--text-primary);line-height:1.7;margin-bottom:16px;white-space:pre-wrap">' + t.description + '</div>' : '') +
+  (t.diagram_html ? '<div style="margin-bottom:16px;overflow-x:auto">' + t.diagram_html + '</div>' : '') +
+  (related ? '<div style="margin-bottom:12px"><span style="font-size:11px;color:var(--text-secondary);margin-right:6px">관련 용어:</span>' + related + '</div>' : '') +
+  '<div style="display:flex;gap:8px;margin-top:16px">' +
+    '<button class="btn btn-primary" onclick="generateTermDetail(&quot;' + t.id + '&quot;)" id="gen-btn-' + t.id + '">🤖 Claude로 상세 설명·다이어그램 생성</button>' +
+    '<button class="btn" onclick="askQ(&quot;' + t.term + ' 기술에 대해 자세히 설명해줘&quot;)" >AI 자문에서 질문</button>' +
+  '</div>';
+
+  document.getElementById('terms-modal-content').innerHTML = html;
+  var modal = document.getElementById('terms-modal');
+  modal.style.display = 'flex';
+}
+
+function closeTermsModal() {
+  document.getElementById('terms-modal').style.display = 'none';
+}
+
+async function generateTermDetail(id) {
+  var t = termsData.find(function(x) { return x.id === id; });
+  if (!t) return;
+  var btn = document.getElementById('gen-btn-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = '생성 중...'; }
+  var { claudeKey } = getConfig();
+  if (!claudeKey) { alert('Claude API 키가 필요합니다.'); if(btn){btn.disabled=false;btn.textContent='🤖 Claude로 상세 설명·다이어그램 생성';} return; }
+  try {
+    var prompt = '이동통신·전파 정책 전문가용 기술 용어 설명을 작성해 주세요.\n\n' +
+      '용어: ' + t.term + (t.term_en ? ' (' + t.term_en + ')' : '') + '\n' +
+      '분야: ' + (t.category||'') + '\n' +
+      '현재 정의: ' + (t.definition||'없음') + '\n\n' +
+      '다음 형식으로 JSON만 출력하세요 (다른 텍스트 없이):' +
+      '{\n' +
+      '  "description": "3~5문단의 상세 설명 (배경, 기술 원리, 국내외 현황, 관련 법령·표준 포함, 줄바꿈은 \\n 사용)",\n' +
+      '  "diagram_html": "개념을 설명하는 SVG 다이어그램 (viewBox=\"0 0 500 220\", 한국어 레이블, 색상은 #6366f1/#10b981/#f59e0b 사용)",\n' +
+      '  "related_terms": ["관련용어1","관련용어2","관련용어3"]\n' +
+      '}';
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'x-api-key':claudeKey,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2000,messages:[{role:'user',content:prompt}]})
+    });
+    var data = await res.json();
+    var text = data.content[0].text.trim();
+    // JSON 추출
+    var jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('JSON 파싱 실패');
+    var parsed = JSON.parse(jsonMatch[0]);
+
+    // Supabase 업데이트
+    if (sb) {
+      await sb.from('tech_terms').update({
+        description: parsed.description || t.description,
+        diagram_html: parsed.diagram_html || t.diagram_html,
+        related_terms: parsed.related_terms || t.related_terms
+      }).eq('id', id);
+    }
+    // 로컬 데이터 갱신
+    var idx = termsData.findIndex(function(x){return x.id===id;});
+    if (idx >= 0) {
+      termsData[idx].description = parsed.description;
+      termsData[idx].diagram_html = parsed.diagram_html;
+      termsData[idx].related_terms = parsed.related_terms;
+    }
+    // 모달 재렌더링
+    openTermsModal(id);
+  } catch(e) {
+    alert('생성 실패: ' + e.message);
+    if(btn){btn.disabled=false;btn.textContent='🤖 Claude로 상세 설명·다이어그램 생성';}
+  }
+}
 
 // ════════════════════════════════════════════
 //  뉴스 컨텍스트 — news_feed 최근 이력 (AI 자문 참조용)
@@ -1088,17 +1275,18 @@ function go(page, navEl) {
   if (navEl && navEl.classList) navEl.classList.add('active');
 
   // 상단 바 제목 업데이트
-  var titles = {home:'대시보드', chat:'AI 자문', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', news:'보도자료·뉴스', settings:'설정'};
+  var titles = {home:'대시보드', chat:'AI 자문', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', settings:'설정'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-home', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-press', news:'bn-press', settings:'bn-settings'};
+  var pageTobn = {home:'bn-home', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-press', terms:'bn-press', news:'bn-press', settings:'bn-settings'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
   if (page === 'settings') loadSettingsUI();
   if (page === 'press') loadPressFromSupabase();
+  if (page === 'terms') loadTerms();
 }
 
 function setBottomNav(activeId) {
@@ -1223,4 +1411,3 @@ document.addEventListener('DOMContentLoaded', function() {
   loadPressJSON();  // 보도자료 원본 JSON 미리 로드
 });
 </script>
-</body>
