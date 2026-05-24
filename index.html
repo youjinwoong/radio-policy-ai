@@ -405,24 +405,40 @@ textarea:focus { border-color: var(--accent); }
       <!-- 보도자료 지식베이스 -->
       <div class="panel" id="panel-press">
         <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
-          <span style="font-size:12px;color:var(--text-secondary)">출처: 과기정통부 · 국립전파연구원 보도자료 (RAG 인덱싱)</span>
-          <span class="badge badge-teal" style="margin-left:auto">Supabase 연동</span>
+          <span style="font-size:12px;color:var(--text-secondary)">출처: 과기정통부 보도자료 원본 파일 136개 · 2023~2026년</span>
+          <span class="badge badge-teal" style="margin-left:auto">원본 파일 검색</span>
         </div>
-        <div class="section-title">연도별 보도자료</div>
-        <div class="card" id="press-list">
-          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-news"></i></div>
-            <div style="flex:1"><div class="file-name">2024년 보도자료</div><div class="file-size">과기정통부 · 주파수, 기술기준, ITU 등</div></div><span class="badge badge-teal">검색가능</span></div>
-          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-news"></i></div>
-            <div style="flex:1"><div class="file-name">2025년 보도자료</div><div class="file-size">과기정통부 · 주파수, 기술기준, ITU 등</div></div><span class="badge badge-teal">검색가능</span></div>
-          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-news"></i></div>
-            <div style="flex:1"><div class="file-name">2026년 보도자료</div><div class="file-size">과기정통부 · 주파수, 기술기준, ITU 등</div></div><span class="badge badge-teal">검색가능</span></div>
+
+        <!-- 연도별 통계 -->
+        <div class="stat-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px" id="press-stats">
+          <div class="stat"><div class="stat-label">전체</div><div class="stat-val" id="ps-total">—</div><div class="stat-sub">개 보도자료</div></div>
+          <div class="stat"><div class="stat-label">2026년</div><div class="stat-val" id="ps-2026">—</div><div class="stat-sub">건</div></div>
+          <div class="stat"><div class="stat-label">2025년</div><div class="stat-val" id="ps-2025">—</div><div class="stat-sub">건</div></div>
+          <div class="stat"><div class="stat-label">2024년 이전</div><div class="stat-val" id="ps-old">—</div><div class="stat-sub">건</div></div>
         </div>
-        <div class="section-title" style="margin-top:16px">활용 안내</div>
+
+        <!-- 검색창 -->
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <input type="text" id="press-search-input" placeholder="보도자료 제목·내용 검색..." style="flex:1;padding:8px 12px;font-size:12px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none" oninput="filterPressList(this.value)"/>
+          <button class="btn" onclick="filterPressList('')">전체</button>
+        </div>
+
+        <!-- 보도자료 목록 (동적) -->
+        <div class="section-title"><span id="press-count-label">전체 보도자료</span></div>
+        <div class="card" id="press-list" style="max-height:340px;overflow-y:auto">
+          <div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">
+            <i class="ti ti-loader"></i> 보도자료 로딩 중...
+          </div>
+        </div>
+
+        <!-- 활용 안내 -->
+        <div class="section-title" style="margin-top:16px">AI 자문에서 검색 예시</div>
         <div class="card" style="cursor:default">
-          <p style="font-size:12px;color:var(--text-secondary);line-height:1.7">
-            보도자료 전문은 <strong>AI 자문</strong>에서 키워드로 검색됩니다.<br>
-            예: <span style="color:var(--accent);cursor:pointer" onclick="askQ('6GHz 주파수 보도자료 내용은?')">6GHz 주파수 보도자료 내용은?</span><br>
-            예: <span style="color:var(--accent);cursor:pointer" onclick="askQ('2025년 주파수 할당 보도자료 요약해줘')">2025년 주파수 할당 보도자료 요약해줘</span>
+          <p style="font-size:12px;color:var(--text-secondary);line-height:2">
+            <span style="color:var(--accent);cursor:pointer" onclick="askQ('28GHz 주파수할당 보도자료 내용을 알려줘')">📌 28GHz 주파수할당 보도자료 내용을 알려줘</span><br>
+            <span style="color:var(--accent);cursor:pointer" onclick="askQ('6GHz 대역 주파수 분배 관련 보도자료를 알려줘')">📌 6GHz 대역 주파수 분배 관련 보도자료를 알려줘</span><br>
+            <span style="color:var(--accent);cursor:pointer" onclick="askQ('2025년 WRC 관련 과기정통부 보도자료 요약해줘')">📌 2025년 WRC 관련 과기정통부 보도자료 요약해줘</span><br>
+            <span style="color:var(--accent);cursor:pointer" onclick="askQ('스테이지엑스 주파수할당 관련 보도자료 알려줘')">📌 스테이지엑스 주파수할당 관련 보도자료 알려줘</span>
           </p>
         </div>
       </div>
@@ -535,8 +551,9 @@ function extractKeywords(text) {
   return all.filter(function(v, i, a) { return a.indexOf(v) === i; }).slice(0, 5);
 }
 
-async function searchKeywords(query) {
+async function searchKeywords(query, lawOnly) {
   if (!sb) return [];
+  if (lawOnly === undefined) lawOnly = false;
   var keywords = extractKeywords(query);
   if (keywords.length === 0) return [];
 
@@ -587,12 +604,29 @@ async function callClaude(userText) {
   const { claudeKey } = getConfig();
   if (!claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다. 설정 탭에서 입력해주세요.');
 
-  // RAG: 관련 문서 청크 검색
+  // RAG: 관련 문서 청크 검색 (보도자료는 원본 JSON, 법령은 Supabase)
   lastRagSources = [];
-  const ragChunks = await searchKeywords(userText);
-  if (ragChunks.length > 0) {
+  var ragChunks = [];
+
+  if (isPressQuery(userText)) {
+    // 보도자료 질문: 원본 JSON에서 검색
+    var pressResults = searchPressReleases(userText);
+    if (pressResults.length > 0) {
+      ragChunks = pressResults;
+      lastRagSources = pressResults.map(function(c) { return c.doc_name; });
+      console.log('보도자료 원본 검색:', pressResults.length + '개');
+    }
+    // 보도자료이지만 법령도 관련 있을 경우 Supabase도 병행
+    var lawChunks = await searchKeywords(userText, true);
+    ragChunks = ragChunks.concat(lawChunks).slice(0, 6);
     lastRagSources = ragChunks.map(function(c) { return c.doc_name; });
-    console.log('RAG 검색 결과:', ragChunks.length + '개 청크 (' + lastRagSources.join(', ') + ')');
+  } else {
+    // 일반 법령·고시 질문: Supabase 검색
+    ragChunks = await searchKeywords(userText, false);
+    if (ragChunks.length > 0) {
+      lastRagSources = ragChunks.map(function(c) { return c.doc_name; });
+      console.log('RAG 검색 결과:', ragChunks.length + '개 청크 (' + lastRagSources.join(', ') + ')');
+    }
   }
 
   // 시스템 프롬프트에 RAG 컨텍스트 추가
@@ -923,32 +957,109 @@ function go(page, navEl) {
 }
 
 // ════════════════════════════════════════════
-//  보도자료 지식베이스 (Supabase RAG 카테고리)
+//  보도자료 — 원본 JSON 파일 검색
 // ════════════════════════════════════════════
-let pressLoaded = false;
-async function loadPressFromSupabase() {
-  if (pressLoaded || !sb) return;
-  const listEl = document.getElementById('press-list');
-  if (!listEl) return;
+let pressData = null;  // press_releases.json 로드 후 저장
+
+async function loadPressJSON() {
+  if (pressData) return;
   try {
-    const { data, error } = await sb
-      .from('document_chunks')
-      .select('doc_name, doc_category, chunk_index')
-      .eq('doc_category', '보도자료')
-      .eq('chunk_index', 0)
-      .order('doc_name', { ascending: false })
-      .limit(50);
-    if (error || !data || data.length === 0) return;
-    pressLoaded = true;
-    listEl.innerHTML = data.map(function(d) {
-      var name = d.doc_name.replace(/\.[^.]+$/, '');
-      return '<div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-news"></i></div>' +
-        '<div style="flex:1"><div class="file-name">' + name + '</div>' +
-        '<div class="file-size">보도자료 · RAG 인덱싱 완료</div></div>' +
-        '<span class="badge badge-teal">검색가능</span></div>';
-    }).join('');
-  } catch(e) { console.warn('보도자료 로드 오류:', e); }
+    const res = await fetch('press_releases.json');
+    pressData = await res.json();
+    console.log('보도자료 로드 완료:', pressData.length + '개');
+    renderPressList();
+  } catch(e) { console.warn('보도자료 JSON 로드 실패:', e); }
 }
+
+function renderPressList(filtered) {
+  const listEl = document.getElementById('press-list');
+  if (!listEl || !pressData) return;
+
+  // 통계 업데이트
+  var t2026 = pressData.filter(d => d.date.startsWith('2026')).length;
+  var t2025 = pressData.filter(d => d.date.startsWith('2025')).length;
+  var tOld  = pressData.filter(d => !d.date.startsWith('2025') && !d.date.startsWith('2026')).length;
+  var el;
+  el = document.getElementById('ps-total'); if(el) el.textContent = pressData.length;
+  el = document.getElementById('ps-2026');  if(el) el.textContent = t2026;
+  el = document.getElementById('ps-2025');  if(el) el.textContent = t2025;
+  el = document.getElementById('ps-old');   if(el) el.textContent = tOld;
+
+  // 표시할 데이터
+  var items = filtered || [...pressData].sort((a, b) => b.date.localeCompare(a.date));
+  var label = document.getElementById('press-count-label');
+  if (label) label.textContent = filtered ? '검색 결과 ' + items.length + '건' : '전체 보도자료 ' + items.length + '건';
+
+  if (items.length === 0) {
+    listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">검색 결과가 없습니다.</div>';
+    return;
+  }
+
+  listEl.innerHTML = items.map(function(d) {
+    var year = d.date ? d.date.slice(0,4) : '';
+    var badgeColor = year === '2026' ? 'badge-purple' : year === '2025' ? 'badge-teal' : 'badge-amber';
+    var safeTitle = d.title.slice(0,30).replace(/['"&<>]/g,'');
+    return '<div class="file-item" style="cursor:pointer" onclick="askQ(&quot;' + safeTitle + ' 보도자료 내용을 알려줘&quot;)">' +
+      '<div class="file-icon fi-blue"><i class="ti ti-news"></i></div>' +
+      '<div style="flex:1">' +
+        '<div class="file-name">' + d.title.slice(0,55) + (d.title.length>55?'…':'') + '</div>' +
+        '<div class="file-size">' + d.date + ' · 과기정통부</div>' +
+      '</div>' +
+      '<span class="badge ' + badgeColor + '">' + year + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function filterPressList(query) {
+  var input = document.getElementById('press-search-input');
+  if (input && query === '') input.value = '';
+  if (!pressData) return;
+  if (!query || query.trim() === '') {
+    renderPressList(null);
+    return;
+  }
+  var q = query.toLowerCase();
+  var filtered = pressData.filter(function(d) {
+    return d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q);
+  }).sort((a, b) => b.date.localeCompare(a.date));
+  renderPressList(filtered);
+}
+
+function isPressQuery(query) {
+  return /보도자료|보도|발표|공지|공고|과기정통부|국립전파연구원|전파연구원/.test(query);
+}
+
+function searchPressReleases(query) {
+  if (!pressData) return [];
+  var keywords = extractKeywords(query);
+  if (keywords.length === 0) return [];
+  var results = [];
+  for (var i = 0; i < pressData.length; i++) {
+    var item = pressData[i];
+    var combined = (item.title + ' ' + item.content).toLowerCase();
+    var score = 0;
+    for (var k = 0; k < keywords.length; k++) {
+      var kw = keywords[k].toLowerCase();
+      if (combined.includes(kw)) score++;
+      if (item.title.toLowerCase().includes(kw)) score++;  // 제목 가중치
+    }
+    if (score > 0) results.push({ item: item, score: score });
+  }
+  results.sort((a, b) => b.score - a.score);
+  return results.slice(0, 4).map(function(r) {
+    var item = r.item;
+    // 관련 본문 발췌 (최대 800자)
+    var excerpt = item.content.slice(0, 800).trim();
+    return {
+      id: 'press_' + item.id,
+      doc_name: item.title,
+      doc_category: '과기정통부 보도자료',
+      content: '[날짜: ' + item.date + ']\n' + excerpt
+    };
+  });
+}
+
+function loadPressFromSupabase() { loadPressJSON(); }
 
 // ════════════════════════════════════════════
 //  Init
@@ -958,6 +1069,7 @@ document.addEventListener('DOMContentLoaded', function() {
   updateStatusDots();
   loadSettingsUI();
   refreshDashboard();
+  loadPressJSON();  // 보도자료 원본 JSON 미리 로드
 });
 </script>
 </body>
