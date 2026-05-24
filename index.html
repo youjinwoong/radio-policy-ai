@@ -692,6 +692,48 @@ function buildRagContext(chunks) {
 let chatHistory = [];
 let isSending = false;
 
+// ════════════════════════════════════════════
+//  뉴스 컨텍스트 — news_feed 최근 이력 (AI 자문 참조용)
+// ════════════════════════════════════════════
+async function fetchRecentNewsContext() {
+  if (!sb) return '';
+  try {
+    var cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 60); // 최근 60일
+    var cutoffStr = cutoff.toISOString().split('T')[0];
+    var resp = await sb
+      .from('news_feed')
+      .select('title, source, category, published_at')
+      .gte('published_at', cutoffStr)
+      .order('published_at', { ascending: false })
+      .limit(40);
+    var data = resp.data;
+    if (!data || data.length === 0) return '';
+
+    // 업데이트 이력과 신규 뉴스 분리
+    var updates = data.filter(function(n) { return n.title.startsWith('[업데이트]'); });
+    var originals = data.filter(function(n) { return !n.title.startsWith('[업데이트]'); });
+
+    var lines = [];
+    if (updates.length > 0) {
+      lines.push('[최근 변경·업데이트 이력]');
+      updates.forEach(function(n) {
+        lines.push('  · [' + (n.published_at||'').slice(0,10) + '] ' + n.title + ' (' + (n.source||'') + ')');
+      });
+    }
+    if (originals.length > 0) {
+      lines.push('[최근 뉴스 동향 — 누적 이력]');
+      originals.forEach(function(n) {
+        lines.push('  · [' + (n.published_at||'').slice(0,10) + '] ' + n.title + ' (' + (n.source||'') + ')');
+      });
+    }
+    return '\n\n' + lines.join('\n') + '\n(위 뉴스 이력을 참고하여, 질문과 관련된 최신 동향이 있으면 언급하세요.)';
+  } catch(e) {
+    console.warn('뉴스 컨텍스트 로드 실패:', e);
+    return '';
+  }
+}
+
 async function callClaude(userText) {
   const { claudeKey } = getConfig();
   if (!claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다. 설정 탭에서 입력해주세요.');
@@ -723,7 +765,9 @@ async function callClaude(userText) {
 
   // 시스템 프롬프트에 RAG 컨텍스트 추가
   const ragContext = buildRagContext(ragChunks);
-  const systemWithRag = SYSTEM_PROMPT + ragContext;
+  // 최근 수집 뉴스 컨텍스트 추가 (Supabase news_feed)
+  const newsContext = await fetchRecentNewsContext();
+  const systemWithRag = SYSTEM_PROMPT + ragContext + newsContext;
 
   chatHistory.push({ role: 'user', content: userText });
 
@@ -1180,4 +1224,3 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 </body>
-</html>                                      
