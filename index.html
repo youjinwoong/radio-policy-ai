@@ -835,27 +835,43 @@ async function generateTermDetail(id) {
   var { claudeKey } = getConfig();
   if (!claudeKey) { alert('Claude API 키가 필요합니다.'); if(btn){btn.disabled=false;btn.textContent='🤖 Claude로 상세 설명·다이어그램 생성';} return; }
   try {
-    var prompt = '이동통신·전파 정책 전문가용 기술 용어 설명을 작성해 주세요.\n\n' +
-      '용어: ' + t.term + (t.term_en ? ' (' + t.term_en + ')' : '') + '\n' +
-      '분야: ' + (t.category||'') + '\n' +
-      '현재 정의: ' + (t.definition||'없음') + '\n\n' +
-      '다음 형식으로 JSON만 출력하세요 (다른 텍스트 없이):' +
-      '{\n' +
-      '  "description": "3~5문단의 상세 설명 (배경, 기술 원리, 국내외 현황, 관련 법령·표준 포함, 줄바꿈은 \\n 사용)",\n' +
-      '  "diagram_html": "개념을 설명하는 SVG 다이어그램 (viewBox=\"0 0 500 220\", 한국어 레이블, 색상은 #6366f1/#10b981/#f59e0b 사용)",\n' +
-      '  "related_terms": ["관련용어1","관련용어2","관련용어3"]\n' +
-      '}';
+    var termLabel = t.term + (t.term_en ? ' (' + t.term_en + ')' : '');
+    var systemMsg = '당신은 이동통신·전파 정책 전문가입니다. 반드시 순수 JSON 객체만 출력하세요. 마크다운 코드블록, 설명 텍스트, 주석을 절대 포함하지 마세요.';
+    var userMsg = '기술 용어 [' + termLabel + '] 에 대해 아래 JSON 형식으로만 답변하세요.' +
+      ' 분야: ' + (t.category||'기타') + '. 현재 정의: ' + (t.definition||'없음') + '.\n\n' +
+      '{"description":"3~5문단 상세 설명(배경/원리/국내외현황/관련표준). 줄바꿈은 \\n 사용.",' +
+      '"diagram_html":"<svg viewBox=\"0 0 500 220\" xmlns=\"http://www.w3.org/2000/svg\">...</svg> 형태의 한국어 개념도. 색상 #6366f1/#10b981/#f59e0b 사용.",' +
+      '"related_terms":["관련용어1","관련용어2","관련용어3"]}';
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers:{'x-api-key':claudeKey,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2000,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system:systemMsg,messages:[{role:'user',content:userMsg}]})
     });
     var data = await res.json();
     var text = data.content[0].text.trim();
-    // JSON 추출
-    var jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('JSON 파싱 실패');
-    var parsed = JSON.parse(jsonMatch[0]);
+    // JSON 추출 — 코드블록 제거 후 파싱
+    var cleaned = text
+      .replace(/^```[\w]*\n?/,'').replace(/\n?```$/,'')  // ```json ... ``` 제거
+      .replace(/^`/,'').replace(/`$/,'')                    // 단일 백틱 제거
+      .trim();
+    // { } 사이 내용 추출 (그리디하지 않게 첫 { ~ 마지막 } 사용)
+    var firstBrace = cleaned.indexOf('{');
+    var lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace === -1 || lastBrace === -1) throw new Error('JSON 파싱 실패: 중괄호 없음');
+    var jsonStr = cleaned.slice(firstBrace, lastBrace + 1);
+    var parsed;
+    try { parsed = JSON.parse(jsonStr); }
+    catch(e) {
+      // SVG 안의 큰따옴표 때문에 실패 시 description/related_terms만 추출 시도
+      var descMatch = jsonStr.match(/"description"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      var relMatch = jsonStr.match(/"related_terms"\s*:\s*(\[[^\]]*\])/);
+      var svgMatch = jsonStr.match(/(<svg[\s\S]*?<\/svg>)/);
+      parsed = {
+        description: descMatch ? descMatch[1].replace(/\\n/g,'\n') : '',
+        diagram_html: svgMatch ? svgMatch[1] : '',
+        related_terms: relMatch ? JSON.parse(relMatch[1]) : []
+      };
+    }
 
     // Supabase 업데이트
     if (sb) {
@@ -1407,8 +1423,4 @@ function loadPressFromSupabase() { loadPressJSON(); }
 document.addEventListener('DOMContentLoaded', function() {
   initSupabase();
   updateStatusDots();
-  loadSettingsUI();
-  refreshDashboard();
-  loadPressJSON();  // 보도자료 원본 JSON 미리 로드
-});
-</script>
+  loadSettingsUI(
