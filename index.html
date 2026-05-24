@@ -1423,4 +1423,10 @@ function loadPressFromSupabase() { loadPressJSON(); }
 document.addEventListener('DOMContentLoaded', function() {
   initSupabase();
   updateStatusDots();
-  loadSettingsUI(
+  loadSettingsUI();
+  refreshDashboard();
+  loadPressJSON();  // 보도자료 원본 JSON 미리 로드
+});
+</script>
+</body>
+</html>
