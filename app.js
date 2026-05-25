@@ -273,12 +273,12 @@ async function generateTermDetail(id) {
   if (!claudeKey) { alert('Claude API 키가 필요합니다.'); if(btn){btn.disabled=false;btn.textContent='🤖 Claude로 상세 설명·다이어그램 생성';} return; }
   try {
     var termLabel = t.term + (t.term_en ? ' (' + t.term_en + ')' : '');
-    var systemMsg = '당신은 이동통신·전파 정책 전문가입니다. 반드시 순수 JSON 객체만 출력하세요. 마크다운 코드블록, 설명 텍스트, 주석을 절대 포함하지 마세요.';
-    var userMsg = '기술 용어 [' + termLabel + '] 에 대해 아래 JSON 형식으로만 답변하세요.' +
-      ' 분야: ' + (t.category||'기타') + '. 현재 정의: ' + (t.definition||'없음') + '.\n\n' +
-      '{"description":"3~5문단 상세 설명(배경/원리/국내외현황/관련표준). 줄바꿈은 \\n 사용.",' +
-      '"diagram_html":"<svg viewBox=\"0 0 500 220\" xmlns=\"http://www.w3.org/2000/svg\">...</svg> 형태의 한국어 개념도. 색상 #6366f1/#10b981/#f59e0b 사용.",' +
-      '"related_terms":["관련용어1","관련용어2","관련용어3"]}';
+    var systemMsg = '당신은 이동통신·전파 정책 전문가입니다. 반드시 지정된 XML 태그 형식으로만 답변하세요.';
+    var userMsg = '기술 용어 [' + termLabel + '] 에 대해 아래 형식으로 정확히 답변하세요.\n' +
+      '분야: ' + (t.category||'기타') + '. 현재 정의: ' + (t.definition||'없음') + '.\n\n' +
+      '<description>\n3~5문단 상세 설명(배경/원리/국내외현황/관련표준)\n</description>\n\n' +
+      '<diagram>\n<svg viewBox="0 0 500 240" xmlns="http://www.w3.org/2000/svg">한국어 개념도. 색상 #6366f1/#10b981/#f59e0b 사용.</svg>\n</diagram>\n\n' +
+      '<related>관련용어1,관련용어2,관련용어3</related>';
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers:{'x-api-key':claudeKey,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
@@ -286,45 +286,27 @@ async function generateTermDetail(id) {
     });
     var data = await res.json();
 
-    // API 오류 응답 체크
+    // API 오류 체크
     if (data.type === 'error' || !data.content) {
       var errMsg = (data.error && data.error.message) ? data.error.message : JSON.stringify(data);
       throw new Error('Claude API 오류: ' + errMsg);
     }
-
-    // content 배열에서 text 타입 블록 명시적으로 찾기 (thinking 블록 등 무시)
     var textBlock = data.content.find(function(b) { return b.type === 'text'; });
-    var text = textBlock ? textBlock.text.trim() : '';
-    console.log('[generateTermDetail] 응답 블록 수:', data.content.length,
-      '/ text 블록:', !!textBlock, '/ 앞 200자:', text.slice(0,200));
+    var text = textBlock ? textBlock.text : '';
+    if (!text) throw new Error('Claude 응답 없음');
 
-    if (!text) throw new Error('Claude가 텍스트 응답을 반환하지 않았습니다');
+    // XML 태그로 파싱 (JSON 불필요 — SVG 포함 안전)
+    var descMatch   = text.match(/<description>([\s\S]*?)<\/description>/);
+    var diagramMatch = text.match(/<diagram>([\s\S]*?)<\/diagram>/);
+    var relatedMatch = text.match(/<related>([\s\S]*?)<\/related>/);
 
-    // { } 사이 JSON 추출 (코드블록 제거 후)
-    var cleaned = text
-      .replace(/```[\w]*\n?/g, '')   // 코드블록 펜스 제거
-      .replace(/`/g, '')              // 백틱 제거
-      .trim();
-    var firstBrace = cleaned.indexOf('{');
-    var lastBrace = cleaned.lastIndexOf('}');
-    console.log('[generateTermDetail] firstBrace:', firstBrace, 'lastBrace:', lastBrace, 'cleaned 앞 100자:', cleaned.slice(0,100));
-    if (firstBrace === -1 || lastBrace === -1) {
-      throw new Error('JSON 없음. 응답: ' + text.slice(0, 200));
-    }
-    var jsonStr = cleaned.slice(firstBrace, lastBrace + 1);
-    var parsed;
-    try { parsed = JSON.parse(jsonStr); }
-    catch(e) {
-      // SVG 안의 큰따옴표 때문에 실패 시 description/related_terms만 추출 시도
-      var descMatch = jsonStr.match(/"description"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-      var relMatch = jsonStr.match(/"related_terms"\s*:\s*(\[[^\]]*\])/);
-      var svgMatch = jsonStr.match(/(<svg[\s\S]*?<\/svg>)/);
-      parsed = {
-        description: descMatch ? descMatch[1].replace(/\\n/g,'\n') : '',
-        diagram_html: svgMatch ? svgMatch[1] : '',
-        related_terms: relMatch ? JSON.parse(relMatch[1]) : []
-      };
-    }
+    var parsed = {
+      description:   descMatch   ? descMatch[1].trim()   : '',
+      diagram_html:  diagramMatch ? diagramMatch[1].trim() : '',
+      related_terms: relatedMatch
+        ? relatedMatch[1].trim().split(',').map(function(s){return s.trim();}).filter(Boolean)
+        : []
+    };
 
     // Supabase 업데이트
     if (sb) {
