@@ -292,20 +292,24 @@ async function generateTermDetail(id) {
       throw new Error('Claude API 오류: ' + errMsg);
     }
 
-    var text = (data.content[0].text || '').trim();
-    console.log('[generateTermDetail] Claude 응답 (앞 300자):', text.slice(0, 300));
+    // content 배열에서 text 타입 블록 명시적으로 찾기 (thinking 블록 등 무시)
+    var textBlock = data.content.find(function(b) { return b.type === 'text'; });
+    var text = textBlock ? textBlock.text.trim() : '';
+    console.log('[generateTermDetail] 응답 블록 수:', data.content.length,
+      '/ text 블록:', !!textBlock, '/ 앞 200자:', text.slice(0,200));
 
-    // JSON 추출 — 코드블록 제거 후 파싱
+    if (!text) throw new Error('Claude가 텍스트 응답을 반환하지 않았습니다');
+
+    // { } 사이 JSON 추출 (코드블록 제거 후)
     var cleaned = text
-      .replace(/^```[\w]*\n?/g,'').replace(/\n?```$/g,'')   // ```json ... ``` 제거
-      .replace(/^`|`$/g,'')                                   // 단일 백틱 제거
+      .replace(/```[\w]*\n?/g, '')   // 코드블록 펜스 제거
+      .replace(/`/g, '')              // 백틱 제거
       .trim();
-    // { } 사이 내용 추출 (첫 { ~ 마지막 } 사용)
     var firstBrace = cleaned.indexOf('{');
     var lastBrace = cleaned.lastIndexOf('}');
+    console.log('[generateTermDetail] firstBrace:', firstBrace, 'lastBrace:', lastBrace, 'cleaned 앞 100자:', cleaned.slice(0,100));
     if (firstBrace === -1 || lastBrace === -1) {
-      console.error('[generateTermDetail] 전체 응답:', text);
-      throw new Error('JSON 파싱 실패: 응답에 JSON 없음. Console에서 전체 응답 확인 가능');
+      throw new Error('JSON 없음. 응답: ' + text.slice(0, 200));
     }
     var jsonStr = cleaned.slice(firstBrace, lastBrace + 1);
     var parsed;
