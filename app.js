@@ -115,7 +115,7 @@ async function extractTermsFromNews() {
     var cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 7);
     var cutoffStr = cutoff.toISOString().split('T')[0];
-    var newsResp = await sb.from('news_feed').select('title,source,published_at').gte('published_at', cutoffStr).order('published_at', {ascending:false}).limit(30);
+    var newsResp = await sb.from('news_feed').select('title,source,published_at').gte('created_at', cutoffStr).order('created_at', {ascending:false}).limit(30);
     var newsList = (newsResp.data || []).map(function(n) { return '[' + (n.published_at||'').slice(0,10) + '] ' + n.title + ' (' + (n.source||'') + ')'; }).join('\n');
     if (!newsList) { alert('최근 7일 뉴스가 없습니다. 먼저 뉴스 브리핑을 실행하세요.'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-bulb"></i>뉴스에서 용어 추출';} return; }
 
@@ -873,8 +873,8 @@ async function autoExtractTermsIfNeeded() {
     var cutoffStr = cutoff.toISOString().split('T')[0];
     var newsResp = await sb.from('news_feed')
       .select('title,source,published_at')
-      .gte('published_at', cutoffStr)
-      .order('published_at', { ascending: false })
+      .gte('created_at', cutoffStr)
+      .order('created_at', { ascending: false })
       .limit(30);
     var newsList = (newsResp.data || []).map(function(n) {
       return '[' + (n.published_at || '').slice(0, 10) + '] ' + n.title + ' (' + (n.source || '') + ')';
