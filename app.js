@@ -3,11 +3,34 @@
 // ════════════════════════════════════════════
 
 // ════════════════════════════════════════════
-//  Config (localStorage)
+//  Config (localStorage + Supabase app_config)
 // ════════════════════════════════════════════
 const CFG_KEY = 'radio_policy_config';
-function getConfig() { try { return JSON.parse(localStorage.getItem(CFG_KEY) || '{}'); } catch(e) { return {}; } }
+let _remoteClaudeKey = null; // Supabase에서 로드한 Claude 키 캐시
+
+function getConfig() {
+  try {
+    var cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+    // localStorage에 Claude 키 없으면 Supabase에서 로드한 값 사용
+    if (!cfg.claudeKey && _remoteClaudeKey) cfg.claudeKey = _remoteClaudeKey;
+    return cfg;
+  } catch(e) { return {}; }
+}
 function saveConfig(c) { localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
+
+// Supabase app_config에서 Claude 키 로드 (페이지 시작 시 1회 실행)
+async function loadRemoteConfig() {
+  if (!sb) return;
+  try {
+    var { data } = await sb.from('app_config').select('key,value');
+    if (!data) return;
+    data.forEach(function(row) {
+      if (row.key === 'claude_key' && row.value) {
+        _remoteClaudeKey = row.value;
+      }
+    });
+  } catch(e) { console.warn('app_config 로드 실패:', e); }
+}
 
 // ════════════════════════════════════════════
 //  Supabase
@@ -747,7 +770,7 @@ function loadSettingsUI() {
   if (isAuth) loadSettingsFields();
 }
 
-function saveApiKeys() {
+async function saveApiKeys() {
   const sbUrl = document.getElementById('inp-sb-url').value.trim();
   const sbKey = document.getElementById('inp-sb-key').value.trim();
   const claudeKey = document.getElementById('inp-claude-key').value.trim();
@@ -756,10 +779,17 @@ function saveApiKeys() {
     return;
   }
   saveConfig({ sbUrl: sbUrl, sbKey: sbKey, claudeKey: claudeKey });
+  _remoteClaudeKey = claudeKey;
   sb = null;
   initSupabase();
   updateStatusDots();
-  showApiAlert('ok', '저장 완료. 연결 테스트를 실행해보세요.');
+  // Supabase app_config에도 Claude 키 저장 (다른 사용자도 자동 사용)
+  try {
+    await sb.from('app_config').upsert({ key: 'claude_key', value: claudeKey });
+    showApiAlert('ok', '저장 완료 — 모든 사용자에게 AI 자문이 활성화됩니다.');
+  } catch(e) {
+    showApiAlert('ok', '로컬 저장 완료 (Supabase 동기화는 실패했습니다).');
+  }
 }
 
 async function testConnection() {
@@ -988,7 +1018,7 @@ function loadPressFromSupabase() { loadPressJSON(); }
 async function autoExtractTermsIfNeeded() {
   var today = new Date().toISOString().slice(0, 10);
   var lastRun = localStorage.getItem('last_terms_extraction');
-  if (lastRun === today) return; // 오늘   if (lastRun === today) return; // 오늘 이미 실행함
+  if (lastRun === today) return; // 오늘 이미 실행함
   if (!sb) return;
   var { claudeKey } = getConfig();
   if (!claudeKey) return;
@@ -1039,32 +1069,38 @@ async function autoExtractTermsIfNeeded() {
     if (firstBracket === -1 || lastBracket === -1) return;
     var terms = [];
     try { terms = JSON.parse(text.slice(firstBracket, lastBracket + 1)); } catch(e) { return; }
-    if (!terms.length) { console.log('[기술 용어] 신규 용어 없음'); localStorage.setItem('last_terms_extraction', today); return; }
+    if (!terms.length) { console.log('[기술 용어] 신규 용어 없음'); return; }
 
     var saved = 0;
-    var saved = 0;
-    for (var i = 0; i < terms.length; i++) {
-      var t = terms[i];
+    for (var t of terms) {
       if (!t.term || existingSet.has(t.term.toLowerCase())) continue;
       var payload = {
-        term: t.term, term_en: t.term_en || '', category: t.category || '기타',
-        definition: t.definition || '', source: t.source || '뉴스 자동 추출', is_reviewed: false
+        term: t.term,
+        term_en: t.term_en || '',
+        category: t.category || '기타',
+        definition: t.definition || '',
+        source: t.source || '뉴스 자동 추출',
+        is_reviewed: false
       };
-      var resp = await sb.from('tech_terms').insert(payload);
-      if (!resp.error) { saved++; existingSet.add(t.term.toLowerCase()); }
+      var r2 = await sb.from('tech_terms').insert(payload);
+      if (!r2.error) { saved++; existingSet.add(t.term.toLowerCase()); }
     }
-    console.log('[기술 용어] 자동 추출 완료:', saved + '건');
     localStorage.setItem('last_terms_extraction', today);
+    console.log('[기술 용어] 자동 추출 완료:', saved, '건 저장');
   } catch(e) {
-    console.warn('[기술 용어] 자동 추출 실패:', e);
+    console.warn('[기술 용어] 자동 추출 오류:', e);
   }
 }
 
+// ════════════════════════════════════════════
+//  앱 초기화
+// ════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
   initSupabase();
   updateStatusDots();
   loadSettingsUI();
   refreshDashboard();
   loadPressJSON();
+  loadRemoteConfig();
   setTimeout(autoExtractTermsIfNeeded, 60000);
 });
