@@ -12,16 +12,19 @@ function saveConfig(c) { localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
 // ════════════════════════════════════════════
 //  Supabase
 // ════════════════════════════════════════════
+// 기본 Supabase 연결 정보 (anon key는 클라이언트 공개 설계)
+const DEFAULT_SB_URL = 'https://zwkjedumfuhodckmtxxn.supabase.co';
+const DEFAULT_SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3a2plZHVtZnVob2Rja210eHhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1MjQ1MjMsImV4cCI6MjA5NTEwMDUyM30.jxMwPgngbSGugU-1GuLNV7EiURONz7JT85F4WdqMisU';
+
 let sb = null;
 function initSupabase() {
-  const { sbUrl, sbKey } = getConfig();
-  if (sbUrl && sbKey) {
-    try {
-      sb = window.supabase.createClient(sbUrl, sbKey);
-      return true;
-    } catch(e) { return false; }
-  }
-  return false;
+  const cfg = getConfig();
+  const sbUrl = cfg.sbUrl || DEFAULT_SB_URL;
+  const sbKey = cfg.sbKey || DEFAULT_SB_KEY;
+  try {
+    sb = window.supabase.createClient(sbUrl, sbKey);
+    return true;
+  } catch(e) { return false; }
 }
 
 // ════════════════════════════════════════════
