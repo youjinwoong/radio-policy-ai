@@ -656,10 +656,11 @@ function loadSettingsFields() {
 }
 
 function loadSettingsUI() {
-  // 항상 잠금 상태로 시작 (새 탭/새로고침 시)
-  sessionStorage.removeItem('admin_auth');
-  document.getElementById('settings-locked').style.display = 'flex';
-  document.getElementById('settings-unlocked').style.display = 'none';
+  // 이미 인증된 경우 잠금 해제 상태 유지, 아니면 잠금 화면 표시
+  var isAuth = sessionStorage.getItem('admin_auth') === '1';
+  document.getElementById('settings-locked').style.display   = isAuth ? 'none'  : 'flex';
+  document.getElementById('settings-unlocked').style.display = isAuth ? 'block' : 'none';
+  if (isAuth) loadSettingsFields();
 }
 
 function saveApiKeys() {
@@ -967,7 +968,6 @@ async function autoExtractTermsIfNeeded() {
     localStorage.setItem('last_terms_extraction', today);
     if (saved > 0) {
       console.log('[기술 용어] 자동 추출 완료: ' + saved + '건 저장');
-      // 기술 용어 패널이 열려 있으면 새로고침
       var termsPanel = document.getElementById('panel-terms');
       if (termsPanel && termsPanel.style.display !== 'none') loadTerms();
     }
@@ -985,6 +985,5 @@ document.addEventListener('DOMContentLoaded', function() {
   loadSettingsUI();
   refreshDashboard();
   loadPressJSON();
-  // 페이지 로드 후 60초 뒤 백그라운드로 기술 용어 자동 추출 (하루 1회)
   setTimeout(autoExtractTermsIfNeeded, 60000);
 });
