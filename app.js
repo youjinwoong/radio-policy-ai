@@ -1099,8 +1099,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initSupabase();
   updateStatusDots();
   loadSettingsUI();
-  refreshDashboard();
   loadPressJSON();
-  loadRemoteConfig();
+  loadRemoteConfig().then(function() { loadNews(); });
   setTimeout(autoExtractTermsIfNeeded, 60000);
 });
