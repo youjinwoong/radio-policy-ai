@@ -285,16 +285,28 @@ async function generateTermDetail(id) {
       body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system:systemMsg,messages:[{role:'user',content:userMsg}]})
     });
     var data = await res.json();
-    var text = data.content[0].text.trim();
+
+    // API 오류 응답 체크
+    if (data.type === 'error' || !data.content) {
+      var errMsg = (data.error && data.error.message) ? data.error.message : JSON.stringify(data);
+      throw new Error('Claude API 오류: ' + errMsg);
+    }
+
+    var text = (data.content[0].text || '').trim();
+    console.log('[generateTermDetail] Claude 응답 (앞 300자):', text.slice(0, 300));
+
     // JSON 추출 — 코드블록 제거 후 파싱
     var cleaned = text
-      .replace(/^```[\w]*\n?/,'').replace(/\n?```$/,'')  // ```json ... ``` 제거
-      .replace(/^`/,'').replace(/`$/,'')                    // 단일 백틱 제거
+      .replace(/^```[\w]*\n?/g,'').replace(/\n?```$/g,'')   // ```json ... ``` 제거
+      .replace(/^`|`$/g,'')                                   // 단일 백틱 제거
       .trim();
-    // { } 사이 내용 추출 (그리디하지 않게 첫 { ~ 마지막 } 사용)
+    // { } 사이 내용 추출 (첫 { ~ 마지막 } 사용)
     var firstBrace = cleaned.indexOf('{');
     var lastBrace = cleaned.lastIndexOf('}');
-    if (firstBrace === -1 || lastBrace === -1) throw new Error('JSON 파싱 실패: 중괄호 없음');
+    if (firstBrace === -1 || lastBrace === -1) {
+      console.error('[generateTermDetail] 전체 응답:', text);
+      throw new Error('JSON 파싱 실패: 응답에 JSON 없음. Console에서 전체 응답 확인 가능');
+    }
     var jsonStr = cleaned.slice(firstBrace, lastBrace + 1);
     var parsed;
     try { parsed = JSON.parse(jsonStr); }
