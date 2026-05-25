@@ -19,21 +19,27 @@
       <div class="subtitle">SKT CR센터 · 기술정책팀</div>
     </div>
     <div class="nav-group">
-      <div class="nav-label">메인</div>
-      <div class="nav-item active" onclick="go('home',this)"><i class="ti ti-layout-dashboard"></i>대시보드</div>
+      <div class="nav-label">모니터링</div>
+      <div class="nav-item" onclick="go('news',this)"><i class="ti ti-news"></i>보도자료·뉴스</div>
+      <div class="nav-item" onclick="go('briefing',this)"><i class="ti ti-coffee"></i>Daily Briefing</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">자문</div>
       <div class="nav-item" onclick="go('chat',this)"><i class="ti ti-message-circle"></i>AI 자문</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">기술 용어</div>
+      <div class="nav-item" onclick="go('terms',this)"><i class="ti ti-book"></i>기술 용어</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">지식 베이스</div>
       <div class="nav-item" onclick="go('law',this)"><i class="ti ti-file-text"></i>국내 법령·고시</div>
       <div class="nav-item" onclick="go('itu',this)"><i class="ti ti-world"></i>ITU-R 문서</div>
       <div class="nav-item" onclick="go('press',this)"><i class="ti ti-speakerphone"></i>정부 보도자료</div>
-      <div class="nav-item" onclick="go('terms',this)"><i class="ti ti-book"></i>기술 용어</div>
     </div>
     <div class="nav-group">
-      <div class="nav-label">모니터링</div>
-      <div class="nav-item" onclick="go('news',this)"><i class="ti ti-news"></i>보도자료·뉴스</div>
-      <div class="nav-item" onclick="go('briefing',this)"><i class="ti ti-coffee"></i>Daily Briefing</div>
+      <div class="nav-label">메인</div>
+      <div class="nav-item active" onclick="go('home',this)"><i class="ti ti-layout-dashboard"></i>대시보드</div>
       <div class="nav-item" onclick="go('settings',this)"><i class="ti ti-settings"></i>설정</div>
     </div>
     <div class="sidebar-bottom">
@@ -50,7 +56,7 @@
       <span class="topbar-title" id="topbar-title">대시보드</span>
       <div class="topbar-actions">
         <button class="btn" onclick="refreshDashboard()"><i class="ti ti-refresh"></i>새로고침</button>
-        <button class="btn btn-primary" onclick="go('chat', document.querySelectorAll('.nav-item')[1])"><i class="ti ti-message-circle"></i>AI 자문 시작</button>
+        <button class="btn btn-primary" onclick="go('chat', document.querySelector('.nav-item[onclick*=\'chat\']'))"><i class="ti ti-message-circle"></i>AI 자문 시작</button>
       </div>
     </div>
 
@@ -393,26 +399,40 @@
 
   <!-- 모바일 하단 네비게이션 -->
   <nav class="bottom-nav">
-    <button class="bottom-nav-item active" id="bn-home" onclick="go('home',null);setBottomNav('bn-home')">
-      <i class="ti ti-layout-dashboard"></i><span>홈</span>
+    <button class="bottom-nav-item" id="bn-monitor" onclick="showMobileSubMenu('monitor-sub')">
+      <i class="ti ti-news"></i><span>모니터링</span>
     </button>
     <button class="bottom-nav-item" id="bn-chat" onclick="go('chat',null);setBottomNav('bn-chat')">
       <i class="ti ti-message-circle"></i><span>AI 자문</span>
     </button>
+    <button class="bottom-nav-item" id="bn-terms" onclick="go('terms',null);setBottomNav('bn-terms')">
+      <i class="ti ti-book"></i><span>기술용어</span>
+    </button>
     <button class="bottom-nav-item" id="bn-law" onclick="showMobileSubMenu('law-sub')">
       <i class="ti ti-books"></i><span>지식베이스</span>
     </button>
-    <button class="bottom-nav-item" id="bn-press" onclick="showMobileSubMenu('monitor-sub')">
-      <i class="ti ti-news"></i><span>모니터링</span>
-    </button>
-    <button class="bottom-nav-item" id="bn-settings" onclick="go('settings',null);setBottomNav('bn-settings')">
-      <i class="ti ti-settings"></i><span>설정</span>
+    <button class="bottom-nav-item active" id="bn-more" onclick="showMobileSubMenu('more-sub')">
+      <i class="ti ti-dots"></i><span>더보기</span>
     </button>
   </nav>
 
 </div><!-- app -->
 
-<!-- 모바일 서브메뉴: 지식베이스 -->
+<!-- 모바일 서브메뉴: 모니터링 -->
+  <div id="monitor-sub" class="mobile-submenu" style="display:none">
+    <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('monitor-sub')"></div>
+    <div class="mobile-submenu-sheet">
+      <div class="mobile-submenu-title">모니터링</div>
+      <button class="mobile-submenu-item" onclick="go('news',null);setBottomNav('bn-monitor');closeMobileSubMenu('monitor-sub')">
+        <i class="ti ti-news"></i>보도자료·뉴스
+      </button>
+      <button class="mobile-submenu-item" onclick="go('briefing',null);setBottomNav('bn-monitor');closeMobileSubMenu('monitor-sub')">
+        <i class="ti ti-coffee"></i>Daily Briefing
+      </button>
+    </div>
+  </div>
+
+  <!-- 모바일 서브메뉴: 지식베이스 -->
   <div id="law-sub" class="mobile-submenu" style="display:none">
     <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('law-sub')"></div>
     <div class="mobile-submenu-sheet">
@@ -426,22 +446,19 @@
       <button class="mobile-submenu-item" onclick="go('press',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
         <i class="ti ti-speakerphone"></i>정부 보도자료
       </button>
-      <button class="mobile-submenu-item" onclick="go('terms',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
-        <i class="ti ti-book"></i>기술 용어
-      </button>
     </div>
   </div>
 
-  <!-- 모바일 서브메뉴: 모니터링 -->
-  <div id="monitor-sub" class="mobile-submenu" style="display:none">
-    <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('monitor-sub')"></div>
+  <!-- 모바일 서브메뉴: 더보기 -->
+  <div id="more-sub" class="mobile-submenu" style="display:none">
+    <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('more-sub')"></div>
     <div class="mobile-submenu-sheet">
-      <div class="mobile-submenu-title">모니터링</div>
-      <button class="mobile-submenu-item" onclick="go('news',null);setBottomNav('bn-press');closeMobileSubMenu('monitor-sub')">
-        <i class="ti ti-news"></i>보도자료·뉴스
+      <div class="mobile-submenu-title">더보기</div>
+      <button class="mobile-submenu-item" onclick="go('home',null);setBottomNav('bn-more');closeMobileSubMenu('more-sub')">
+        <i class="ti ti-layout-dashboard"></i>대시보드
       </button>
-      <button class="mobile-submenu-item" onclick="go('briefing',null);setBottomNav('bn-press');closeMobileSubMenu('monitor-sub')">
-        <i class="ti ti-coffee"></i>Daily Briefing
+      <button class="mobile-submenu-item" onclick="go('settings',null);setBottomNav('bn-more');closeMobileSubMenu('more-sub')">
+        <i class="ti ti-settings"></i>설정
       </button>
     </div>
   </div>
