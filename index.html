@@ -376,47 +376,75 @@
           <!-- 알림 설정 -->
           <div class="card" style="cursor:default">
           <div class="section-title" style="margin-bottom:12px"><i class="ti ti-bell"></i>알림 설정 (준비 중)</div>
-          <div class="toggle-row">
+                    <div class="toggle-row">
             <div class="toggle-info"><div class="toggle-name">과기정통부 고시 개정 알림</div><div class="toggle-desc">rra.go.kr 신규 고시·개정예고 감지</div></div>
             <div class="toggle on" onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="toggle-row">
-            <div class="toggle-info"><div class="toggle-name">ITU-R 신규 문서 알림</div><div class="toggle-desc">M·SM 시리즈 신규 권고·보고서</div></div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info"><div class="toggle-name">WRC 회의 일정 알림</div><div class="toggle-desc">WRC-27 준비 회의 및 의제 업데이트</div></div>
+            <div class="toggle-info"><div class="toggle-name">전파법 시행령 개정 알림</div><div class="toggle-desc">법제처 법령정보 신규 고시·개정 감지</div></div>
             <div class="toggle" onclick="this.classList.toggle('on')"></div>
           </div>
-          <div class="toggle-row">
-            <div class="toggle-info"><div class="toggle-name">주파수 경매·할당 공고 알림</div><div class="toggle-desc">과기정통부 주파수 관련 공고</div></div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
-          </div>
-          </div><!-- /알림 설정 card -->
-        </div><!-- /settings-unlocked -->
-      </div><!-- /panel-settings -->
+          </div><!-- card -->
+        </div><!-- settings-unlocked -->
+      </div><!-- panel-settings -->
 
-    </div><!-- /content -->
-  </div><!-- /main -->
-</div><!-- /app -->
-<!-- 모바일 하단 네비게이션 -->
-<nav class="bottom-nav" id="bottom-nav">
-  <button class="bottom-nav-item active" id="bn-home" onclick="go('home',this);setBottomNav('bn-home')">
-    <i class="ti ti-layout-dashboard"></i><span>대시보드</span>
-  </button>
-  <button class="bottom-nav-item" id="bn-chat" onclick="go('chat',this);setBottomNav('bn-chat')">
-    <i class="ti ti-message-circle"></i><span>AI 자문</span>
-  </button>
-  <button class="bottom-nav-item" id="bn-law" onclick="go('law',this);setBottomNav('bn-law')">
-    <i class="ti ti-file-text"></i><span>법령·고시</span>
-  </button>
-  <button class="bottom-nav-item" id="bn-press" onclick="go('press',this);setBottomNav('bn-press')">
-    <i class="ti ti-speakerphone"></i><span>보도자료</span>
-  </button>
-  <button class="bottom-nav-item" id="bn-settings" onclick="go('settings',this);setBottomNav('bn-settings')">
-    <i class="ti ti-settings"></i><span>설정</span>
-  </button>
-</nav>
+    </div><!-- content -->
+  </div><!-- main -->
+
+  <!-- 모바일 하단 네비게이션 -->
+  <nav class="bottom-nav">
+    <button class="bottom-nav-item active" id="bn-home" onclick="go('home',null);setBottomNav('bn-home')">
+      <i class="ti ti-layout-dashboard"></i><span>홈</span>
+    </button>
+    <button class="bottom-nav-item" id="bn-chat" onclick="go('chat',null);setBottomNav('bn-chat')">
+      <i class="ti ti-message-circle"></i><span>AI 자문</span>
+    </button>
+    <button class="bottom-nav-item" id="bn-law" onclick="showMobileSubMenu('law-sub')">
+      <i class="ti ti-books"></i><span>지식베이스</span>
+    </button>
+    <button class="bottom-nav-item" id="bn-press" onclick="showMobileSubMenu('monitor-sub')">
+      <i class="ti ti-news"></i><span>모니터링</span>
+    </button>
+    <button class="bottom-nav-item" id="bn-settings" onclick="go('settings',null);setBottomNav('bn-settings')">
+      <i class="ti ti-settings"></i><span>설정</span>
+    </button>
+  </nav>
+
+  <!-- 모바일 서브메뉴: 지식베이스 -->
+  <div id="law-sub" class="mobile-submenu" style="display:none">
+    <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('law-sub')"></div>
+    <div class="mobile-submenu-sheet">
+      <div class="mobile-submenu-title">지식베이스</div>
+      <button class="mobile-submenu-item" onclick="go('law',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
+        <i class="ti ti-file-text"></i>국내 법령·고시
+      </button>
+      <button class="mobile-submenu-item" onclick="go('itu',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
+        <i class="ti ti-world"></i>ITU-R 문서
+      </button>
+      <button class="mobile-submenu-item" onclick="go('press',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
+        <i class="ti ti-speakerphone"></i>정부 보도자료
+      </button>
+      <button class="mobile-submenu-item" onclick="go('terms',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
+        <i class="ti ti-book"></i>기술 용어
+      </button>
+    </div>
+  </div>
+
+  <!-- 모바일 서브메뉴: 모니터링 -->
+  <div id="monitor-sub" class="mobile-submenu" style="display:none">
+    <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('monitor-sub')"></div>
+    <div class="mobile-submenu-sheet">
+      <div class="mobile-submenu-title">모니터링</div>
+      <button class="mobile-submenu-item" onclick="go('news',null);setBottomNav('bn-press');closeMobileSubMenu('monitor-sub')">
+        <i class="ti ti-news"></i>보도자료·뉴스
+      </button>
+      <button class="mobile-submenu-item" onclick="go('briefing',null);setBottomNav('bn-press');closeMobileSubMenu('monitor-sub')">
+        <i class="ti ti-coffee"></i>Daily Briefing
+      </button>
+    </div>
+  </div>
+
+</div><!-- app -->
   <script src="system_prompt.js"></script>
   <script src="app.js"></script>
 </body>

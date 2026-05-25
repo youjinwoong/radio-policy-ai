@@ -853,6 +853,16 @@ function setBottomNav(activeId) {
   if (el) el.classList.add('active');
 }
 
+function showMobileSubMenu(id) {
+  var el = document.getElementById(id);
+  if (el) { el.style.display = 'block'; }
+}
+
+function closeMobileSubMenu(id) {
+  var el = document.getElementById(id);
+  if (el) { el.style.display = 'none'; }
+}
+
 // ════════════════════════════════════════════
 //  보도자료 — 원본 JSON 파일 검색
 // ════════════════════════════════════════════
