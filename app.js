@@ -855,6 +855,96 @@ function searchPressReleases(query) {
 function loadPressFromSupabase() { loadPressJSON(); }
 
 // ════════════════════════════════════════════
+//  기술 용어 자동 추출 (하루 1회, 백그라운드)
+// ════════════════════════════════════════════
+async function autoExtractTermsIfNeeded() {
+  var today = new Date().toISOString().slice(0, 10);
+  var lastRun = localStorage.getItem('last_terms_extraction');
+  if (lastRun === today) return; // 오늘 이미 실행됨
+
+  if (!sb) return;
+  var { claudeKey } = getConfig();
+  if (!claudeKey) return;
+
+  console.log('[기술 용어] 자동 추출 시작 (' + today + ')');
+
+  try {
+    // 최근 7일 뉴스 가져오기
+    var cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    var cutoffStr = cutoff.toISOString().split('T')[0];
+    var newsResp = await sb.from('news_feed')
+      .select('title,source,published_at')
+      .gte('published_at', cutoffStr)
+      .order('published_at', { ascending: false })
+      .limit(30);
+    var newsList = (newsResp.data || []).map(function(n) {
+      return '[' + (n.published_at || '').slice(0, 10) + '] ' + n.title + ' (' + (n.source || '') + ')';
+    }).join('\n');
+    if (!newsList) { console.log('[기술 용어] 최근 뉴스 없음, 스킵'); return; }
+
+    // 기존 용어 목록
+    var existingResp = await sb.from('tech_terms').select('term').limit(500);
+    var existingTerms = (existingResp.data || []).map(function(t) { return t.term.toLowerCase(); });
+
+    // Claude에 용어 추출 요청
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': claudeKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: '당신은 이동통신·전파 전문가입니다. 반드시 순수 JSON 배열만 출력하세요. 마크다운 코드블록 없이.',
+        messages: [{
+          role: 'user',
+          content: '아래 뉴스 목록에서 이동통신·전파 분야 기술 용어(영문 약어, 표준명, 새 기술명)를 추출하세요.\n' +
+            '이미 알려진 용어(' + existingTerms.slice(0, 20).join(', ') + ' 등)는 제외하세요.\n\n' +
+            '뉴스 목록:\n' + newsList + '\n\n' +
+            '형식: [{"term":"약어","term_en":"영문 전체 이름","category":"주파수|네트워크|위성|단말|규제|기타","definition":"한 줄 정의(50자 이내)","source":"출처"}]\n' +
+            '새 용어가 없으면 [] 출력.'
+        }]
+      })
+    });
+
+    var data = await res.json();
+    var text = (data.content[0].text || '').trim()
+      .replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
+    var firstBracket = text.indexOf('[');
+    var lastBracket = text.lastIndexOf(']');
+    if (firstBracket === -1) { console.log('[기술 용어] 추출 결과 없음'); return; }
+    var terms = JSON.parse(text.slice(firstBracket, lastBracket + 1));
+    if (!terms.length) { console.log('[기술 용어] 신규 용어 없음'); localStorage.setItem('last_terms_extraction', today); return; }
+
+    // Supabase에 저장
+    var saved = 0;
+    for (var i = 0; i < terms.length; i++) {
+      var t = terms[i];
+      if (!t.term || existingTerms.includes(t.term.toLowerCase())) continue;
+      var r = await sb.from('tech_terms').insert({
+        term: t.term, term_en: t.term_en || '', category: t.category || '기타',
+        definition: t.definition || '', source: t.source || '뉴스 자동 추출', is_reviewed: false
+      });
+      if (!r.error) { saved++; existingTerms.push(t.term.toLowerCase()); }
+    }
+
+    localStorage.setItem('last_terms_extraction', today);
+    if (saved > 0) {
+      console.log('[기술 용어] 자동 추출 완료: ' + saved + '건 저장');
+      // 기술 용어 패널이 열려 있으면 새로고침
+      var termsPanel = document.getElementById('panel-terms');
+      if (termsPanel && termsPanel.style.display !== 'none') loadTerms();
+    }
+  } catch(e) {
+    console.warn('[기술 용어] 자동 추출 오류:', e.message);
+  }
+}
+
+// ════════════════════════════════════════════
 //  Init
 // ════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
@@ -863,4 +953,6 @@ document.addEventListener('DOMContentLoaded', function() {
   loadSettingsUI();
   refreshDashboard();
   loadPressJSON();
+  // 페이지 로드 후 60초 뒤 백그라운드로 기술 용어 자동 추출 (하루 1회)
+  setTimeout(autoExtractTermsIfNeeded, 60000);
 });
