@@ -618,6 +618,33 @@ function filterNews(el, cat) {
 }
 
 // ════════════════════════════════════════════
+//  관리자 인증 (AI 페르소나 보호)
+// ════════════════════════════════════════════
+const ADMIN_PWD = 'skt2026!';  // ← 비밀번호 변경 시 이 값을 수정하세요
+
+function checkAdminPwd() {
+  var input = document.getElementById('admin-pwd-input').value;
+  var errEl = document.getElementById('admin-pwd-error');
+  if (input === ADMIN_PWD) {
+    sessionStorage.setItem('admin_auth', '1');
+    document.getElementById('admin-locked').style.display = 'none';
+    document.getElementById('admin-unlocked').style.display = 'block';
+    document.getElementById('system-prompt-display').value = SYSTEM_PROMPT;
+    if (errEl) errEl.style.display = 'none';
+  } else {
+    if (errEl) errEl.style.display = 'block';
+    document.getElementById('admin-pwd-input').value = '';
+  }
+}
+
+function lockAdmin() {
+  sessionStorage.removeItem('admin_auth');
+  document.getElementById('admin-locked').style.display = 'block';
+  document.getElementById('admin-unlocked').style.display = 'none';
+  document.getElementById('admin-pwd-input').value = '';
+}
+
+// ════════════════════════════════════════════
 //  Settings
 // ════════════════════════════════════════════
 function loadSettingsUI() {
@@ -625,7 +652,8 @@ function loadSettingsUI() {
   if (cfg.sbUrl) document.getElementById('inp-sb-url').value = cfg.sbUrl;
   if (cfg.sbKey) document.getElementById('inp-sb-key').value = cfg.sbKey;
   if (cfg.claudeKey) document.getElementById('inp-claude-key').value = cfg.claudeKey;
-  document.getElementById('system-prompt-display').value = SYSTEM_PROMPT;
+  // 이전 세션에서 인증된 경우 자동 해제 (새 탭/새로고침 시 항상 잠금)
+  sessionStorage.removeItem('admin_auth');
 }
 
 function saveApiKeys() {

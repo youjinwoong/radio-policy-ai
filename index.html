@@ -334,11 +334,30 @@
           </div>
         </div>
 
-        <!-- 시스템 프롬프트 -->
+        <!-- 시스템 프롬프트 (관리자 전용) -->
         <div class="card" style="margin-bottom:12px;cursor:default">
-          <div class="section-title" style="margin-bottom:12px"><i class="ti ti-robot"></i>AI 페르소나 (시스템 프롬프트)</div>
-          <textarea id="system-prompt-display" rows="6" readonly style="height:110px;opacity:0.8"></textarea>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">※ 시스템 프롬프트는 코드에 내장되어 있습니다. 변경이 필요하면 개발자에게 문의하세요.</div>
+          <div class="section-title" style="margin-bottom:12px"><i class="ti ti-robot"></i>AI 페르소나 <span style="font-size:11px;color:var(--text-tertiary);font-weight:400">(관리자 전용)</span></div>
+
+          <!-- 잠금 상태 -->
+          <div id="admin-locked" style="text-align:center;padding:16px 0">
+            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px"><i class="ti ti-lock"></i> 관리자 인증이 필요합니다</div>
+            <div style="display:flex;gap:8px;justify-content:center">
+              <input id="admin-pwd-input" type="password" class="input-field" placeholder="관리자 비밀번호"
+                style="max-width:200px;margin:0"
+                onkeydown="if(event.key==='Enter')checkAdminPwd()" />
+              <button class="btn btn-primary" onclick="checkAdminPwd()"><i class="ti ti-lock-open"></i>확인</button>
+            </div>
+            <div id="admin-pwd-error" style="font-size:11px;color:#dc2626;margin-top:8px;display:none">비밀번호가 올바르지 않습니다.</div>
+          </div>
+
+          <!-- 인증 후 표시 -->
+          <div id="admin-unlocked" style="display:none">
+            <textarea id="system-prompt-display" rows="6" readonly style="height:110px;opacity:0.8"></textarea>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+              <div style="font-size:11px;color:var(--text-tertiary)">※ 변경이 필요하면 system_prompt.js 파일을 수정하세요.</div>
+              <button class="btn" onclick="lockAdmin()" style="font-size:11px;padding:4px 10px"><i class="ti ti-lock"></i>잠금</button>
+            </div>
+          </div>
         </div>
 
         <!-- 알림 설정 -->
