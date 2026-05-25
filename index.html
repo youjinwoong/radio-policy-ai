@@ -314,54 +314,55 @@
 
       <!-- 설정 -->
       <div class="panel" id="panel-settings">
-        <!-- API 키 설정 -->
-        <div class="card" style="margin-bottom:12px;cursor:default">
-          <div class="section-title" style="margin-bottom:12px"><i class="ti ti-key"></i>API 키 설정</div>
-          <div id="api-alert"></div>
-          <div style="margin-bottom:12px">
-            <span class="input-label">Supabase Project URL</span>
-            <input class="input-field" id="inp-sb-url" type="text" placeholder="https://xxxxxxxxxxxx.supabase.co" />
-            <span class="input-label">Supabase Publishable Key</span>
-            <input class="input-field" id="inp-sb-key" type="password" placeholder="sb_publishable_..." />
-            <span class="input-label">Claude API Key</span>
-            <input class="input-field" id="inp-claude-key" type="password" placeholder="sk-ant-..." />
 
+        <!-- 잠금 화면 -->
+        <div id="settings-locked" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center">
+          <div style="font-size:40px;margin-bottom:16px">🔒</div>
+          <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:6px">관리자 전용 영역</div>
+          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:24px">API 키 및 AI 페르소나 설정에 접근하려면<br>관리자 비밀번호를 입력하세요.</div>
+          <div style="display:flex;gap:8px;justify-content:center;width:100%;max-width:320px">
+            <input id="admin-pwd-input" type="password" class="input-field" placeholder="비밀번호 입력"
+              style="margin:0;flex:1"
+              onkeydown="if(event.key==='Enter')checkAdminPwd()" />
+            <button class="btn btn-primary" onclick="checkAdminPwd()"><i class="ti ti-lock-open"></i>확인</button>
           </div>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-primary" onclick="saveApiKeys()"><i class="ti ti-device-floppy"></i>저장 및 연결</button>
-            <button class="btn" onclick="testConnection()"><i class="ti ti-plug"></i>연결 테스트</button>
-            <button class="btn" onclick="clearApiKeys()" style="margin-left:auto;color:#791F1F"><i class="ti ti-trash"></i>초기화</button>
-          </div>
+          <div id="admin-pwd-error" style="font-size:12px;color:#dc2626;margin-top:10px;display:none">비밀번호가 올바르지 않습니다.</div>
         </div>
 
-        <!-- 시스템 프롬프트 (관리자 전용) -->
-        <div class="card" style="margin-bottom:12px;cursor:default">
-          <div class="section-title" style="margin-bottom:12px"><i class="ti ti-robot"></i>AI 페르소나 <span style="font-size:11px;color:var(--text-tertiary);font-weight:400">(관리자 전용)</span></div>
-
-          <!-- 잠금 상태 -->
-          <div id="admin-locked" style="text-align:center;padding:16px 0">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px"><i class="ti ti-lock"></i> 관리자 인증이 필요합니다</div>
-            <div style="display:flex;gap:8px;justify-content:center">
-              <input id="admin-pwd-input" type="password" class="input-field" placeholder="관리자 비밀번호"
-                style="max-width:200px;margin:0"
-                onkeydown="if(event.key==='Enter')checkAdminPwd()" />
-              <button class="btn btn-primary" onclick="checkAdminPwd()"><i class="ti ti-lock-open"></i>확인</button>
-            </div>
-            <div id="admin-pwd-error" style="font-size:11px;color:#dc2626;margin-top:8px;display:none">비밀번호가 올바르지 않습니다.</div>
+        <!-- 인증 후 설정 전체 -->
+        <div id="settings-unlocked" style="display:none">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+            <button class="btn" onclick="lockAdmin()" style="font-size:12px"><i class="ti ti-lock"></i> 설정 잠금</button>
           </div>
 
-          <!-- 인증 후 표시 -->
-          <div id="admin-unlocked" style="display:none">
+          <!-- API 키 설정 -->
+          <div class="card" style="margin-bottom:12px;cursor:default">
+            <div class="section-title" style="margin-bottom:12px"><i class="ti ti-key"></i>API 키 설정</div>
+            <div id="api-alert"></div>
+            <div style="margin-bottom:12px">
+              <span class="input-label">Supabase Project URL</span>
+              <input class="input-field" id="inp-sb-url" type="text" placeholder="https://xxxxxxxxxxxx.supabase.co" />
+              <span class="input-label">Supabase Publishable Key</span>
+              <input class="input-field" id="inp-sb-key" type="password" placeholder="sb_publishable_..." />
+              <span class="input-label">Claude API Key</span>
+              <input class="input-field" id="inp-claude-key" type="password" placeholder="sk-ant-..." />
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-primary" onclick="saveApiKeys()"><i class="ti ti-device-floppy"></i>저장 및 연결</button>
+              <button class="btn" onclick="testConnection()"><i class="ti ti-plug"></i>연결 테스트</button>
+              <button class="btn" onclick="clearApiKeys()" style="margin-left:auto;color:#791F1F"><i class="ti ti-trash"></i>초기화</button>
+            </div>
+          </div>
+
+          <!-- 시스템 프롬프트 -->
+          <div class="card" style="margin-bottom:12px;cursor:default">
+            <div class="section-title" style="margin-bottom:12px"><i class="ti ti-robot"></i>AI 페르소나 (시스템 프롬프트)</div>
             <textarea id="system-prompt-display" rows="6" readonly style="height:110px;opacity:0.8"></textarea>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-              <div style="font-size:11px;color:var(--text-tertiary)">※ 변경이 필요하면 system_prompt.js 파일을 수정하세요.</div>
-              <button class="btn" onclick="lockAdmin()" style="font-size:11px;padding:4px 10px"><i class="ti ti-lock"></i>잠금</button>
-            </div>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">※ 변경이 필요하면 system_prompt.js 파일을 수정하세요.</div>
           </div>
-        </div>
 
-        <!-- 알림 설정 -->
-        <div class="card" style="cursor:default">
+          <!-- 알림 설정 -->
+          <div class="card" style="cursor:default">
           <div class="section-title" style="margin-bottom:12px"><i class="ti ti-bell"></i>알림 설정 (준비 중)</div>
           <div class="toggle-row">
             <div class="toggle-info"><div class="toggle-name">과기정통부 고시 개정 알림</div><div class="toggle-desc">rra.go.kr 신규 고시·개정예고 감지</div></div>
@@ -379,8 +380,9 @@
             <div class="toggle-info"><div class="toggle-name">주파수 경매·할당 공고 알림</div><div class="toggle-desc">과기정통부 주파수 관련 공고</div></div>
             <div class="toggle on" onclick="this.classList.toggle('on')"></div>
           </div>
-        </div>
-      </div>
+          </div><!-- /알림 설정 card -->
+        </div><!-- /settings-unlocked -->
+      </div><!-- /panel-settings -->
 
     </div><!-- /content -->
   </div><!-- /main -->

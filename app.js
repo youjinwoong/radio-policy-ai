@@ -627,9 +627,10 @@ function checkAdminPwd() {
   var errEl = document.getElementById('admin-pwd-error');
   if (input === ADMIN_PWD) {
     sessionStorage.setItem('admin_auth', '1');
-    document.getElementById('admin-locked').style.display = 'none';
-    document.getElementById('admin-unlocked').style.display = 'block';
+    document.getElementById('settings-locked').style.display = 'none';
+    document.getElementById('settings-unlocked').style.display = 'block';
     document.getElementById('system-prompt-display').value = SYSTEM_PROMPT;
+    loadSettingsFields();
     if (errEl) errEl.style.display = 'none';
   } else {
     if (errEl) errEl.style.display = 'block';
@@ -639,21 +640,26 @@ function checkAdminPwd() {
 
 function lockAdmin() {
   sessionStorage.removeItem('admin_auth');
-  document.getElementById('admin-locked').style.display = 'block';
-  document.getElementById('admin-unlocked').style.display = 'none';
+  document.getElementById('settings-locked').style.display = 'flex';
+  document.getElementById('settings-unlocked').style.display = 'none';
   document.getElementById('admin-pwd-input').value = '';
 }
 
 // ════════════════════════════════════════════
 //  Settings
 // ════════════════════════════════════════════
-function loadSettingsUI() {
+function loadSettingsFields() {
   const cfg = getConfig();
   if (cfg.sbUrl) document.getElementById('inp-sb-url').value = cfg.sbUrl;
   if (cfg.sbKey) document.getElementById('inp-sb-key').value = cfg.sbKey;
   if (cfg.claudeKey) document.getElementById('inp-claude-key').value = cfg.claudeKey;
-  // 이전 세션에서 인증된 경우 자동 해제 (새 탭/새로고침 시 항상 잠금)
+}
+
+function loadSettingsUI() {
+  // 항상 잠금 상태로 시작 (새 탭/새로고침 시)
   sessionStorage.removeItem('admin_auth');
+  document.getElementById('settings-locked').style.display = 'flex';
+  document.getElementById('settings-unlocked').style.display = 'none';
 }
 
 function saveApiKeys() {
