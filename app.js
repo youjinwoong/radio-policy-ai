@@ -587,21 +587,32 @@ let currentNewsFilter = '전체';
 async function loadNews() {
   if (!sb) return;
   try {
-    let query = sb.from('news_feed').select('*').order('created_at', { ascending: false }).limit(20);
+    let query = sb.from('news_feed').select('*').order('published_at', { ascending: false, nullsFirst: false }).limit(30);
     if (currentNewsFilter !== '전체') query = query.eq('category', currentNewsFilter);
     const { data } = await query;
     if (data && data.length > 0) {
+      // published_at 없는 항목은 created_at 기준으로 정렬 보완
+      const sorted = data.slice().sort(function(a, b) {
+        var da = new Date(a.published_at || a.created_at);
+        var db = new Date(b.published_at || b.created_at);
+        return db - da;
+      });
       const list = document.getElementById('news-list');
-      list.innerHTML = data.map(n => {
-        const date = new Date(n.published_at || n.created_at).toLocaleDateString('ko-KR', {year:'numeric',month:'2-digit',day:'2-digit'});
+      list.innerHTML = sorted.map(n => {
+        const dateStr = n.published_at || n.created_at;
+        const date = new Date(dateStr).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
+        const urlHtml = n.url ? ` <a href="${n.url}" target="_blank" style="color:var(--accent);font-size:11px;margin-left:4px"><i class="ti ti-external-link"></i></a>` : '';
         return `<div class="news-item">
           <div class="news-dot ${n.is_read ? 'dot-read' : 'dot-new'}"></div>
-          <div>
-            <div class="news-title" onclick="markRead('${n.id}')">${n.title}</div>
+          <div style="flex:1">
+            <div class="news-title" onclick="markRead('${n.id}')" style="cursor:pointer">${n.title}${urlHtml}</div>
             <div class="news-meta">${n.source || ''} · ${date} · ${n.category || ''}</div>
+            ${n.summary ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:3px">${n.summary}</div>` : ''}
           </div>
         </div>`;
       }).join('');
+    } else {
+      document.getElementById('news-list').innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">수집된 뉴스가 없습니다.</div>';
     }
   } catch(e) { console.warn('News load error:', e); }
 }
@@ -1027,6 +1038,7 @@ async function autoExtractTermsIfNeeded() {
     try { terms = JSON.parse(text.slice(firstBracket, lastBracket + 1)); } catch(e) { return; }
     if (!terms.length) { console.log('[기술 용어] 신규 용어 없음'); localStorage.setItem('last_terms_extraction', today); return; }
 
+    var saved = 0;
     var saved = 0;
     for (var i = 0; i < terms.length; i++) {
       var t = terms[i];
