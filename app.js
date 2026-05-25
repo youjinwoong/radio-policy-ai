@@ -618,6 +618,76 @@ function filterNews(el, cat) {
 }
 
 // ════════════════════════════════════════════
+//  Daily Briefing — Supabase daily_briefings 표시
+// ════════════════════════════════════════════
+async function loadBriefing() {
+  const listEl = document.getElementById('briefing-list');
+  if (!listEl) return;
+  if (!sb) {
+    listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">Supabase 연결이 필요합니다.</div>';
+    return;
+  }
+  listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">불러오는 중...</div>';
+  try {
+    const { data, error } = await sb
+      .from('daily_briefings')
+      .select('*')
+      .order('briefing_date', { ascending: false })
+      .limit(30);
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      listEl.innerHTML = '<div style="color:var(--text-secondary);padding:40px;text-align:center">아직 브리핑이 없습니다.<br>매일 오전 8시에 자동으로 생성됩니다.</div>';
+      return;
+    }
+    listEl.innerHTML = data.map(function(b, idx) {
+      const d = new Date(b.briefing_date).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
+      const isToday = b.briefing_date === new Date().toISOString().slice(0,10);
+      const contentHtml = (b.content || '')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/📡[^\n]*/g, '<span style="font-size:15px;font-weight:700;color:var(--accent)">$&</span>')
+        .replace(/\[([^\]]+)\]/g, '<span style="font-weight:600;color:var(--text-primary)">[$1]</span>')
+        .replace(/^• (.+)$/gm, '<span style="display:block;padding-left:12px">• $1</span>')
+        .replace(/^  → (.+)$/gm, '<span style="display:block;padding-left:24px;color:var(--text-secondary);font-size:12px">→ $1</span>')
+        .replace(/^  🔗 (.+)$/gm, '<span style="display:block;padding-left:24px;font-size:12px"><a href="$1" target="_blank" style="color:var(--accent)">🔗 원문 보기</a></span>')
+        .replace(/\n/g, '<br>');
+      const badgeHtml = isToday ? '<span style="background:var(--accent);color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;margin-left:8px">오늘</span>' : '';
+      const metaHtml = (b.news_count || b.terms_count)
+        ? `<span style="color:var(--text-secondary);font-size:11px">뉴스 ${b.news_count||0}건 · 용어 ${b.terms_count||0}건</span>`
+        : '';
+      return `<div class="card" style="margin-bottom:12px;cursor:default">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;cursor:pointer"
+             onclick="toggleBriefing('bf-${idx}')">
+          <div style="display:flex;align-items:center;gap:6px">
+            <i class="ti ti-coffee" style="color:var(--accent)"></i>
+            <span style="font-weight:600">${d}</span>${badgeHtml}
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            ${metaHtml}
+            <i class="ti ti-chevron-${idx===0?'up':'down'}" id="chevron-bf-${idx}" style="color:var(--text-secondary)"></i>
+          </div>
+        </div>
+        <div id="bf-${idx}" style="display:${idx===0?'block':'none'};font-size:13px;line-height:1.8;white-space:pre-wrap;border-top:1px solid var(--border);padding-top:10px">
+          ${contentHtml}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">브리핑 로드 실패: ' + e.message + '</div>';
+    console.warn('Briefing load error:', e);
+  }
+}
+
+function toggleBriefing(id) {
+  var el = document.getElementById(id);
+  var idx = id.replace('bf-','');
+  var chevron = document.getElementById('chevron-' + id);
+  if (!el) return;
+  var isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'block';
+  if (chevron) chevron.className = 'ti ti-chevron-' + (isOpen ? 'down' : 'up');
+}
+
+// ════════════════════════════════════════════
 //  관리자 인증 (AI 페르소나 보호)
 // ════════════════════════════════════════════
 const ADMIN_PWD = 'skt2026!';  // ← 비밀번호 변경 시 이 값을 수정하세요
@@ -762,15 +832,16 @@ function go(page, navEl) {
   if (navEl && navEl.classList) navEl.classList.add('active');
 
   // 상단 바 제목 업데이트
-  var titles = {home:'대시보드', chat:'AI 자문', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', settings:'설정'};
+  var titles = {home:'대시보드', chat:'AI 자문', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', briefing:'Daily Briefing', settings:'설정'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-home', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-press', terms:'bn-press', news:'bn-press', settings:'bn-settings'};
+  var pageTobn = {home:'bn-home', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-press', terms:'bn-press', news:'bn-press', briefing:'bn-press', settings:'bn-settings'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
+  if (page === 'briefing') loadBriefing();
   if (page === 'settings') loadSettingsUI();
   if (page === 'press') loadPressFromSupabase();
   if (page === 'terms') loadTerms();
@@ -893,16 +964,12 @@ function loadPressFromSupabase() { loadPressJSON(); }
 async function autoExtractTermsIfNeeded() {
   var today = new Date().toISOString().slice(0, 10);
   var lastRun = localStorage.getItem('last_terms_extraction');
-  if (lastRun === today) return; // 오늘 이미 실행됨
-
+  if (lastRun === today) return; // 오늘   if (lastRun === today) return; // 오늘 이미 실행함
   if (!sb) return;
   var { claudeKey } = getConfig();
   if (!claudeKey) return;
 
-  console.log('[기술 용어] 자동 추출 시작 (' + today + ')');
-
   try {
-    // 최근 7일 뉴스 가져오기
     var cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 7);
     var cutoffStr = cutoff.toISOString().split('T')[0];
@@ -916,11 +983,14 @@ async function autoExtractTermsIfNeeded() {
     }).join('\n');
     if (!newsList) { console.log('[기술 용어] 최근 뉴스 없음, 스킵'); return; }
 
-    // 기존 용어 목록
     var existingResp = await sb.from('tech_terms').select('term').limit(500);
-    var existingTerms = (existingResp.data || []).map(function(t) { return t.term.toLowerCase(); });
+    var existingSet = new Set((existingResp.data || []).map(function(t) { return t.term.toLowerCase(); }));
 
-    // Claude에 용어 추출 요청
+    var userMsg = '아래 뉴스 목록에서 이동통신·전파 분야 기술 용어(영문 약어, 표준명, 새 기술명)를 추출하세요.\n' +
+      '흔한 용어(5G, LTE, Wi-Fi 등)는 제외하세요.\n\n' +
+      '뉴스 목록:\n' + newsList + '\n\n' +
+      'JSON 배열로만 출력 (신규 용어만, 없으면 []): [{"term":"...","term_en":"...","category":"...","definition":"...","source":"..."}]';
+
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -932,53 +1002,39 @@ async function autoExtractTermsIfNeeded() {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1000,
-        system: '당신은 이동통신·전파 전문가입니다. 반드시 순수 JSON 배열만 출력하세요. 마크다운 코드블록 없이.',
-        messages: [{
-          role: 'user',
-          content: '아래 뉴스 목록에서 이동통신·전파 분야 기술 용어(영문 약어, 표준명, 새 기술명)를 추출하세요.\n' +
-            '이미 알려진 용어(' + existingTerms.slice(0, 20).join(', ') + ' 등)는 제외하세요.\n\n' +
-            '뉴스 목록:\n' + newsList + '\n\n' +
-            '형식: [{"term":"약어","term_en":"영문 전체 이름","category":"주파수|네트워크|위성|단말|규제|기타","definition":"한 줄 정의(50자 이내)","source":"출처"}]\n' +
-            '새 용어가 없으면 [] 출력.'
-        }]
+        messages: [{ role: 'user', content: userMsg }]
       })
     });
-
     var data = await res.json();
-    var text = (data.content[0].text || '').trim()
-      .replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
+    var textBlock = data.content && data.content.find(function(b) { return b.type === 'text'; });
+    var text = textBlock ? textBlock.text : '';
+    if (!text) return;
+
     var firstBracket = text.indexOf('[');
     var lastBracket = text.lastIndexOf(']');
-    if (firstBracket === -1) { console.log('[기술 용어] 추출 결과 없음'); return; }
-    var terms = JSON.parse(text.slice(firstBracket, lastBracket + 1));
+    if (firstBracket === -1 || lastBracket === -1) return;
+    var terms = [];
+    try { terms = JSON.parse(text.slice(firstBracket, lastBracket + 1)); } catch(e) { return; }
     if (!terms.length) { console.log('[기술 용어] 신규 용어 없음'); localStorage.setItem('last_terms_extraction', today); return; }
 
-    // Supabase에 저장
     var saved = 0;
     for (var i = 0; i < terms.length; i++) {
       var t = terms[i];
-      if (!t.term || existingTerms.includes(t.term.toLowerCase())) continue;
-      var r = await sb.from('tech_terms').insert({
+      if (!t.term || existingSet.has(t.term.toLowerCase())) continue;
+      var payload = {
         term: t.term, term_en: t.term_en || '', category: t.category || '기타',
         definition: t.definition || '', source: t.source || '뉴스 자동 추출', is_reviewed: false
-      });
-      if (!r.error) { saved++; existingTerms.push(t.term.toLowerCase()); }
+      };
+      var resp = await sb.from('tech_terms').insert(payload);
+      if (!resp.error) { saved++; existingSet.add(t.term.toLowerCase()); }
     }
-
+    console.log('[기술 용어] 자동 추출 완료:', saved + '건');
     localStorage.setItem('last_terms_extraction', today);
-    if (saved > 0) {
-      console.log('[기술 용어] 자동 추출 완료: ' + saved + '건 저장');
-      var termsPanel = document.getElementById('panel-terms');
-      if (termsPanel && termsPanel.style.display !== 'none') loadTerms();
-    }
   } catch(e) {
-    console.warn('[기술 용어] 자동 추출 오류:', e.message);
+    console.warn('[기술 용어] 자동 추출 실패:', e);
   }
 }
 
-// ════════════════════════════════════════════
-//  Init
-// ════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
   initSupabase();
   updateStatusDots();
