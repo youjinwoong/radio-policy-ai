@@ -358,45 +358,150 @@ async function generateTermDetail(id) {
 }
 
 // ════════════════════════════════════════════
-//  뉴스 컨텍스트 — news_feed 최근 이력 (AI 자문 참조용)
+//  뉴스 컨텍스트 — 키워드 매칭 본문 발췌 + 제목 목록 (AI 자문 참조용)
 // ════════════════════════════════════════════
-async function fetchRecentNewsContext() {
+async function fetchRecentNewsContext(query) {
   if (!sb) return '';
   try {
     var cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 60); // 최근 60일
     var cutoffStr = cutoff.toISOString().split('T')[0];
-    var resp = await sb
-      .from('news_feed')
-      .select('title, source, category, published_at')
-      .gte('published_at', cutoffStr)
-      .order('published_at', { ascending: false })
-      .limit(40);
-    var data = resp.data;
-    if (!data || data.length === 0) return '';
 
-    // 업데이트 이력과 신규 뉴스 분리
-    var updates = data.filter(function(n) { return n.title.startsWith('[업데이트]'); });
-    var originals = data.filter(function(n) { return !n.title.startsWith('[업데이트]'); });
+    // [1] 최근 뉴스 제목 목록 (동향 파악용, 최대 30건)
+    var listResp = await sb
+      .from('news_feed')
+      .select('title, source, published_at')
+      .gte('published_at', cutoffStr)
+      .not('title', 'ilike', '[업데이트]%')
+      .order('published_at', { ascending: false })
+      .limit(30);
+    var allTitles = listResp.data || [];
+
+    // [2] 질문 키워드로 본문 매칭 (최대 3건, content 컬럼 있는 경우)
+    var bodyResults = [];
+    if (query) {
+      var keywords = extractKeywords(query);
+      var seen = new Set();
+      for (var ki = 0; ki < Math.min(keywords.length, 3); ki++) {
+        var kw = keywords[ki];
+        if (kw.length < 2) continue;
+        try {
+          var bodyResp = await sb
+            .from('news_feed')
+            .select('title, source, published_at, content')
+            .gte('published_at', cutoffStr)
+            .ilike('content', '%' + kw + '%')
+            .not('content', 'is', null)
+            .order('published_at', { ascending: false })
+            .limit(2);
+          (bodyResp.data || []).forEach(function(n) {
+            if (!seen.has(n.title) && n.content) {
+              seen.add(n.title);
+              bodyResults.push(n);
+            }
+          });
+        } catch(e) { /* content 컬럼 없으면 무시 */ }
+        if (bodyResults.length >= 3) break;
+      }
+    }
 
     var lines = [];
-    if (updates.length > 0) {
-      lines.push('[최근 변경·업데이트 이력]');
-      updates.forEach(function(n) {
-        lines.push('  · [' + (n.published_at||'').slice(0,10) + '] ' + n.title + ' (' + (n.source||'') + ')');
+
+    // 관련 기사 본문 발췌 (질문과 관련된 경우 우선 표시)
+    if (bodyResults.length > 0) {
+      lines.push('[질문 관련 최신 기사]');
+      bodyResults.slice(0, 3).forEach(function(n) {
+        var excerpt = (n.content || '').slice(0, 600).trim();
+        lines.push('■ [' + (n.published_at || '').slice(0, 10) + '] ' + n.title + ' (' + (n.source || '') + ')');
+        if (excerpt) lines.push('  → ' + excerpt + (n.content.length > 600 ? '...' : ''));
       });
     }
-    if (originals.length > 0) {
-      lines.push('[최근 뉴스 동향 — 누적 이력]');
-      originals.forEach(function(n) {
-        lines.push('  · [' + (n.published_at||'').slice(0,10) + '] ' + n.title + ' (' + (n.source||'') + ')');
+
+    // 최근 뉴스 제목 목록 (전반적인 동향 파악용)
+    if (allTitles.length > 0) {
+      lines.push('\n[최근 수집 뉴스 동향]');
+      allTitles.forEach(function(n) {
+        lines.push('  · [' + (n.published_at || '').slice(0, 10) + '] ' + n.title + ' (' + (n.source || '') + ')');
       });
     }
-    return '\n\n' + lines.join('\n') + '\n(위 뉴스 이력을 참고하여, 질문과 관련된 최신 동향이 있으면 언급하세요.)';
+
+    if (lines.length === 0) return '';
+    return '\n\n' + lines.join('\n') +
+      '\n(위 뉴스를 참고하여, 질문과 관련된 최신 동향이 있으면 출처와 날짜를 포함해 언급하세요.)';
   } catch(e) {
     console.warn('뉴스 컨텍스트 로드 실패:', e);
     return '';
   }
+}
+
+// ════════════════════════════════════════════
+//  추가 지식 — custom_knowledge 검색 및 CRUD
+// ════════════════════════════════════════════
+async function searchCustomKnowledge(query) {
+  if (!sb || !query) return '';
+  try {
+    var keywords = extractKeywords(query);
+    if (keywords.length === 0) return '';
+    var seen = new Set();
+    var results = [];
+    for (var ki = 0; ki < Math.min(keywords.length, 3); ki++) {
+      var kw = keywords[ki];
+      if (kw.length < 2) continue;
+      try {
+        var resp = await sb
+          .from('custom_knowledge')
+          .select('title, content, category')
+          .eq('is_active', true)
+          .or('title.ilike.%' + kw + '%,content.ilike.%' + kw + '%')
+          .order('created_at', { ascending: false })
+          .limit(3);
+        (resp.data || []).forEach(function(row) {
+          if (!seen.has(row.title)) {
+            seen.add(row.title);
+            results.push(row);
+          }
+        });
+      } catch(e) {}
+      if (results.length >= 3) break;
+    }
+    if (results.length === 0) return '';
+    var lines = ['\n\n[팀 내부 추가 지식 — 검증 완료]'];
+    results.slice(0, 3).forEach(function(r, i) {
+      var excerpt = (r.content || '').slice(0, 800);
+      lines.push('■ [' + (r.category || '일반') + '] ' + r.title);
+      lines.push('  ' + excerpt + (r.content.length > 800 ? '...' : ''));
+    });
+    lines.push('(위 내부 지식을 우선 참고하여 답변하세요.)');
+    return lines.join('\n');
+  } catch(e) {
+    console.warn('추가 지식 검색 실패:', e);
+    return '';
+  }
+}
+
+async function saveCustomKnowledge(title, content, category, tagsStr) {
+  if (!sb) throw new Error('Supabase 연결 없음');
+  var tags = tagsStr ? tagsStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+  var { error } = await sb.from('custom_knowledge').insert({
+    title: title, content: content, category: category || '일반', tags: tags
+  });
+  if (error) throw new Error(error.message);
+}
+
+async function loadCustomKnowledgeList() {
+  if (!sb) return [];
+  var { data } = await sb
+    .from('custom_knowledge')
+    .select('id, title, category, tags, created_at, is_active')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  return data || [];
+}
+
+async function deleteCustomKnowledge(id) {
+  if (!sb) throw new Error('Supabase 연결 없음');
+  var { error } = await sb.from('custom_knowledge').delete().eq('id', id);
+  if (error) throw new Error(error.message);
 }
 
 async function callClaude(userText) {
@@ -428,11 +533,11 @@ async function callClaude(userText) {
     }
   }
 
-  // 시스템 프롬프트에 RAG 컨텍스트 추가
-  const ragContext = buildRagContext(ragChunks);
-  // 최근 수집 뉴스 컨텍스트 추가 (Supabase news_feed)
-  const newsContext = await fetchRecentNewsContext();
-  const systemWithRag = SYSTEM_PROMPT + ragContext + newsContext;
+  // 시스템 프롬프트에 컨텍스트 조합
+  const ragContext    = buildRagContext(ragChunks);
+  const customContext = await searchCustomKnowledge(userText);   // 팀 내부 추가 지식
+  const newsContext   = await fetchRecentNewsContext(userText);  // 뉴스 본문+제목
+  const systemWithRag = SYSTEM_PROMPT + ragContext + customContext + newsContext;
 
   chatHistory.push({ role: 'user', content: userText });
 
@@ -881,7 +986,7 @@ function go(page, navEl) {
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-more', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', settings:'bn-more'};
+  var pageTobn = {home:'bn-more', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', settings:'bn-more'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
@@ -1089,6 +1194,93 @@ async function autoExtractTermsIfNeeded() {
     console.log('[기술 용어] 자동 추출 완료:', saved, '건 저장');
   } catch(e) {
     console.warn('[기술 용어] 자동 추출 오류:', e);
+  }
+}
+
+// ════════════════════════════════════════════
+//  추가 지식 — UI 함수 (패널 탭 전환 / 저장 / 목록 렌더)
+// ════════════════════════════════════════════
+function switchCustomTab(tab) {
+  document.getElementById('custom-tab-input').style.display = tab === 'input' ? '' : 'none';
+  document.getElementById('custom-tab-list').style.display  = tab === 'list'  ? '' : 'none';
+  document.getElementById('ctab-input').classList.toggle('active', tab === 'input');
+  document.getElementById('ctab-list').classList.toggle('active',  tab === 'list');
+  if (tab === 'list') renderCustomKnowledgeList();
+}
+
+async function renderCustomKnowledgeList(filterText) {
+  var listEl = document.getElementById('custom-list-items');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary);font-size:12px"><i class="ti ti-loader"></i> 불러오는 중...</div>';
+  try {
+    var items = await loadCustomKnowledgeList();
+    if (filterText) {
+      var q = filterText.toLowerCase();
+      items = items.filter(function(i) {
+        return i.title.toLowerCase().includes(q) || (i.tags || []).join(' ').toLowerCase().includes(q);
+      });
+    }
+    if (items.length === 0) {
+      listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">저장된 지식이 없습니다.</div>';
+      return;
+    }
+    listEl.innerHTML = items.map(function(item) {
+      var tagsHtml = (item.tags || []).map(function(t) {
+        return '<span style="background:var(--bg-tertiary);border-radius:4px;padding:1px 6px;font-size:10px;color:var(--text-secondary)">' + t + '</span>';
+      }).join(' ');
+      var date = (item.created_at || '').slice(0, 10);
+      return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border-light)">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
+            '<span style="font-size:10px;background:var(--accent);color:#fff;border-radius:4px;padding:1px 6px">' + (item.category || '일반') + '</span>' +
+            '<span style="font-size:12px;font-weight:600;color:var(--text-primary)">' + item.title + '</span>' +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--text-tertiary)">' + date + (tagsHtml ? ' · ' + tagsHtml : '') + '</div>' +
+        '</div>' +
+        '<button onclick="onDeleteCustom(' + item.id + ',this)" style="background:none;border:none;color:var(--text-tertiary);cursor:pointer;font-size:13px;padding:2px 4px" title="삭제"><i class="ti ti-trash"></i></button>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="padding:16px;color:#dc2626;font-size:12px">목록 로드 실패: ' + e.message + '</div>';
+  }
+}
+
+async function onSaveCustomKnowledge() {
+  var title    = (document.getElementById('ck-title')   || {}).value || '';
+  var category = (document.getElementById('ck-category')|| {}).value || '일반';
+  var content  = (document.getElementById('ck-content') || {}).value || '';
+  var tags     = (document.getElementById('ck-tags')    || {}).value || '';
+  var btn      = document.getElementById('ck-save-btn');
+  if (!title.trim() || !content.trim()) { alert('제목과 내용을 모두 입력하세요.'); return; }
+  btn.disabled = true;
+  btn.textContent = '저장 중...';
+  try {
+    await saveCustomKnowledge(title.trim(), content.trim(), category, tags);
+    btn.textContent = '✅ 저장됨';
+    btn.style.background = '#22c55e';
+    // 폼 초기화
+    document.getElementById('ck-title').value   = '';
+    document.getElementById('ck-content').value = '';
+    document.getElementById('ck-tags').value    = '';
+    setTimeout(function() { btn.disabled = false; btn.textContent = '저장하기'; btn.style.background = ''; }, 2000);
+  } catch(e) {
+    alert('저장 실패: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '저장하기';
+  }
+}
+
+async function onDeleteCustom(id, btn) {
+  if (!confirm('이 지식을 삭제하시겠습니까?')) return;
+  btn.disabled = true;
+  try {
+    await deleteCustomKnowledge(id);
+    renderCustomKnowledgeList(
+      (document.getElementById('ck-list-search') || {}).value || ''
+    );
+  } catch(e) {
+    alert('삭제 실패: ' + e.message);
+    btn.disabled = false;
   }
 }
 

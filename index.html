@@ -36,6 +36,7 @@
       <div class="nav-item" onclick="go('law',this)"><i class="ti ti-file-text"></i>국내 법령·고시</div>
       <div class="nav-item" onclick="go('itu',this)"><i class="ti ti-world"></i>ITU-R 문서</div>
       <div class="nav-item" onclick="go('press',this)"><i class="ti ti-speakerphone"></i>정부 보도자료</div>
+      <div class="nav-item" onclick="go('custom',this)"><i class="ti ti-pencil-plus"></i>추가 지식 입력</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">메인</div>
@@ -299,6 +300,78 @@
         </div>
       </div>
 
+      <!-- 추가 지식 입력 -->
+      <div class="panel" id="panel-custom">
+
+        <!-- 탭 헤더 -->
+        <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:0.5px solid var(--border-light);padding-bottom:10px">
+          <button id="ctab-input" class="btn btn-primary active" onclick="switchCustomTab('input')" style="font-size:12px">
+            <i class="ti ti-pencil-plus"></i> 지식 입력
+          </button>
+          <button id="ctab-list" class="btn" onclick="switchCustomTab('list')" style="font-size:12px">
+            <i class="ti ti-list"></i> 저장된 목록
+          </button>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-tertiary);align-self:center">AI 자문 시 자동 참조됩니다</span>
+        </div>
+
+        <!-- 입력 탭 -->
+        <div id="custom-tab-input">
+          <div style="display:flex;flex-direction:column;gap:12px;max-width:640px">
+
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">제목 <span style="color:#dc2626">*</span></div>
+              <input id="ck-title" type="text" placeholder="예: 6GHz 대역 공유 방안 내부 검토 결과"
+                style="width:100%;box-sizing:border-box;padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none"/>
+            </div>
+
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">분류</div>
+              <select id="ck-category" style="width:100%;padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none">
+                <option value="일반">일반</option>
+                <option value="주파수">주파수</option>
+                <option value="전자파">전자파</option>
+                <option value="적합성평가">적합성평가</option>
+                <option value="ITU-R">ITU-R</option>
+                <option value="기술기준">기술기준</option>
+              </select>
+            </div>
+
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">내용 <span style="color:#dc2626">*</span></div>
+              <textarea id="ck-content" rows="8" placeholder="검증된 지식, 해석, 사례, 유권해석 결과 등을 자유롭게 입력하세요."
+                style="width:100%;box-sizing:border-box;padding:10px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none;resize:vertical;line-height:1.7"></textarea>
+            </div>
+
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">태그 <span style="color:var(--text-tertiary)">(선택 · 쉼표로 구분)</span></div>
+              <input id="ck-tags" type="text" placeholder="예: 6GHz, 공유, WRC-27, 기술기준"
+                style="width:100%;box-sizing:border-box;padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none"/>
+            </div>
+
+            <div style="display:flex;justify-content:flex-end">
+              <button id="ck-save-btn" class="btn btn-primary" onclick="onSaveCustomKnowledge()" style="min-width:100px">
+                <i class="ti ti-device-floppy"></i> 저장하기
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 목록 탭 -->
+        <div id="custom-tab-list" style="display:none">
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <input id="ck-list-search" type="text" placeholder="제목·태그로 검색..."
+              style="flex:1;padding:7px 12px;font-size:12px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none"
+              oninput="renderCustomKnowledgeList(this.value)"/>
+            <button class="btn" onclick="renderCustomKnowledgeList('')">전체</button>
+          </div>
+          <div id="custom-list-items">
+            <div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">목록 탭을 클릭하면 로드됩니다.</div>
+          </div>
+        </div>
+
+      </div><!-- panel-custom -->
+
       <!-- 기술 용어 위키 -->
       <div class="panel" id="panel-terms">
         <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
@@ -451,6 +524,9 @@
       </button>
       <button class="mobile-submenu-item" onclick="go('press',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
         <i class="ti ti-speakerphone"></i>정부 보도자료
+      </button>
+      <button class="mobile-submenu-item" onclick="go('custom',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
+        <i class="ti ti-pencil-plus"></i>추가 지식 입력
       </button>
     </div>
   </div>

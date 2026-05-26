@@ -8,6 +8,7 @@
 
 import os
 import re
+import time
 import smtplib
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -227,11 +228,47 @@ def crawl_etnews() -> list:
 
 
 # ═══════════════════════════════════════════════════════
+#  기사 본문 수집
+# ═══════════════════════════════════════════════════════
+
+def fetch_article_body(url: str, source: str) -> str:
+    """기사 URL에서 본문 텍스트 추출 (최대 1500자)"""
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=8)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        # 소스별 본문 셀렉터
+        selectors_map = {
+            '전자신문':   ['div.article_body', 'div#articleBody', 'div.news_view'],
+            '연합뉴스':   ['div.article-txt', 'article.story-news'],
+            '디지털데일리': ['div#articleBody', 'div.article_txt'],
+            '지디넷코리아': ['div#article_content', 'div.article_view'],
+            '블로터':     ['div.article_content'],
+            '전자신문':   ['div.article_body', 'div#articleView'],
+        }
+        candidates = selectors_map.get(source, []) + [
+            'article', 'div.article', 'div.news-content',
+            'div.view_cont', 'div.view-content', 'div#content',
+            'div.article-body', 'div.news_body'
+        ]
+        for sel in candidates:
+            tag = soup.select_one(sel)
+            if tag:
+                text = tag.get_text(separator=' ', strip=True)
+                if len(text) > 100:
+                    return text[:1500]
+        return ''
+    except Exception as e:
+        print(f'  [본문 수집 실패] {url}: {e}')
+        return ''
+
+
+# ═══════════════════════════════════════════════════════
 #  Supabase 저장
 # ═══════════════════════════════════════════════════════
 
 def save_new_items(items: list, existing_urls: set) -> list:
-    """기존에 없는 항목만 필터링 후 저장"""
+    """기존에 없는 항목만 필터링 → 본문 수집 → 저장"""
     seen_urls = set(existing_urls)
     unique_new = []
     for item in items:
@@ -241,8 +278,17 @@ def save_new_items(items: list, existing_urls: set) -> list:
             unique_new.append(item)
 
     if unique_new:
+        # 기사 본문 수집 (항목당 1초 간격)
+        print(f'[본문 수집] {len(unique_new)}건 시작...')
+        for item in unique_new:
+            if item.get('url'):
+                body = fetch_article_body(item['url'], item.get('source', ''))
+                item['content'] = body if body else None
+                item['content_fetched_at'] = datetime.now(KST).isoformat()
+                time.sleep(1)  # 서버 부하 방지
+
         sb.table('news_feed').insert(unique_new).execute()
-        print(f'[저장] {len(unique_new)}건 신규 저장 완료')
+        print(f'[저장] {len(unique_new)}건 본문 포함 저장 완료')
     else:
         print('[저장] 신규 항목 없음')
     return unique_new
