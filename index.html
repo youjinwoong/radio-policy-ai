@@ -105,12 +105,17 @@
           <div class="chat-area" id="chat-area">
             <div class="msg msg-ai">
               <div class="msg-name">전파정책 전문가 AI</div>
-              안녕하세요. 전파법·관련 고시, 전기통신사업법, 정보통신망법, ITU-R 권고, 그리고 과기정통부 보도자료를 기반으로 제3자 관점에서 객관적인 자문을 드립니다.<br><br>
-              📄 <strong>참조 가능 자료</strong><br>
+              안녕하세요. 전파법·관련 고시, ITU-R 권고, 최신 뉴스, 그리고 팀이 직접 입력한 검증 지식을 종합하여 제3자 관점에서 객관적인 자문을 드립니다.<br><br>
+              📄 <strong>법령·고시 (RAG 검색)</strong><br>
               · 전파법·시행령·시행규칙, 주파수 분배표, 무선설비 기술기준, 전자파 기준, 적합성평가 고시<br>
               · ITU-R M.2150-3(5G) / M.2160-0(6G) / M.1036-8 / SM.329-13 등 6종<br>
               · 전기통신사업법·정보통신망법 계열 7종<br>
               · 과기정통부 보도자료(2024~2026년, 원문 136건 직접 검색)<br><br>
+              📰 <strong>최신 뉴스 (자동 반영)</strong><br>
+              · 매일 수집되는 전파·통신 분야 뉴스의 본문을 질문 키워드로 검색하여 관련 기사를 자동 참조합니다.<br><br>
+              🗂️ <strong>팀 추가 지식 (누적 반영)</strong><br>
+              · 지식 베이스 → <em>추가 지식 입력</em>에 저장된 내용을 질문과 매칭하여 자동으로 참조합니다.<br>
+              · 내부 검토 결과, 유권해석 사례, 협의 내용 등을 입력할수록 답변이 정교해집니다.<br><br>
               궁금하신 사항을 입력해 주세요.
             </div>
           </div>
@@ -348,7 +353,12 @@
                 style="width:100%;box-sizing:border-box;padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none"/>
             </div>
 
-            <div style="display:flex;justify-content:flex-end">
+            <div id="ck-edit-banner" style="display:none;padding:8px 12px;background:#fef3c7;border:0.5px solid #f59e0b;border-radius:var(--radius-md);font-size:12px;color:#92400e"></div>
+
+            <div style="display:flex;justify-content:flex-end;gap:8px">
+              <button id="ck-cancel-btn" class="btn" onclick="setCustomEditMode(null)" style="display:none">
+                취소
+              </button>
               <button id="ck-save-btn" class="btn btn-primary" onclick="onSaveCustomKnowledge()" style="min-width:100px">
                 <i class="ti ti-device-floppy"></i> 저장하기
               </button>
