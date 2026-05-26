@@ -488,6 +488,15 @@ async function saveCustomKnowledge(title, content, category, tagsStr) {
   if (error) throw new Error(error.message);
 }
 
+async function updateCustomKnowledge(id, title, content, category, tagsStr) {
+  if (!sb) throw new Error('Supabase 연결 없음');
+  var tags = tagsStr ? tagsStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+  var { error } = await sb.from('custom_knowledge').update({
+    title: title, content: content, category: category || '일반', tags: tags
+  }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
 async function loadCustomKnowledgeList() {
   if (!sb) return [];
   var { data } = await sb
@@ -1200,12 +1209,39 @@ async function autoExtractTermsIfNeeded() {
 // ════════════════════════════════════════════
 //  추가 지식 — UI 함수 (패널 탭 전환 / 저장 / 목록 렌더)
 // ════════════════════════════════════════════
+var _editingCustomId = null; // null이면 신규 입력, 숫자면 수정 중인 항목 id
+
 function switchCustomTab(tab) {
   document.getElementById('custom-tab-input').style.display = tab === 'input' ? '' : 'none';
   document.getElementById('custom-tab-list').style.display  = tab === 'list'  ? '' : 'none';
   document.getElementById('ctab-input').classList.toggle('active', tab === 'input');
   document.getElementById('ctab-list').classList.toggle('active',  tab === 'list');
   if (tab === 'list') renderCustomKnowledgeList();
+}
+
+function setCustomEditMode(id) {
+  _editingCustomId = id;
+  var banner = document.getElementById('ck-edit-banner');
+  var saveBtn = document.getElementById('ck-save-btn');
+  var cancelBtn = document.getElementById('ck-cancel-btn');
+  if (id) {
+    if (banner) { banner.style.display = ''; banner.textContent = '✏️ 수정 모드 — 내용을 변경한 뒤 저장하세요.'; }
+    if (saveBtn) { saveBtn.textContent = '수정 저장'; saveBtn.style.background = '#f59e0b'; }
+    if (cancelBtn) cancelBtn.style.display = '';
+  } else {
+    if (banner) banner.style.display = 'none';
+    if (saveBtn) { saveBtn.textContent = '저장하기'; saveBtn.style.background = ''; }
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    // 폼 초기화
+    var t = document.getElementById('ck-title');
+    var c = document.getElementById('ck-content');
+    var g = document.getElementById('ck-tags');
+    var cat = document.getElementById('ck-category');
+    if (t) t.value = '';
+    if (c) c.value = '';
+    if (g) g.value = '';
+    if (cat) cat.value = '일반';
+  }
 }
 
 async function renderCustomKnowledgeList(filterText) {
@@ -1237,11 +1273,34 @@ async function renderCustomKnowledgeList(filterText) {
           '</div>' +
           '<div style="font-size:11px;color:var(--text-tertiary)">' + date + (tagsHtml ? ' · ' + tagsHtml : '') + '</div>' +
         '</div>' +
+        '<button onclick="onEditCustom(' + item.id + ')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;padding:2px 4px;margin-right:2px" title="수정"><i class="ti ti-edit"></i></button>' +
         '<button onclick="onDeleteCustom(' + item.id + ',this)" style="background:none;border:none;color:var(--text-tertiary);cursor:pointer;font-size:13px;padding:2px 4px" title="삭제"><i class="ti ti-trash"></i></button>' +
       '</div>';
     }).join('');
   } catch(e) {
     listEl.innerHTML = '<div style="padding:16px;color:#dc2626;font-size:12px">목록 로드 실패: ' + e.message + '</div>';
+  }
+}
+
+async function onEditCustom(id) {
+  // Supabase에서 해당 항목 전체 내용 불러오기
+  try {
+    var { data, error } = await sb.from('custom_knowledge')
+      .select('id, title, content, category, tags')
+      .eq('id', id)
+      .single();
+    if (error || !data) { alert('항목을 불러올 수 없습니다.'); return; }
+    // 입력 탭으로 전환 후 폼에 채워 넣기
+    switchCustomTab('input');
+    document.getElementById('ck-title').value   = data.title || '';
+    document.getElementById('ck-content').value = data.content || '';
+    document.getElementById('ck-category').value = data.category || '일반';
+    document.getElementById('ck-tags').value    = (data.tags || []).join(', ');
+    setCustomEditMode(id);
+    // 화면 상단으로 스크롤
+    document.getElementById('ck-title').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch(e) {
+    alert('항목 로드 실패: ' + e.message);
   }
 }
 
@@ -1252,21 +1311,23 @@ async function onSaveCustomKnowledge() {
   var tags     = (document.getElementById('ck-tags')    || {}).value || '';
   var btn      = document.getElementById('ck-save-btn');
   if (!title.trim() || !content.trim()) { alert('제목과 내용을 모두 입력하세요.'); return; }
+  var isEdit = !!_editingCustomId;
   btn.disabled = true;
-  btn.textContent = '저장 중...';
+  btn.textContent = isEdit ? '수정 중...' : '저장 중...';
   try {
-    await saveCustomKnowledge(title.trim(), content.trim(), category, tags);
-    btn.textContent = '✅ 저장됨';
+    if (isEdit) {
+      await updateCustomKnowledge(_editingCustomId, title.trim(), content.trim(), category, tags);
+    } else {
+      await saveCustomKnowledge(title.trim(), content.trim(), category, tags);
+    }
+    btn.textContent = isEdit ? '✅ 수정됨' : '✅ 저장됨';
     btn.style.background = '#22c55e';
-    // 폼 초기화
-    document.getElementById('ck-title').value   = '';
-    document.getElementById('ck-content').value = '';
-    document.getElementById('ck-tags').value    = '';
-    setTimeout(function() { btn.disabled = false; btn.textContent = '저장하기'; btn.style.background = ''; }, 2000);
+    setCustomEditMode(null); // 수정 모드 해제 + 폼 초기화
+    setTimeout(function() { btn.disabled = false; btn.style.background = ''; }, 2000);
   } catch(e) {
-    alert('저장 실패: ' + e.message);
+    alert((isEdit ? '수정' : '저장') + ' 실패: ' + e.message);
     btn.disabled = false;
-    btn.textContent = '저장하기';
+    btn.textContent = isEdit ? '수정 저장' : '저장하기';
   }
 }
 
