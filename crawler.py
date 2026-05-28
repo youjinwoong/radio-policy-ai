@@ -775,6 +775,13 @@ def save_new_items(items: list, existing_urls: set) -> list:
             seen_urls.add(url)
             unique_new.append(item)
 
+    # 발행일 3일 이내 기사만 저장 (날짜 없는 기사는 허용)
+    cutoff_3d = (datetime.now(KST) - timedelta(days=3)).isoformat()
+    skipped_old = [i for i in unique_new if i.get('published_at') and i.get('published_at', '') < cutoff_3d]
+    unique_new  = [i for i in unique_new if not i.get('published_at') or i.get('published_at', '') >= cutoff_3d]
+    if skipped_old:
+        print(f'[날짜 필터] {len(skipped_old)}건 제외 (발행 3일 초과)')
+
     if unique_new:
         # 기사 본문 수집 (항목당 1초 간격)
         print(f'[본문 수집] {len(unique_new)}건 시작...')
