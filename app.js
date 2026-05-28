@@ -1415,9 +1415,8 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
       + '</div>';
   }
 
-  // 보통·참고는 기존 스타일 (심플)
-  var dotColor = importance === '보통' ? '#f59e0b' : '#22c55e';
-  return '<div style="padding:8px 0 8px 10px;border-left:3px solid ' + dotColor + ';margin-bottom:8px">'
+  // 보통·참고 — 별도 표시 없이 일반 텍스트
+  return '<div style="padding:6px 0;margin-bottom:6px">'
     + '<div style="margin-bottom:4px">' + titleHtml + '</div>'
     + summaryHtml
     + linkHtml

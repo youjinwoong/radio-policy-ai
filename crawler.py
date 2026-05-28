@@ -228,6 +228,338 @@ def crawl_etnews() -> list:
 
 
 # ═══════════════════════════════════════════════════════
+#  크롤러 — 방송통신위원회 (kcc.go.kr)
+# ═══════════════════════════════════════════════════════
+
+def crawl_kcc() -> list:
+    items = []
+    targets = [
+        ('https://kcc.go.kr/user.do?mode=view&page=A05030000&dc=K05030000', '보도자료', '방송통신위원회'),
+        ('https://kcc.go.kr/user.do?mode=view&page=A05010000&dc=K05010000', '공지사항', '방송통신위원회'),
+    ]
+    for url, label, source in targets:
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=20)
+            res.raise_for_status()
+            res.encoding = 'utf-8'
+            soup = BeautifulSoup(res.text, 'html.parser')
+            rows = soup.select('table tbody tr, ul.bbs_list li')[:15]
+            for row in rows:
+                title_tag = row.find('a')
+                if not title_tag:
+                    continue
+                title = title_tag.get_text(strip=True)
+                if not title or not any(k in title for k in RADIO_KEYWORDS):
+                    continue
+                href = title_tag.get('href', '')
+                if href.startswith('/'):
+                    href = 'https://kcc.go.kr' + href
+                date_tag = row.find(class_=re.compile(r'date|day|time'))
+                date_str = date_tag.get_text(strip=True) if date_tag else ''
+                items.append({
+                    'title': title,
+                    'source': source,
+                    'category': detect_category(title),
+                    'url': href,
+                    'is_read': False,
+                    'published_at': parse_date(date_str),
+                })
+        except Exception as e:
+            print(f'[방통위 오류] {label}: {e}')
+    print(f'[방통위] {len(items)}건 수집')
+    return items
+
+
+# ═══════════════════════════════════════════════════════
+#  크롤러 — ETRI (etri.re.kr)
+# ═══════════════════════════════════════════════════════
+
+def crawl_etri() -> list:
+    items = []
+    targets = [
+        ('https://www.etri.re.kr/kor/bbs/list.do?bbsId=1001', '보도자료', 'ETRI'),
+        ('https://www.etri.re.kr/kor/bbs/list.do?bbsId=1003', '공지사항', 'ETRI'),
+    ]
+    for url, label, source in targets:
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=20)
+            res.raise_for_status()
+            res.encoding = 'utf-8'
+            soup = BeautifulSoup(res.text, 'html.parser')
+            rows = soup.select('table tbody tr')[:15]
+            for row in rows:
+                title_tag = row.find('a')
+                if not title_tag:
+                    continue
+                title = title_tag.get_text(strip=True)
+                if not title or not any(k in title for k in RADIO_KEYWORDS + ['6G', '5G', 'IMT', 'AI', '표준', '연구']):
+                    continue
+                href = title_tag.get('href', '')
+                if href.startswith('/'):
+                    href = 'https://www.etri.re.kr' + href
+                date_tag = row.find(class_=re.compile(r'date|day|time'))
+                date_str = date_tag.get_text(strip=True) if date_tag else ''
+                items.append({
+                    'title': title,
+                    'source': source,
+                    'category': detect_category(title),
+                    'url': href,
+                    'is_read': False,
+                    'published_at': parse_date(date_str),
+                })
+        except Exception as e:
+            print(f'[ETRI 오류] {label}: {e}')
+    print(f'[ETRI] {len(items)}건 수집')
+    return items
+
+
+# ═══════════════════════════════════════════════════════
+#  크롤러 — KISDI (kisdi.re.kr)
+# ═══════════════════════════════════════════════════════
+
+def crawl_kisdi() -> list:
+    items = []
+    targets = [
+        ('https://www.kisdi.re.kr/bbs/list.do?bbsId=BBSMSTR_000000000017', '연구보고서', 'KISDI'),
+        ('https://www.kisdi.re.kr/bbs/list.do?bbsId=BBSMSTR_000000000018', '정책자료', 'KISDI'),
+    ]
+    for url, label, source in targets:
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=20)
+            res.raise_for_status()
+            res.encoding = 'utf-8'
+            soup = BeautifulSoup(res.text, 'html.parser')
+            rows = soup.select('table tbody tr, ul.bbs_list li')[:15]
+            for row in rows:
+                title_tag = row.find('a')
+                if not title_tag:
+                    continue
+                title = title_tag.get_text(strip=True)
+                if not title or not any(k in title for k in RADIO_KEYWORDS + ['6G', '5G', 'IMT', '방송', '통신', '인터넷']):
+                    continue
+                href = title_tag.get('href', '')
+                if href.startswith('/'):
+                    href = 'https://www.kisdi.re.kr' + href
+                date_tag = row.find(class_=re.compile(r'date|day|time'))
+                date_str = date_tag.get_text(strip=True) if date_tag else ''
+                items.append({
+                    'title': title,
+                    'source': source,
+                    'category': detect_category(title),
+                    'url': href,
+                    'is_read': False,
+                    'published_at': parse_date(date_str),
+                })
+        except Exception as e:
+            print(f'[KISDI 오류] {label}: {e}')
+    print(f'[KISDI] {len(items)}건 수집')
+    return items
+
+
+# ═══════════════════════════════════════════════════════
+#  크롤러 — 범용 키워드 검색 (IT전문지·경제지·종합일간지)
+# ═══════════════════════════════════════════════════════
+
+NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이']
+
+# 언론사별 검색 설정 ─ (source, search_url, article_sel, date_sel, base_url)
+NEWS_SITE_CONFIGS = [
+    # ── IT·통신 전문지 ─────────────────────────────────
+    {
+        'source': '디지털타임스',
+        'search_url': 'https://www.dt.co.kr/search.php?q={kw}',
+        'article_sel': ['div.article_title a', 'h4.tit a', 'ul.article_list li a'],
+        'date_sel':    ['span.date', 'em.date', 'span.regdate'],
+        'base_url':    'https://www.dt.co.kr',
+    },
+    {
+        'source': '디지털데일리',
+        'search_url': 'https://www.ddaily.co.kr/search?keyword={kw}',
+        'article_sel': ['ul.article_list li a', 'div.article_title a', 'h4.tit a'],
+        'date_sel':    ['span.date', 'em.date', 'span.regdate'],
+        'base_url':    'https://www.ddaily.co.kr',
+    },
+    {
+        'source': 'ZDNet Korea',
+        'search_url': 'https://zdnet.co.kr/news/?t=&q={kw}&l=&c=',
+        'article_sel': ['article h4 a', 'div.article_title a', 'ul.news_list li a'],
+        'date_sel':    ['span.date', 'em.date', 'time'],
+        'base_url':    'https://zdnet.co.kr',
+    },
+    {
+        'source': '아이뉴스24',
+        'search_url': 'https://search.inews24.com/search/news?q={kw}',
+        'article_sel': ['div.result_news ul li a.tit', 'ul.article_list li a', 'div.news_list a'],
+        'date_sel':    ['span.date', 'span.regdate', 'em.date'],
+        'base_url':    'https://www.inews24.com',
+    },
+    {
+        'source': '블로터',
+        'search_url': 'https://www.bloter.net/?s={kw}',
+        'article_sel': ['h2.entry-title a', 'h3.entry-title a', 'article a.entry-title'],
+        'date_sel':    ['time.entry-date', 'span.date', 'span.post-date'],
+        'base_url':    'https://www.bloter.net',
+    },
+    {
+        'source': '정보통신신문',
+        'search_url': 'https://www.koit.co.kr/news/articleList.html?sc_word={kw}',
+        'article_sel': ['ul.type2 li a', 'div.list-titles a', 'h4.titles a'],
+        'date_sel':    ['em.info', 'span.date', 'em.date'],
+        'base_url':    'https://www.koit.co.kr',
+    },
+    # ── 경제지 ────────────────────────────────────────
+    {
+        'source': '매일경제',
+        'search_url': 'https://search.mk.co.kr/search.php?q={kw}',
+        'article_sel': ['ul.search_news_list li a', 'div.con_tit a', 'h3.news_tit a'],
+        'date_sel':    ['span.date', 'em.date', 'span.lasttime'],
+        'base_url':    'https://www.mk.co.kr',
+    },
+    {
+        'source': '머니투데이',
+        'search_url': 'https://search.mt.co.kr/mtSearchMain.php?q={kw}',
+        'article_sel': ['ul.newslist01 li dt a', 'div.news_list li a', 'a.news_tit'],
+        'date_sel':    ['span.date', 'em.date', 'li.date'],
+        'base_url':    'https://news.mt.co.kr',
+    },
+    {
+        'source': '한국경제',
+        'search_url': 'https://search.hankyung.com/search/news?query={kw}',
+        'article_sel': ['ul.article__list li a', 'div.article_title a', 'h3.tit a'],
+        'date_sel':    ['span.date', 'em.date', 'span.txt-date'],
+        'base_url':    'https://www.hankyung.com',
+    },
+    {
+        'source': '서울경제',
+        'search_url': 'https://www.sedaily.com/Search/News?Keyword={kw}',
+        'article_sel': ['ul.article_list li a', 'div.article_title a', 'h3.tit a'],
+        'date_sel':    ['span.date', 'em.date', 'span.txt_date'],
+        'base_url':    'https://www.sedaily.com',
+    },
+    # ── 종합일간지·통신 ──────────────────────────────
+    {
+        'source': '연합뉴스',
+        'search_url': 'https://www.yna.co.kr/search/index?query={kw}&lang=KOR',
+        'article_sel': ['div.cts-title a', 'ul.list01 li a.tit', 'div.result-basic a.tit'],
+        'date_sel':    ['p.cts-date', 'span.date', 'span.cts-date'],
+        'base_url':    'https://www.yna.co.kr',
+    },
+    {
+        'source': '뉴시스',
+        'search_url': 'https://www.newsis.com/search/?q={kw}',
+        'article_sel': ['ul.list_news li a', 'div.tit_news a', 'a.txt_tit'],
+        'date_sel':    ['span.date', 'em.date', 'li.date'],
+        'base_url':    'https://www.newsis.com',
+    },
+    {
+        'source': '조선일보',
+        'search_url': 'https://www.chosun.com/search/?query={kw}',
+        'article_sel': ['a.story-card__headline', 'div.news_tit a', 'h3.tit a'],
+        'date_sel':    ['time', 'span.date', 'em.date'],
+        'base_url':    'https://www.chosun.com',
+    },
+    {
+        'source': '중앙일보',
+        'search_url': 'https://www.joongang.co.kr/search/news?keyword={kw}',
+        'article_sel': ['a.card-title', 'h2.headline a', 'div.article_title a'],
+        'date_sel':    ['time', 'span.date', 'em.date'],
+        'base_url':    'https://www.joongang.co.kr',
+    },
+    {
+        'source': '동아일보',
+        'search_url': 'https://www.donga.com/news/search?query={kw}',
+        'article_sel': ['div.tit a', 'h3.tit a', 'ul.news_list li a'],
+        'date_sel':    ['span.date', 'em.date', 'span.txt_date'],
+        'base_url':    'https://www.donga.com',
+    },
+    {
+        'source': '한겨레',
+        'search_url': 'https://www.hani.co.kr/arti/SEARCH/search.html?query={kw}',
+        'article_sel': ['div.article-title a', 'ul.search_list li a', 'h4.title a'],
+        'date_sel':    ['span.date', 'em.date', 'time'],
+        'base_url':    'https://www.hani.co.kr',
+    },
+    {
+        'source': '경향신문',
+        'search_url': 'https://www.khan.co.kr/search?query={kw}',
+        'article_sel': ['a.news_title', 'div.tit a', 'h3.tit a'],
+        'date_sel':    ['span.date', 'em.date', 'span.txt_date'],
+        'base_url':    'https://www.khan.co.kr',
+    },
+]
+
+
+def crawl_news_site(cfg: dict) -> list:
+    """키워드 검색 기반 범용 뉴스 크롤러"""
+    items = []
+    source = cfg['source']
+    seen_urls: set = set()
+    for kw in NEWS_SEARCH_KEYWORDS[:5]:  # 키워드 5개까지
+        url = cfg['search_url'].format(kw=requests.utils.quote(kw))
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=15)
+            res.raise_for_status()
+            soup = BeautifulSoup(res.text, 'html.parser')
+
+            # 기사 링크 탐색 (복수 셀렉터 시도)
+            links = []
+            for sel in cfg['article_sel']:
+                links = soup.select(sel)
+                if links:
+                    break
+            if not links:
+                # fallback: 모든 <a>에서 전파 키워드 포함 제목 탐색
+                links = [a for a in soup.find_all('a', href=True)
+                         if any(k in a.get_text() for k in ['전파', '주파수', '5G', '6G', '이동통신', '무선'])]
+
+            for link in links[:8]:
+                title = link.get_text(strip=True)
+                if not title or len(title) < 8:
+                    continue
+                if not any(k in title for k in RADIO_KEYWORDS):
+                    continue
+                href = link.get('href', '')
+                if not href:
+                    continue
+                if href.startswith('/'):
+                    href = cfg['base_url'] + href
+                if not href.startswith('http'):
+                    continue
+                if href in seen_urls:
+                    continue
+                seen_urls.add(href)
+
+                # 날짜 추출 (부모 컨테이너에서 탐색)
+                date_str = ''
+                parent = link.parent
+                for _ in range(4):  # 최대 4단계 부모까지
+                    if parent is None:
+                        break
+                    for dsel in cfg['date_sel']:
+                        dtag = parent.select_one(dsel)
+                        if dtag:
+                            date_str = dtag.get_text(strip=True)
+                            break
+                    if date_str:
+                        break
+                    parent = parent.parent
+
+                items.append({
+                    'title': title,
+                    'source': source,
+                    'category': detect_category(title),
+                    'url': href,
+                    'is_read': False,
+                    'published_at': parse_date(date_str),
+                })
+        except Exception as e:
+            print(f'[{source} 오류] {kw}: {e}')
+        time.sleep(0.5)
+    print(f'[{source}] {len(items)}건 수집')
+    return items
+
+
+# ═══════════════════════════════════════════════════════
 #  기사 본문 수집
 # ═══════════════════════════════════════════════════════
 
@@ -239,17 +571,21 @@ def fetch_article_body(url: str, source: str) -> str:
         soup = BeautifulSoup(resp.text, 'html.parser')
         # 소스별 본문 셀렉터
         selectors_map = {
-            '전자신문':   ['div.article_body', 'div#articleBody', 'div.news_view'],
-            '연합뉴스':   ['div.article-txt', 'article.story-news'],
+            '전자신문':    ['div.article_body', 'div#articleBody', 'div.news_view', 'div#articleView'],
+            '연합뉴스':    ['div.article-txt', 'article.story-news', 'div#articleWrap'],
+            '디지털타임스': ['div#article_txt', 'div.article_content', 'div#articleBody'],
+            'ZDNet Korea': ['div#article_body', 'div.article_view', 'div#articleContent'],
+            '아이뉴스24':  ['div#news_body_area', 'div.article_txt', 'div#articleBody'],
+            '매일경제':    ['div#article_body', 'div.art_txt', 'div#newsDetailBody'],
+            '머니투데이':  ['div#textBody', 'div.news_text', 'div#content_text'],
             '디지털데일리': ['div#articleBody', 'div.article_txt'],
             '지디넷코리아': ['div#article_content', 'div.article_view'],
-            '블로터':     ['div.article_content'],
-            '전자신문':   ['div.article_body', 'div#articleView'],
+            '블로터':      ['div.article_content'],
         }
         candidates = selectors_map.get(source, []) + [
             'article', 'div.article', 'div.news-content',
             'div.view_cont', 'div.view-content', 'div#content',
-            'div.article-body', 'div.news_body'
+            'div.article-body', 'div.news_body', 'div.article_txt'
         ]
         for sel in candidates:
             tag = soup.select_one(sel)
@@ -387,7 +723,12 @@ def main():
     all_items: list = []
     all_items += crawl_rra()
     all_items += crawl_msit()
+    all_items += crawl_kcc()
+    all_items += crawl_etri()
+    all_items += crawl_kisdi()
     all_items += crawl_etnews()
+    for cfg in NEWS_SITE_CONFIGS:
+        all_items += crawl_news_site(cfg)
     print(f'[수집] 총 {len(all_items)}건')
 
     new_items = save_new_items(all_items, existing_urls)

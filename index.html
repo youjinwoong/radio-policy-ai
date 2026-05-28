@@ -299,6 +299,33 @@
           <button class="btn" onclick="loadNews()"><i class="ti ti-refresh"></i>새로고침</button>
         </div>
 
+        <!-- 수집 대상 언론·기관 (카테고리별) -->
+        <div style="margin-bottom:12px;padding:9px 12px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);font-size:11px;color:var(--text-secondary)">
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:7px">
+            <i class="ti ti-antenna" style="font-size:13px"></i>
+            <span>수집 대상 언론·기관</span>
+            <span style="opacity:.6;font-size:10px">· 매일 오전 8시 자동 수집</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;line-height:1.6">
+            <div style="display:flex;gap:6px">
+              <span style="width:64px;flex-shrink:0;font-weight:500;color:var(--text-secondary)">정부 기관</span>
+              <span>국립전파연구원 · 과기정통부 · 방통위 · ETRI · KISDI</span>
+            </div>
+            <div style="display:flex;gap:6px">
+              <span style="width:64px;flex-shrink:0;font-weight:500;color:var(--text-secondary)">IT 전문지</span>
+              <span>전자신문 · 디지털타임스 · 디지털데일리 · ZDNet Korea · 아이뉴스24 · 블로터 · 정보통신신문</span>
+            </div>
+            <div style="display:flex;gap:6px">
+              <span style="width:64px;flex-shrink:0;font-weight:500;color:var(--text-secondary)">경제지</span>
+              <span>매일경제 · 머니투데이 · 한국경제 · 서울경제</span>
+            </div>
+            <div style="display:flex;gap:6px">
+              <span style="width:64px;flex-shrink:0;font-weight:500;color:var(--text-secondary)">종합일간지</span>
+              <span>연합뉴스 · 뉴시스 · 조선일보 · 중앙일보 · 동아일보 · 한겨레 · 경향신문</span>
+            </div>
+          </div>
+        </div>
+
         <!-- 중요도 필터 탭 -->
         <div class="tag-list" style="margin-bottom:12px" id="news-filter-tabs">
           <span class="tag selected" onclick="filterNewsByImportance(this,'전체')">전체</span>
