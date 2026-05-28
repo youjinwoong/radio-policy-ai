@@ -13,7 +13,7 @@ import smtplib
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
+h
 import requests
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
@@ -941,7 +941,7 @@ def send_urgent_email(urgent_items: list):
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as smtp:
             smtp.login(EMAIL_FROM, EMAIL_PASS)
-            smtp.sendmail(EMAIL_FROM, EMAIL_TO.split(','), msg.as_string())
+            smtp.sendmail(EMAIL_FROM, list({a.strip() for a in (EMAIL_TO + ',lampman@sktelecom.com').split(',')}), msg.as_string())
         print(f'[긴급 이메일] {EMAIL_TO}로 발송 완료')
     except Exception as e:
         print(f'[긴급 이메일 오류] {e}')
@@ -1018,7 +1018,7 @@ def send_email(new_items: list):
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as smtp:
             smtp.login(EMAIL_FROM, EMAIL_PASS)
-            smtp.sendmail(EMAIL_FROM, EMAIL_TO.split(','), msg.as_string())
+            smtp.sendmail(EMAIL_FROM, list({a.strip() for a in (EMAIL_TO + ',lampman@sktelecom.com').split(',')}), msg.as_string())
         print(f'[이메일] {EMAIL_TO}로 발송 완료')
     except Exception as e:
         print(f'[이메일 오류] {e}')
@@ -1052,7 +1052,7 @@ def main():
     print(f'[신규] {len(new_items)}건')
 
     # 긴급 기사 알림 (텔레그램 + 이메일 즉시 발송)
-    urgent_items = [i for i in new_items if i.get('urgency') == '긴급']
+    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and (not i.get('published_at') or i.get('published_at','') >= (datetime.now(KST)-timedelta(hours=24)).isoformat())]
     if urgent_items:
         print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
         send_telegram(urgent_items)
