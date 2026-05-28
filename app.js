@@ -1211,6 +1211,8 @@ async function analyzeNewsImpact(newsId) {
         // 캐시도 갱신 — 뉴스 목록 재렌더링
         n._importance = aiImportance;
         renderNewsList();
+        // Supabase DB도 업데이트 — 다음 로드 시부터 반영
+        if (sb) { try { await sb.from('news_feed').update({ urgency: aiImportance, importance: aiImportance }).eq('id', newsId); } catch(e) { console.warn('urgency 업데이트 실패:', e); } }
       }
     }
   } catch(e) {
