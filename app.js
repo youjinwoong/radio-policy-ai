@@ -931,7 +931,7 @@ async function loadNews() {
       .order('published_at', { ascending: false, nullsFirst: false }).limit(50);
     newsDataCache = data || [];
     // 중요도 분류 (캐시에 저장)
-    newsDataCache.forEach(function(n) { n._importance = n.importance || classifyNewsImportance(n); });
+    newsDataCache.forEach(function(n) { n._importance = n.importance || n.urgency || classifyNewsImportance(n); });
     renderNewsList();
   } catch(e) {
     console.warn('News load error:', e);
