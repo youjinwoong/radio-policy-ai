@@ -993,13 +993,12 @@ function showNewsDetail(newsId) {
     ? '<a href="' + n.url + '" target="_blank" class="btn" style="font-size:11px;padding:4px 10px;text-decoration:none"><i class="ti ti-external-link"></i> 원문 보기</a>'
     : '';
 
-  // 팀 액션 아이템 HTML
-  var actionsHtml = rule.response_guide.map(function(a, i) {
-    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--border-light)">' +
-      '<span style="background:var(--accent);color:#fff;border-radius:50%;width:18px;height:18px;min-width:18px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-top:1px">' + (i+1) + '</span>' +
-      '<span style="font-size:12px;color:var(--text-primary);line-height:1.6">' + a + '</span>' +
-    '</div>';
-  }).join('');
+  // 주요 내용 요약 — DB summary 또는 본문 앞부분
+  var summaryText = (n.summary || '').trim();
+  if (!summaryText && (n.body || n.content)) {
+    summaryText = (n.body || n.content || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    if (summaryText.length === 200) summaryText += '…';
+  }
 
   var html =
     // 헤더: 중요도 + 제목
@@ -1013,8 +1012,13 @@ function showNewsDetail(newsId) {
       '<div style="font-size:11px;color:var(--text-secondary)">' + (n.source || '') + '</div>' +
     '</div>' +
 
-    // 요약 (있는 경우)
-    (n.summary ? '<div style="font-size:12px;color:var(--text-secondary);padding:9px 12px;background:var(--bg-secondary);border-radius:var(--radius-md);margin-bottom:14px;line-height:1.7">' + n.summary + '</div>' : '') +
+    // 주요 내용 요약
+    (summaryText ?
+      '<div style="margin-bottom:14px">' +
+        '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● 주요 내용 요약</div>' +
+        '<div style="font-size:12px;color:var(--text-primary);padding:9px 12px;background:var(--bg-secondary);border-radius:var(--radius-md);line-height:1.7">' + summaryText + '</div>' +
+      '</div>'
+    : '') +
 
     // SKT 영향도 — 자동 분석 (로딩 스피너로 시작)
     '<div style="margin-bottom:14px">' +
@@ -1025,12 +1029,6 @@ function showNewsDetail(newsId) {
           'AI 분석 중...' +
         '</div>' +
       '</div>' +
-    '</div>' +
-
-    // 팀 액션 아이템
-    '<div style="margin-bottom:14px">' +
-      '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● 팀 액션 아이템</div>' +
-      actionsHtml +
     '</div>' +
 
     // AI 자문 연동
