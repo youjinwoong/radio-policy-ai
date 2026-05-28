@@ -1174,12 +1174,11 @@ async function analyzeNewsImpact(newsId) {
     if (box) {
       if (impactText) {
         box.innerHTML =
-          '<div style="font-size:12px;line-height:1.7;margin-bottom:8px">' + impactText + '</div>' +
-          (priorityText ? '<div style="font-size:11px;color:' + rule.color + ';font-weight:600">⚡ ' + priorityText + '</div>' : '');
+          renderSummaryHtml(impactText) +
+          (priorityText ? '<div style="font-size:11px;color:' + rule.color + ';font-weight:600;margin-top:6px">⚡ ' + priorityText + '</div>' : '');
       } else {
-        // XML 태그 없이 일반 텍스트로 응답한 경우 그대로 표시
         box.innerHTML = text
-          ? '<div style="font-size:12px;line-height:1.7">' + text.trim() + '</div>'
+          ? renderSummaryHtml(text.trim())
           : '<span style="color:var(--text-tertiary);font-size:11px">분석 결과를 받지 못했습니다 — AI 자문에서 직접 질문해 주세요.</span>';
       }
     }
