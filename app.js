@@ -925,15 +925,13 @@ function showNewsDetail(newsId) {
     // 요약 (있는 경우)
     (n.summary ? '<div style="font-size:12px;color:var(--text-secondary);padding:9px 12px;background:var(--bg-secondary);border-radius:var(--radius-md);margin-bottom:14px;line-height:1.7">' + n.summary + '</div>' : '') +
 
-    // SKT 영향도
+    // SKT 영향도 — 자동 분석 (로딩 스피너로 시작)
     '<div style="margin-bottom:14px">' +
       '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● SKT 영향도 분석</div>' +
       '<div style="font-size:12px;color:var(--text-primary);padding:10px 12px;background:' + rule.bg + ';border-radius:var(--radius-md);line-height:1.7" id="impact-box-' + n.id + '">' +
-        '<span style="color:var(--text-secondary)">' + rule.desc + '</span>' +
-        '<div style="margin-top:8px">' +
-          '<button onclick="analyzeNewsImpact(\'' + n.id + '\')" class="btn" id="analyze-btn-' + n.id + '" style="font-size:11px;padding:4px 12px">' +
-            '<i class="ti ti-robot"></i> AI 영향도 분석' +
-          '</button>' +
+        '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary)">' +
+          '<span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>' +
+          'AI 분석 중...' +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -959,6 +957,9 @@ function showNewsDetail(newsId) {
   // 읽음 처리
   if (sb) { sb.from('news_feed').update({ is_read: true }).eq('id', n.id).then(function() {}); }
   n.is_read = true;
+
+  // 영향도 분석 자동 실행 (버튼 클릭 없이 바로 시작)
+  analyzeNewsImpact(n.id);
 }
 
 // ── AI 영향도 분석 (Claude Haiku — 빠른 분석) ───────────────
@@ -968,12 +969,10 @@ async function analyzeNewsImpact(newsId) {
   var { claudeKey } = getConfig();
   if (!claudeKey) { alert('Claude API 키가 필요합니다.'); return; }
 
-  var btn = document.getElementById('analyze-btn-' + newsId);
   var box = document.getElementById('impact-box-' + newsId);
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 분석 중...'; }
 
   try {
-    var sysMsg = 'SK텔레콤 CR센터 기술정책팀 전파정책 전문가. 뉴스 제목을 보고 SKT 입장에서 간결하게 분석하라. XML 형식으로만 답변:\n<impact>SKT 영향도 2~3문장</impact>\n<kpi>관련 KPI 태그: KPI1(주파수 대가 최소화)/KPI2(적합성평가 리스크)/KPI3(선제적 규제 대응)/KPI4(국제표준 기여) 중 해당하는 것</kpi>\n<priority>즉시대응/금주검토/동향파악 중 하나</priority>';
+    var sysMsg = 'SK텔레콤 CR센터 기술정책팀 전파정책 전문가. 뉴스 제목을 보고 SKT 입장에서 간결하게 분석하라. XML 형식으로만 답변:\n<impact>SKT 영향도 2~3문장</impact>\n<priority>즉시대응/금주검토/동향파악 중 하나</priority>';
     var userMsg = '뉴스: ' + n.title + '\n출처: ' + (n.source || '') + '\n날짜: ' + (n.published_at||'').slice(0,10) + (n.summary ? '\n요약: ' + n.summary : '');
 
     var res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -984,12 +983,10 @@ async function analyzeNewsImpact(newsId) {
     var data = await res.json();
     var text = (data.content && data.content[0] && data.content[0].text) || '';
 
-    var impactM  = text.match(/<impact>([\s\S]*?)<\/impact>/);
-    var kpiM     = text.match(/<kpi>([\s\S]*?)<\/kpi>/);
+    var impactM   = text.match(/<impact>([\s\S]*?)<\/impact>/);
     var priorityM = text.match(/<priority>([\s\S]*?)<\/priority>/);
 
     var impactText   = impactM   ? impactM[1].trim()   : '';
-    var kpiText      = kpiM      ? kpiM[1].trim()      : '';
     var priorityText = priorityM ? priorityM[1].trim() : '';
 
     var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
@@ -997,12 +994,11 @@ async function analyzeNewsImpact(newsId) {
     if (box && impactText) {
       box.innerHTML =
         '<div style="font-size:12px;line-height:1.7;margin-bottom:8px">' + impactText + '</div>' +
-        (kpiText      ? '<div style="font-size:11px;color:var(--accent);margin-bottom:4px">🎯 ' + kpiText + '</div>' : '') +
         (priorityText ? '<div style="font-size:11px;color:' + rule.color + ';font-weight:600">⚡ ' + priorityText + '</div>' : '');
     }
   } catch(e) {
     console.warn('영향도 분석 오류:', e);
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-robot"></i> AI 영향도 분석'; }
+    if (box) { box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">분석 실패 — AI 자문에서 직접 질문해 주세요.</span>'; }
   }
 }
 
