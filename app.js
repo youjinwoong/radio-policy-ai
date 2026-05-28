@@ -255,35 +255,60 @@ function filterTerms(query) {
   renderTerms(filtered);
 }
 
-function openTermsModal(id) {
-  var t = termsData.find(function(x) { return x.id === id; });
-  if (!t) return;
+function renderTermsModalHtml(t) {
   var catColor = {주파수:'badge-purple', 네트워크:'badge-teal', 위성:'badge-blue', 단말:'badge-amber', 규제:'badge-red', 기타:'badge-amber'};
   var cc = catColor[t.category] || 'badge-amber';
   var related = (t.related_terms||[]).map(function(r) {
     return '<span class="badge badge-amber" style="cursor:pointer" onclick="closeTermsModal();document.getElementById(&quot;terms-search-input&quot;).value=&quot;' + r + '&quot;;filterTerms(&quot;' + r + '&quot;)">' + r + '</span>';
   }).join(' ');
 
-  var html = '<div style="margin-bottom:16px">' +
+  var headerHtml = '<div style="margin-bottom:16px">' +
     '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span style="font-size:20px;font-weight:700;color:var(--text-primary)">' + t.term + '</span>' +
       (t.term_en ? '<span style="font-size:13px;color:var(--text-secondary)">' + t.term_en + '</span>' : '') +
       '<span class="badge ' + cc + '">' + (t.category||'기타') + '</span>' +
     '</div>' +
     (t.source ? '<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">📌 출처: ' + t.source + '</div>' : '') +
-  '</div>' +
-  (t.definition ? '<div style="font-size:13px;font-weight:500;margin-bottom:12px;padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md)">' + t.definition + '</div>' : '') +
-  (t.description ? '<div style="font-size:13px;color:var(--text-primary);line-height:1.7;margin-bottom:16px;white-space:pre-wrap">' + t.description + '</div>' : '') +
-  (t.diagram_html ? '<div style="margin-bottom:16px;overflow-x:auto">' + t.diagram_html + '</div>' : '') +
-  (related ? '<div style="margin-bottom:12px"><span style="font-size:11px;color:var(--text-secondary);margin-right:6px">관련 용어:</span>' + related + '</div>' : '') +
-  '<div style="display:flex;gap:8px;margin-top:16px">' +
-    '<button class="btn btn-primary" onclick="generateTermDetail(&quot;' + t.id + '&quot;)" id="gen-btn-' + t.id + '">🤖 Claude로 상세 설명·다이어그램 생성</button>' +
-    '<button class="btn" onclick="askQ(&quot;' + t.term + ' 기술에 대해 자세히 설명해줘&quot;)" >AI 자문에서 질문</button>' +
   '</div>';
 
-  document.getElementById('terms-modal-content').innerHTML = html;
+  var bodyHtml = (t.definition ? '<div style="font-size:13px;font-weight:500;margin-bottom:12px;padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md)">' + t.definition + '</div>' : '');
+
+  if (t.description) {
+    // 캐시된 설명 있음 — 즉시 표시
+    bodyHtml +=
+      '<div style="font-size:13px;color:var(--text-primary);line-height:1.7;margin-bottom:16px;white-space:pre-wrap">' + t.description + '</div>' +
+      (t.diagram_html ? '<div style="margin-bottom:16px;overflow-x:auto">' + t.diagram_html + '</div>' : '') +
+      (related ? '<div style="margin-bottom:12px"><span style="font-size:11px;color:var(--text-secondary);margin-right:6px">관련 용어:</span>' + related + '</div>' : '') +
+      '<div style="display:flex;gap:8px;margin-top:16px">' +
+        '<button class="btn" style="font-size:11px;padding:4px 10px" onclick="generateTermDetail(&quot;' + t.id + '&quot;)" id="gen-btn-' + t.id + '">↺ 재생성</button>' +
+        '<button class="btn" onclick="askQ(&quot;' + t.term + ' 기술에 대해 자세히 설명해줘&quot;)">AI 자문에서 질문</button>' +
+      '</div>';
+  } else {
+    // 설명 없음 — 자동 생성 로딩 상태
+    bodyHtml +=
+      '<div id="gen-body-' + t.id + '" style="padding:24px 0;text-align:center;color:var(--text-secondary)">' +
+        '<div style="display:inline-flex;align-items:center;gap:8px;font-size:13px">' +
+          '<span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>' +
+          'AI가 상세 설명을 생성하는 중...' +
+        '</div>' +
+      '</div>';
+  }
+
+  return headerHtml + bodyHtml;
+}
+
+function openTermsModal(id) {
+  var t = termsData.find(function(x) { return x.id === id; });
+  if (!t) return;
+
+  document.getElementById('terms-modal-content').innerHTML = renderTermsModalHtml(t);
   var modal = document.getElementById('terms-modal');
   modal.style.display = 'flex';
+
+  // 설명 없으면 자동 생성 시작
+  if (!t.description) {
+    generateTermDetail(id);
+  }
 }
 
 function closeTermsModal() {
@@ -352,8 +377,12 @@ async function generateTermDetail(id) {
     // 모달 재렌더링
     openTermsModal(id);
   } catch(e) {
-    alert('생성 실패: ' + e.message);
-    if(btn){btn.disabled=false;btn.textContent='🤖 Claude로 상세 설명·다이어그램 생성';}
+    // 생성 실패 시 로딩 영역에 에러 메시지 표시
+    var genBody = document.getElementById('gen-body-' + id);
+    if (genBody) {
+      genBody.innerHTML = '<span style="font-size:12px;color:var(--text-secondary)">생성 실패: ' + e.message + ' &nbsp;<button class="btn" style="font-size:11px;padding:2px 8px" onclick="generateTermDetail(&quot;' + id + '&quot;)">재시도</button></span>';
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '↺ 재생성'; }
   }
 }
 
