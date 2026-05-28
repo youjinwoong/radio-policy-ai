@@ -1296,76 +1296,88 @@ function renderPlainBulletItem(block) {
 }
 
 // 브리핑 콘텐츠 파싱 — 섹션 순서 보존, 뉴스 섹션만 긴급도 분류
+// ※ 분류는 원본(raw) 텍스트로, HTML 출력은 이스케이프 적용
 function parseBriefingContent(rawContent, briefingIdx) {
-  var escaped = (rawContent || '')
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  var lines = escaped.split('\n');
-  var output = [];          // 순서 보존 HTML 청크 배열
-  var itemLines = [];
+  function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  var rawLines = (rawContent || '').split('\n');
+  var output = [];
+  var rawItemLines = [];   // 원본 텍스트 줄 (분류용)
   var itemIdx = 0;
   var urgentCount = 0;
-  var currentSection = 'news'; // 현재 섹션 추적 (news | other)
+  var urgentItems = [];    // [{elemId, title}] — 분석 트리거에 사용
+  var currentSection = 'news';
 
   function flushItem() {
-    if (itemLines.length === 0) return;
-    var block = itemLines.join('\n');
+    if (rawItemLines.length === 0) return;
+    var rawBlock = rawItemLines.join('\n');
     if (currentSection === 'news') {
-      var importance = classifyBriefingItemImportance(block);
-      output.push(renderBriefingNewsItem(block, importance, briefingIdx, itemIdx));
-      if (importance === '긴급') urgentCount++;
+      // 분류는 원본 텍스트 기준
+      var importance = classifyBriefingItemImportance(rawBlock);
+      // 렌더링은 이스케이프된 텍스트 기준
+      var escBlock = rawItemLines.map(function(l){ return esc(l); }).join('\n');
+      output.push(renderBriefingNewsItem(escBlock, importance, briefingIdx, itemIdx));
+      if (importance === '긴급') {
+        urgentCount++;
+        // 제목 추출 (원본)
+        var titleRaw = '';
+        for (var i = 0; i < rawItemLines.length; i++) {
+          if (/^• /.test(rawItemLines[i])) { titleRaw = rawItemLines[i].replace(/^• /, ''); break; }
+        }
+        urgentItems.push({ elemId: 'bi-' + briefingIdx + '-' + itemIdx, title: titleRaw });
+      }
     } else {
-      // 주목 포인트·기술 용어 등 — 일반 텍스트로 표시
-      output.push(renderPlainBulletItem(block));
+      var escBlock = rawItemLines.map(function(l){ return esc(l); }).join('\n');
+      output.push(renderPlainBulletItem(escBlock));
     }
     itemIdx++;
-    itemLines = [];
+    rawItemLines = [];
   }
 
-  for (var li = 0; li < lines.length; li++) {
-    var line = lines[li];
+  for (var li = 0; li < rawLines.length; li++) {
+    var line = rawLines[li];
     var trimmed = line.trim();
 
     // 섹션 헤더 [주요 뉴스], [주목 포인트], [기술 용어] 등
     if (/^\[.+\]$/.test(trimmed)) {
       flushItem();
-      // 뉴스 섹션인지 여부 판단
       currentSection = /뉴스|news/i.test(trimmed) ? 'news' : 'other';
-      output.push('<div style="font-weight:600;font-size:12px;color:var(--text-secondary);margin:14px 0 8px;letter-spacing:0.04em">' + trimmed + '</div>');
+      output.push('<div style="font-weight:600;font-size:12px;color:var(--text-secondary);margin:14px 0 8px;letter-spacing:0.04em">' + esc(trimmed) + '</div>');
       continue;
     }
     // 제목 헤더 (📡)
     if (/^📡/.test(line)) {
       flushItem();
-      output.push('<div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:12px">' + line + '</div>');
+      output.push('<div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:12px">' + esc(line) + '</div>');
       continue;
     }
     // bullet 항목 시작
     if (/^• /.test(line)) {
       flushItem();
-      itemLines.push(line);
+      rawItemLines.push(line);
       continue;
     }
     // 들여쓰기 줄 — 현재 항목에 추가
-    if (/^  /.test(line) && itemLines.length > 0) {
-      itemLines.push(line);
+    if (/^  /.test(line) && rawItemLines.length > 0) {
+      rawItemLines.push(line);
       continue;
     }
     // 빈 줄 — 항목 종료
-    if (trimmed === '' && itemLines.length > 0) {
+    if (trimmed === '' && rawItemLines.length > 0) {
       flushItem();
       output.push('<div style="height:4px"></div>');
       continue;
     }
-    // 일반 텍스트 줄
-    if (itemLines.length > 0) {
-      itemLines.push(line); // 항목 내 연속 줄
+    // 일반 텍스트
+    if (rawItemLines.length > 0) {
+      rawItemLines.push(line);
     } else {
-      output.push(trimmed ? '<div style="font-size:13px;line-height:1.8">' + line + '</div>' : '<div style="height:4px"></div>');
+      output.push(trimmed ? '<div style="font-size:13px;line-height:1.8">' + esc(line) + '</div>' : '<div style="height:4px"></div>');
     }
   }
   flushItem();
 
-  return { html: output.join(''), urgentCount: urgentCount };
+  return { html: output.join(''), urgentCount: urgentCount, urgentItems: urgentItems };
 }
 
 // 뉴스 항목 1건 HTML 렌더링
@@ -1481,10 +1493,15 @@ async function loadBriefing() {
       listEl.innerHTML = '<div style="color:var(--text-secondary);padding:40px;text-align:center">아직 브리핑이 없습니다.<br>매일 오전 8시에 자동으로 생성됩니다.</div>';
       return;
     }
+    // 먼저 전체 파싱 결과를 수집 (elemId 보장)
+    var allParsed = data.map(function(b, idx) {
+      return parseBriefingContent(b.content, idx);
+    });
+
     listEl.innerHTML = data.map(function(b, idx) {
       const d = new Date(b.briefing_date).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
       const isToday = b.briefing_date === new Date().toISOString().slice(0,10);
-      const parsed = parseBriefingContent(b.content, idx);
+      const parsed = allParsed[idx];
       const contentHtml = parsed.html;
       const urgentCount = parsed.urgentCount;
       const badgeHtml = isToday ? '<span style="background:var(--accent);color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;margin-left:8px">오늘</span>' : '';
@@ -1511,35 +1528,12 @@ async function loadBriefing() {
         + '</div>';
     }).join('');
 
-    // 긴급 항목 AI 분석 자동 실행 (오늘 브리핑만)
-    data.forEach(function(b, idx) {
-      if (idx !== 0) return; // 오늘(최신) 브리핑만
-      var lines = (b.content || '').split('\n');
-      var itemIdx = 0;
-      var itemLines = [];
-      function tryAnalyze() {
-        if (itemLines.length === 0) return;
-        var block = itemLines.join('\n');
-        var importance = classifyBriefingItemImportance(block);
-        if (importance === '긴급') {
-          var titleLine = '';
-          for (var k = 0; k < itemLines.length; k++) {
-            if (/^• /.test(itemLines[k])) { titleLine = itemLines[k].replace(/^• /, ''); break; }
-          }
-          var elemId = 'bi-' + idx + '-' + itemIdx;
-          analyzeBriefingItem(elemId, titleLine);
-        }
-        itemIdx++;
-        itemLines = [];
-      }
-      for (var li = 0; li < lines.length; li++) {
-        var line = lines[li];
-        if (/^• /.test(line)) { tryAnalyze(); itemLines.push(line); }
-        else if (/^  /.test(line) && itemLines.length > 0) { itemLines.push(line); }
-        else if (itemLines.length > 0) { itemLines.push(line); }
-      }
-      tryAnalyze();
-    });
+    // 최신 브리핑(idx=0)의 긴급 항목 AI 분석 — parseBriefingContent가 수집한 elemId 그대로 사용
+    if (allParsed.length > 0) {
+      allParsed[0].urgentItems.forEach(function(item) {
+        analyzeBriefingItem(item.elemId, item.title);
+      });
+    }
 
   } catch(e) {
     listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">브리핑 로드 실패: ' + e.message + '</div>';
