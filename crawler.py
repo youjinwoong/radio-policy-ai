@@ -124,20 +124,81 @@ def detect_category(title: str) -> str:
 
 
 def parse_date(date_str: str) -> str:
-    """다양한 날짜 형식 → ISO 8601 변환"""
+    """다양한 날짜 형식 → ISO 8601 변환. 파싱 실패 시 빈 문자열 반환."""
     if not date_str:
-        return datetime.now(KST).isoformat()
-    date_str = date_str.strip()
-    for sep in ['.', '/', '-']:
-        date_str = date_str.replace(sep, '-')
-    date_str = re.sub(r'\s+', ' ', date_str)
-    for fmt in ['%Y-%m-%d %H-%M-%S', '%Y-%m-%d %H-%M', '%Y-%m-%d']:
+        return ''
+    s = date_str.strip()
+    now = datetime.now(KST)
+
+    # 1) ISO 8601 / RFC 3339 (meta 태그에서 추출한 날짜)
+    m = re.match(r'(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?', s)
+    if m:
+        y, mo, d, h, mi, sec = m.group(1,2,3,4,5,6)
+        sec = sec or '00'
         try:
-            dt = datetime.strptime(date_str[:len(fmt.replace('%-', '-'))], fmt)
-            return dt.replace(tzinfo=KST).isoformat()
+            dt = datetime(int(y), int(mo), int(d), int(h), int(mi), int(sec), tzinfo=KST)
+            return dt.isoformat()
         except Exception:
             pass
-    return datetime.now(KST).isoformat()
+
+    # 2) YYYY.MM.DD HH:MM:SS  /  YYYY.MM.DD HH:MM  /  YYYY.MM.DD
+    m = re.match(r'(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        h  = int(m.group(4)) if m.group(4) else 0
+        mi = int(m.group(5)) if m.group(5) else 0
+        sec = int(m.group(6)) if m.group(6) else 0
+        try:
+            dt = datetime(y, mo, d, h, mi, sec, tzinfo=KST)
+            return dt.isoformat()
+        except Exception:
+            pass
+
+    # 3) 한국어 형식: 2024년 05월 28일 14:30
+    m = re.match(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        h  = int(m.group(4)) if m.group(4) else 0
+        mi = int(m.group(5)) if m.group(5) else 0
+        sec = int(m.group(6)) if m.group(6) else 0
+        try:
+            dt = datetime(y, mo, d, h, mi, sec, tzinfo=KST)
+            return dt.isoformat()
+        except Exception:
+            pass
+
+    # 4) 상대 날짜: N분 전, N시간 전, N일 전
+    m = re.search(r'(\d+)\s*(분|시간|일)\s*전', s)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        if unit == '분':
+            dt = now - timedelta(minutes=n)
+        elif unit == '시간':
+            dt = now - timedelta(hours=n)
+        else:
+            dt = now - timedelta(days=n)
+        return dt.isoformat()
+
+    # 5) 어제
+    if '어제' in s:
+        dt = now - timedelta(days=1)
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    # 6) MM.DD 형식 (연도 없음) → 현재 연도로 보정
+    m = re.match(r'^(\d{1,2})[./](\d{1,2})$', s)
+    if m:
+        mo, d = int(m.group(1)), int(m.group(2))
+        try:
+            dt = datetime(now.year, mo, d, tzinfo=KST)
+            # 미래 날짜라면 전년도로
+            if dt > now:
+                dt = dt.replace(year=now.year - 1)
+            return dt.isoformat()
+        except Exception:
+            pass
+
+    return ''  # 파싱 실패 — 호출자가 fallback 처리
 
 
 # ═══════════════════════════════════════════════════════
@@ -626,13 +687,41 @@ def crawl_news_site(cfg: dict) -> list:
 #  기사 본문 수집
 # ═══════════════════════════════════════════════════════
 
-def fetch_article_body(url: str, source: str) -> str:
-    """기사 URL에서 본문 텍스트 추출 (최대 1500자)"""
+def fetch_article_body(url: str, source: str) -> tuple:
+    """기사 URL에서 본문 텍스트와 발행일 추출. 반환: (body: str, published_at: str)"""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=8)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
-        # 소스별 본문 셀렉터
+
+        # ── 발행일 추출 (meta 태그 우선) ───────────────────
+        pub_date = ''
+
+        # 1순위: Open Graph / schema.org meta 태그
+        for attr_name, attr_val in [
+            ('property', 'article:published_time'),
+            ('property', 'og:article:published_time'),
+            ('itemprop', 'datePublished'),
+            ('name', 'article:published_time'),
+            ('name', 'publishdate'),
+            ('name', 'date'),
+        ]:
+            tag = soup.find('meta', attrs={attr_name: attr_val})
+            if tag and tag.get('content'):
+                parsed = parse_date(tag['content'])
+                if parsed:
+                    pub_date = parsed
+                    break
+
+        # 2순위: <time datetime="..."> 태그
+        if not pub_date:
+            for time_tag in soup.find_all('time', datetime=True):
+                parsed = parse_date(time_tag['datetime'])
+                if parsed:
+                    pub_date = parsed
+                    break
+
+        # ── 본문 추출 ───────────────────────────────────────
         selectors_map = {
             '전자신문':    ['div.article_body', 'div#articleBody', 'div.news_view', 'div#articleView'],
             '연합뉴스':    ['div.article-txt', 'article.story-news', 'div#articleWrap'],
@@ -658,16 +747,18 @@ def fetch_article_body(url: str, source: str) -> str:
             'div.view_cont', 'div.view-content', 'div#content',
             'div.article-body', 'div.news_body', 'div.article_txt'
         ]
+        body = ''
         for sel in candidates:
             tag = soup.select_one(sel)
             if tag:
                 text = tag.get_text(separator=' ', strip=True)
                 if len(text) > 100:
-                    return text[:1500]
-        return ''
+                    body = text[:1500]
+                    break
+        return body, pub_date
     except Exception as e:
         print(f'  [본문 수집 실패] {url}: {e}')
-        return ''
+        return '', ''
 
 
 # ═══════════════════════════════════════════════════════
@@ -689,9 +780,19 @@ def save_new_items(items: list, existing_urls: set) -> list:
         print(f'[본문 수집] {len(unique_new)}건 시작...')
         for item in unique_new:
             if item.get('url'):
-                body = fetch_article_body(item['url'], item.get('source', ''))
+                body, article_date = fetch_article_body(item['url'], item.get('source', ''))
                 item['content'] = body if body else None
                 item['content_fetched_at'] = datetime.now(KST).isoformat()
+
+                # 발행일 확정: 목록 페이지 날짜 → 기사 본문 meta 날짜 → 현재 시각(최후 수단)
+                current_pub = item.get('published_at', '')
+                if not current_pub and article_date:
+                    item['published_at'] = article_date
+                    print(f'  [날짜 보정] {item.get("title","")[:30]}... → {article_date}')
+                elif not current_pub:
+                    item['published_at'] = datetime.now(KST).isoformat()
+                    print(f'  [날짜 미확인] {item.get("title","")[:30]}... → 현재 시각 사용')
+
                 time.sleep(1)  # 서버 부하 방지
 
         # 긴급도 분류 추가
