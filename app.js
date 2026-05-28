@@ -960,7 +960,7 @@ function renderNewsList() {
 
   listEl.innerHTML = sorted.map(function(n) {
     var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
-    var date = new Date(n.published_at || n.created_at).toLocaleDateString('ko-KR', {month:'2-digit', day:'2-digit'});
+    var date = new Date(n.published_at || n.created_at).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
     var isSelected = String(n.id) === String(selectedNewsId);
     var urlIcon = n.url
       ? ' <a href="' + n.url + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:11px;vertical-align:middle"><i class="ti ti-external-link"></i></a>'
