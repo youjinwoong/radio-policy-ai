@@ -26,6 +26,7 @@
     <div class="nav-group">
       <div class="nav-label">자문</div>
       <div class="nav-item" onclick="go('chat',this)"><i class="ti ti-message-circle"></i>AI 자문</div>
+      <div class="nav-item" onclick="go('diff',this)"><i class="ti ti-git-diff"></i>법령 DIFF 분석</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">기술 용어</div>
@@ -136,6 +137,61 @@
           <div class="chat-input-wrap" style="margin-top:12px">
             <input type="text" id="chat-input" placeholder="질문을 입력하세요... (예: 3.5GHz 재할당 조건은?)" onkeydown="if(event.key==='Enter' && !event.shiftKey) sendChat()" />
             <button class="btn btn-primary" id="send-btn" onclick="sendChat()"><i class="ti ti-send"></i>전송</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 법령 DIFF 분석 -->
+      <div class="panel" id="panel-diff">
+        <div style="margin-bottom:16px">
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px">
+            <i class="ti ti-git-diff" style="color:var(--accent);margin-right:4px"></i>법령 DIFF 분석
+          </div>
+          <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">
+            입법예고·행정예고 단계에서 <b style="color:var(--text-primary)">개정 전·후 파일</b>을 올리면 변경된 조문과 SKT 영향도를 자동 분석합니다.
+          </div>
+        </div>
+
+        <!-- 파일 업로드 2열 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+          <div>
+            <div style="font-size:11px;font-weight:600;color:#ef4444;margin-bottom:6px">① 개정 전 (구 법령)</div>
+            <div id="drop-before" class="diff-drop-zone" onclick="document.getElementById('file-before').click()" ondragover="event.preventDefault()" ondrop="handleDiffDrop('before',event)">
+              <i class="ti ti-file-text" style="font-size:20px;opacity:.4"></i>
+              <div style="font-size:12px">클릭 또는 드래그</div>
+              <div style="font-size:10px;opacity:.6">.txt · .pdf · .md</div>
+            </div>
+            <input type="file" id="file-before" accept=".txt,.pdf,.md,.hwp" style="display:none" onchange="handleDiffFile('before',this)">
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:#22c55e;margin-bottom:6px">② 개정 후 (신 법령)</div>
+            <div id="drop-after" class="diff-drop-zone" onclick="document.getElementById('file-after').click()" ondragover="event.preventDefault()" ondrop="handleDiffDrop('after',event)">
+              <i class="ti ti-file-text" style="font-size:20px;opacity:.4"></i>
+              <div style="font-size:12px">클릭 또는 드래그</div>
+              <div style="font-size:10px;opacity:.6">.txt · .pdf · .md</div>
+            </div>
+            <input type="file" id="file-after" accept=".txt,.pdf,.md,.hwp" style="display:none" onchange="handleDiffFile('after',this)">
+          </div>
+        </div>
+
+        <!-- 분석 버튼 -->
+        <button id="diff-analyze-btn" class="btn btn-primary" onclick="runDiffAnalysis()" disabled
+          style="width:100%;justify-content:center;margin-bottom:16px;opacity:.5">
+          <i class="ti ti-search"></i> 변경사항 분석 시작 (두 파일 업로드 후 활성화)
+        </button>
+
+        <!-- 결과 영역 -->
+        <div id="diff-result" style="display:none">
+          <!-- AI 분석 카드 -->
+          <div class="card" style="cursor:default;padding:16px;margin-bottom:12px" id="diff-ai-result"></div>
+          <!-- 조문 변경 DIFF 뷰 -->
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;display:flex;align-items:center;gap:8px">
+              ● 조문별 변경사항
+              <span style="background:rgba(239,68,68,.1);color:#ef4444;font-size:10px;padding:1px 7px;border-radius:4px">− 삭제/변경</span>
+              <span style="background:rgba(34,197,94,.1);color:#16a34a;font-size:10px;padding:1px 7px;border-radius:4px">+ 추가/변경</span>
+            </div>
+            <div id="diff-view" style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:12px;max-height:420px;overflow-y:auto"></div>
           </div>
         </div>
       </div>
@@ -574,7 +630,9 @@
     </div>
   </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js"></script>
-  <script src="app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

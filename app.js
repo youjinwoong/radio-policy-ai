@@ -1010,6 +1010,250 @@ async function markRead(id) {
 function filterNews(el, cat) { filterNewsByImportance(el, cat); }
 
 // ════════════════════════════════════════════
+//  법령 DIFF 분석
+// ════════════════════════════════════════════
+var diffState = { before: null, after: null };  // { text, name }
+
+function handleDiffDrop(type, event) {
+  event.preventDefault();
+  var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+  if (!file) return;
+  _loadDiffFile(type, file);
+}
+
+function handleDiffFile(type, input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  _loadDiffFile(type, file);
+}
+
+async function _loadDiffFile(type, file) {
+  var dropEl = document.getElementById('drop-' + type);
+  var origHtml = dropEl ? dropEl.innerHTML : '';
+  try {
+    if (dropEl) {
+      dropEl.innerHTML = '<span style="display:inline-block;width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite"></span><div style="font-size:11px">읽는 중...</div>';
+    }
+    var text = await _readFileAsText(file);
+    diffState[type] = { text: text, name: file.name };
+
+    if (dropEl) {
+      dropEl.classList.add('loaded');
+      dropEl.innerHTML =
+        '<i class="ti ti-check" style="font-size:18px;color:var(--green)"></i>' +
+        '<div style="font-size:11px;font-weight:600;color:var(--green);word-break:break-all;max-width:140px">' + file.name + '</div>' +
+        '<div style="font-size:10px;color:var(--text-tertiary)">' + Math.ceil(text.length / 1000) + 'KB · ' + text.split('\n').length + '줄</div>';
+    }
+
+    // 두 파일 모두 준비되면 버튼 활성화
+    var btn = document.getElementById('diff-analyze-btn');
+    if (btn && diffState.before && diffState.after) {
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.innerHTML = '<i class="ti ti-search"></i> 변경사항 분석 시작';
+    }
+  } catch(e) {
+    alert('파일 읽기 실패: ' + e.message);
+    if (dropEl) { dropEl.classList.remove('loaded'); dropEl.innerHTML = origHtml; }
+  }
+}
+
+async function _readFileAsText(file) {
+  if (file.name.toLowerCase().endsWith('.pdf')) {
+    if (typeof pdfjsLib === 'undefined') throw new Error('PDF 파서가 로드되지 않았습니다. 잠시 후 다시 시도하거나 .txt 파일로 변환해 업로드하세요.');
+    var buf = await file.arrayBuffer();
+    var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    var pages = [];
+    for (var i = 1; i <= pdf.numPages; i++) {
+      var page = await pdf.getPage(i);
+      var content = await page.getTextContent();
+      pages.push(content.items.map(function(item) { return item.str; }).join(' '));
+    }
+    return pages.join('\n');
+  }
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload  = function(e) { resolve(e.target.result); };
+    reader.onerror = function()  { reject(new Error('FileReader 오류')); };
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+// ── 조문 단위 DIFF 알고리즘 ──────────────────────────────
+function _computeDiff(beforeText, afterText) {
+  // 한국 법령 조문 단위로 분리: 제X조, 항 번호, 번호 목록
+  function toChunks(text) {
+    return text
+      .split(/\n(?=제\d+조|제\s*\d+\s*조|[\①-⑳]|[①②③④⑤⑥⑦⑧⑨⑩]|\d+\.\s|[가-힣]\.\s)/)
+      .map(function(s) { return s.trim(); })
+      .filter(function(s) { return s.length > 5; });
+  }
+  var bChunks = toChunks(beforeText);
+  var aChunks = toChunks(afterText);
+
+  // 첫 50자를 키로 사용해 추가/삭제 분류
+  function key(s) { return s.replace(/\s+/g,' ').slice(0,60); }
+  var bKeys = new Set(bChunks.map(key));
+  var aKeys = new Set(aChunks.map(key));
+
+  var removed  = bChunks.filter(function(c) { return !aKeys.has(key(c)); });
+  var added    = aChunks.filter(function(c) { return !bKeys.has(key(c)); });
+
+  return { removed: removed, added: added };
+}
+
+function _renderDiffView(diffResult) {
+  var el = document.getElementById('diff-view');
+  if (!el) return;
+  var removed = diffResult.removed;
+  var added   = diffResult.added;
+
+  if (removed.length === 0 && added.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:8px">변경된 조문이 자동 감지되지 않았습니다.<br>조문 형식이 다른 경우 아래 AI 분석 결과를 참고하세요.</div>';
+    return;
+  }
+
+  function esc(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  var html = '';
+
+  removed.forEach(function(c) {
+    html += '<div style="background:rgba(239,68,68,.07);border-left:3px solid #ef4444;padding:6px 10px;margin-bottom:4px;border-radius:0 4px 4px 0">' +
+      '<div style="font-size:10px;font-weight:700;color:#ef4444;margin-bottom:2px">− 삭제 / 변경 전</div>' +
+      '<div style="font-size:11px;color:#7f1d1d;white-space:pre-wrap;line-height:1.6">' + esc(c.slice(0,400)) + (c.length>400?'…':'') + '</div>' +
+    '</div>';
+  });
+
+  added.forEach(function(c) {
+    html += '<div style="background:rgba(34,197,94,.07);border-left:3px solid #22c55e;padding:6px 10px;margin-bottom:4px;border-radius:0 4px 4px 0">' +
+      '<div style="font-size:10px;font-weight:700;color:#16a34a;margin-bottom:2px">+ 추가 / 변경 후</div>' +
+      '<div style="font-size:11px;color:#14532d;white-space:pre-wrap;line-height:1.6">' + esc(c.slice(0,400)) + (c.length>400?'…':'') + '</div>' +
+    '</div>';
+  });
+
+  el.innerHTML = html;
+}
+
+// ── 메인 분석 함수 ────────────────────────────────────────
+async function runDiffAnalysis() {
+  if (!diffState.before || !diffState.after) return;
+  var { claudeKey } = getConfig();
+  if (!claudeKey) { alert('Claude API 키가 설정에 없습니다.'); return; }
+
+  var btn       = document.getElementById('diff-analyze-btn');
+  var resultEl  = document.getElementById('diff-result');
+  var aiResultEl = document.getElementById('diff-ai-result');
+
+  if (btn) { btn.disabled = true; btn.style.opacity = '.6'; btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:6px"></span>분석 중...'; }
+  if (resultEl)   resultEl.style.display = 'block';
+  if (aiResultEl) aiResultEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);padding:12px"><span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite"></span>AI 분석 중 (Claude Sonnet)…</div>';
+
+  try {
+    // DIFF 시각화
+    var diffResult = _computeDiff(diffState.before.text, diffState.after.text);
+    _renderDiffView(diffResult);
+
+    // Claude 호출 (앞 4000자씩 — 실무 법령 기준 충분한 분량)
+    var bExcerpt = diffState.before.text.slice(0, 4000);
+    var aExcerpt = diffState.after.text.slice(0, 4000);
+
+    var sysMsg =
+      'SK텔레콤 CR센터 기술정책팀 전파정책 전문가 수석 위원. ' +
+      '개정 전·후 법령 원문을 비교하여 SKT 사업에 미치는 영향을 구조적으로 분석한다. ' +
+      '반드시 아래 XML 형식으로만 답변:\n' +
+      '<summary>주요 변경사항 요약 (3~5줄, 조문 번호 포함)</summary>\n' +
+      '<risks>SKT에 불리한 독소조항 (조문 번호·내용·이유 명시. 없으면 "없음")</risks>\n' +
+      '<favorable>SKT에 유리한 조항 (조문 번호·내용·이유 명시. 없으면 "없음")</favorable>\n' +
+      '<actions>팀 대응 액션 아이템 (각 항목을 || 로 구분)</actions>\n' +
+      '<urgency>즉시대응/금주검토/중장기검토 중 하나</urgency>';
+
+    var userMsg =
+      '[파일명: ' + diffState.before.name + ' → ' + diffState.after.name + ']\n\n' +
+      '[개정 전]\n' + bExcerpt + '\n\n' +
+      '[개정 후]\n' + aExcerpt;
+
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2500, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
+    });
+    var data = await res.json();
+    var txt = (data.content && data.content[0] && data.content[0].text) || '';
+
+    var summaryM   = txt.match(/<summary>([\s\S]*?)<\/summary>/);
+    var risksM     = txt.match(/<risks>([\s\S]*?)<\/risks>/);
+    var favorableM = txt.match(/<favorable>([\s\S]*?)<\/favorable>/);
+    var actionsM   = txt.match(/<actions>([\s\S]*?)<\/actions>/);
+    var urgencyM   = txt.match(/<urgency>([\s\S]*?)<\/urgency>/);
+
+    var summary   = summaryM   ? summaryM[1].trim()   : '분석 결과를 파싱하지 못했습니다.';
+    var risks     = risksM     ? risksM[1].trim()     : '없음';
+    var favorable = favorableM ? favorableM[1].trim() : '없음';
+    var actions   = actionsM   ? actionsM[1].trim().split('||').map(function(a){return a.trim();}).filter(Boolean) : [];
+    var urgency   = urgencyM   ? urgencyM[1].trim()   : '';
+
+    var urgencyColor = urgency === '즉시대응' ? '#ef4444' : urgency === '금주검토' ? '#f59e0b' : '#22c55e';
+
+    var actionsHtml = actions.map(function(a, i) {
+      return '<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--border-light)">' +
+        '<span style="background:var(--accent);color:#fff;border-radius:50%;width:18px;height:18px;min-width:18px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-top:1px">' + (i+1) + '</span>' +
+        '<span style="font-size:12px;line-height:1.6">' + a + '</span>' +
+      '</div>';
+    }).join('');
+
+    if (aiResultEl) {
+      aiResultEl.innerHTML =
+        // 헤더: 파일명 + 대응 긴급도
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">' +
+          '<span style="font-size:11px;background:rgba(239,68,68,.1);color:#ef4444;padding:2px 8px;border-radius:4px;white-space:nowrap">' + diffState.before.name + '</span>' +
+          '<i class="ti ti-arrow-right" style="color:var(--text-tertiary);font-size:13px;flex-shrink:0"></i>' +
+          '<span style="font-size:11px;background:rgba(34,197,94,.1);color:#16a34a;padding:2px 8px;border-radius:4px;white-space:nowrap">' + diffState.after.name + '</span>' +
+          (urgency ? '<span style="margin-left:auto;font-size:11px;font-weight:700;color:' + urgencyColor + ';background:rgba(0,0,0,.04);padding:2px 8px;border-radius:4px;white-space:nowrap">⚡ ' + urgency + '</span>' : '') +
+        '</div>' +
+
+        // 주요 변경사항
+        '<div style="margin-bottom:14px">' +
+          '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● 주요 변경사항</div>' +
+          '<div style="font-size:12px;line-height:1.8;color:var(--text-primary)">' + summary.replace(/\n/g,'<br>') + '</div>' +
+        '</div>' +
+
+        // 독소조항 (불리)
+        (risks !== '없음' && risks ?
+          '<div style="margin-bottom:14px;padding:10px 14px;background:rgba(239,68,68,.06);border-radius:var(--radius-md);border-left:3px solid #ef4444">' +
+            '<div style="font-size:10px;font-weight:700;color:#ef4444;margin-bottom:6px">⚠ SKT 불리 조항 · 독소조항</div>' +
+            '<div style="font-size:12px;line-height:1.8;color:var(--text-primary)">' + risks.replace(/\n/g,'<br>') + '</div>' +
+          '</div>' : '') +
+
+        // 유리 조항
+        (favorable !== '없음' && favorable ?
+          '<div style="margin-bottom:14px;padding:10px 14px;background:rgba(34,197,94,.06);border-radius:var(--radius-md);border-left:3px solid #22c55e">' +
+            '<div style="font-size:10px;font-weight:700;color:#16a34a;margin-bottom:6px">✓ SKT 유리 조항</div>' +
+            '<div style="font-size:12px;line-height:1.8;color:var(--text-primary)">' + favorable.replace(/\n/g,'<br>') + '</div>' +
+          '</div>' : '') +
+
+        // 팀 액션
+        (actionsHtml ?
+          '<div>' +
+            '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● 팀 액션 아이템</div>' +
+            actionsHtml +
+          '</div>' : '') +
+
+        // AI 자문 연동
+        '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">' +
+          '<button onclick="askQ(\'개정된 법령의 SKT 영향을 상세히 분석해줘. 법령명: ' + diffState.after.name.replace(/'/g,"\\'") + '\')" class="btn btn-primary" style="width:100%;font-size:12px;justify-content:center">' +
+            '<i class="ti ti-message-2"></i> AI 자문에서 추가 질의' +
+          '</button>' +
+        '</div>';
+    }
+
+  } catch(e) {
+    console.warn('DIFF 분석 오류:', e);
+    if (aiResultEl) aiResultEl.innerHTML = '<div style="color:#ef4444;font-size:12px;padding:12px">분석 실패: ' + e.message + '</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerHTML = '<i class="ti ti-refresh"></i> 다시 분석'; }
+  }
+}
+
+// ════════════════════════════════════════════
 //  Daily Briefing — Supabase daily_briefings 표시
 // ════════════════════════════════════════════
 async function loadBriefing() {
@@ -1231,7 +1475,7 @@ function go(page, navEl) {
   if (navEl && navEl.classList) navEl.classList.add('active');
 
   // 상단 바 제목 업데이트
-  var titles = {home:'대시보드', chat:'AI 자문', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', briefing:'Daily Briefing', settings:'설정'};
+  var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', briefing:'Daily Briefing', settings:'설정'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
