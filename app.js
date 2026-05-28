@@ -1438,7 +1438,7 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
 // 긴급 항목 AI 영향도 분석 (briefing 전용)
 async function analyzeBriefingItem(elemId, titleText) {
   var el = document.getElementById(elemId);
-  if (!el) return;
+  if (!el) { console.warn('[analyzeBriefingItem] elem not found:', elemId); return; }
   var { claudeKey } = getConfig();
   if (!claudeKey) {
     el.innerHTML = '<span style="font-size:11px;color:var(--text-secondary)">Claude API 키가 설정되지 않아 분석을 건너뜁니다.</span>';
@@ -1528,11 +1528,20 @@ async function loadBriefing() {
         + '</div>';
     }).join('');
 
-    // 최신 브리핑(idx=0)의 긴급 항목 AI 분석 — parseBriefingContent가 수집한 elemId 그대로 사용
+    // 최신 브리핑(idx=0)의 긴급 항목 AI 분석 — DOM 렌더링 완료 후 실행
     if (allParsed.length > 0) {
-      allParsed[0].urgentItems.forEach(function(item) {
-        analyzeBriefingItem(item.elemId, item.title);
-      });
+      var urgentItems0 = allParsed[0].urgentItems;
+      setTimeout(function() {
+        urgentItems0.forEach(function(item) {
+          var chk = document.getElementById(item.elemId);
+          if (!chk) {
+            console.warn('[briefing] 분석 대상 elem 없음:', item.elemId, '— 렌더링 확인 필요');
+          } else {
+            console.log('[briefing] 분석 시작:', item.elemId, item.title);
+          }
+          analyzeBriefingItem(item.elemId, item.title);
+        });
+      }, 0);
     }
 
   } catch(e) {
