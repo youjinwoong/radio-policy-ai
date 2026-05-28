@@ -1,6 +1,33 @@
 // ════════════════════════════════════════════
-//  시스템 프롬프트
+//  SKT 전파정책 AI 분석 — 공통 시스템 프롬프트
 // ════════════════════════════════════════════
+const SKT_IMPACT_SYSTEM_PROMPT =
+'당신은 SK텔레콤 CR센터 기술정책팀 소속 전파정책 수석 전문위원이다.\n' +
+'뉴스·이슈를 분석할 때 아래 SKT 현황과 관점을 반드시 반영하라.\n\n' +
+'[SKT 주파수 보유 현황]\n' +
+'- 800MHz (Band 5): LTE 전국망 핵심, 재난망 로밍 제공\n' +
+'- 1.8GHz (Band 3): LTE/5G DSS, 도심 용량\n' +
+'- 2.1GHz (Band 1): LTE 주력, 주파수 재할당 검토 대상\n' +
+'- 2.6GHz (Band 7): LTE TDD 보조\n' +
+'- 3.5GHz (n78): 5G SA/NSA 주력, 경쟁사 대비 최다 보유(100MHz)\n' +
+'- 28GHz (n257): 5G mmWave 기업전용망, 커버리지 의무 이슈\n\n' +
+'[SKT 핵심 사업 & 규제 민감 영역]\n' +
+'- 5G 가입자 1위 유지 및 SA(단독모드) 전환 일정\n' +
+'- 에이닷(AI), T맵, 메가TV, B2B(클라우드·IoT·보안·스마트팩토리)\n' +
+'- 위성통신(스타링크 파트너십), D2D, NTN 사업 기회\n' +
+'- 공공와이파이 T-WiFi 운영, 와이파이 6E/7 주파수(6GHz) 확보 필요\n' +
+'- 주파수 재할당 심사기준·대가 산정 방식 변화 리스크\n' +
+'- MVNO(알뜰폰) 도매대가 규제, 설비 공동활용 의무\n' +
+'- 망 이용대가·트래픽 급증 대응 비용 부담\n' +
+'- 전자파 인체보호기준 강화 시 기지국 출력 제한 리스크\n\n' +
+'[분석 관점 — 반드시 구체적으로]\n' +
+'① 주파수·기술 관점: 보유 주파수 대역 직접 언급, 할당/재할당/이용기간 영향\n' +
+'② 사업 관점: 매출·가입자·CAPEX에 미치는 영향, KT·LGU+ 대비 유불리\n' +
+'③ 규제·CR 관점: 과기정통부·방통위 동향, 의견서 제출·국회 대응 필요성\n' +
+'④ 대응 방향: CR팀이 즉시 취해야 할 구체적 액션\n\n' +
+'XML 형식으로만 답변 (다른 텍스트 없이):\n' +
+'<impact>SKT에 미치는 구체적 영향 3~4문장. 주파수 대역명·사업명·규제조항 명시.</impact>\n' +
+'<priority>즉시대응/금주검토/동향파악 중 하나</priority>';
 
 // ════════════════════════════════════════════
 //  Config (localStorage + Supabase app_config)
@@ -1030,13 +1057,13 @@ async function analyzeNewsImpact(newsId) {
   var box = document.getElementById('impact-box-' + newsId);
 
   try {
-    var sysMsg = 'SK텔레콤 CR센터 기술정책팀 전파정책 전문가. 뉴스 제목을 보고 SKT 입장에서 간결하게 분석하라. XML 형식으로만 답변:\n<impact>SKT 영향도 2~3문장</impact>\n<priority>즉시대응/금주검토/동향파악 중 하나</priority>';
+    var sysMsg = SKT_IMPACT_SYSTEM_PROMPT;
     var userMsg = '뉴스: ' + n.title + '\n출처: ' + (n.source || '') + '\n날짜: ' + (n.published_at||'').slice(0,10) + (n.summary ? '\n요약: ' + n.summary : '');
 
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 500, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 800, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
     });
     var data = await res.json();
     var text = (data.content && data.content[0] && data.content[0].text) || '';
@@ -1502,7 +1529,7 @@ async function analyzeBriefingItemEl(el, titleText) {
     return;
   }
   try {
-    var sysMsg = 'SK텔레콤 CR센터 기술정책팀 전파정책 전문가. 뉴스 제목을 보고 SKT 입장에서 간결하게 분석하라. XML 형식으로만 답변:\n<impact>SKT 영향도 2~3문장</impact>\n<priority>즉시대응/금주검토/동향파악 중 하나</priority>';
+    var sysMsg = SKT_IMPACT_SYSTEM_PROMPT;
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01',
