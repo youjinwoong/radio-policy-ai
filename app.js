@@ -1427,7 +1427,7 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
     }
   }
 
-  var titleHtml = '<span style="font-weight:500;font-size:13px;line-height:1.6">' + titleLine + '</span>';
+  var titleHtml = '<span data-news-title="1" style="font-weight:500;font-size:13px;line-height:1.6">' + titleLine + '</span>';
   var summaryHtml = summaryLines.map(function(s) {
     return '<div style="font-size:12px;color:var(--text-secondary);padding-left:4px;margin-top:3px;line-height:1.6">→ ' + s + '</div>';
   }).join('');
@@ -1572,7 +1572,7 @@ async function loadBriefing() {
       console.log('[briefing] 긴급 분석 대상 (data attr):', urgentDivs.length, '개');
       urgentDivs.forEach(function(div) {
         var container = div.parentElement;
-        var titleEl = container ? container.querySelector('span[style*="font-weight:500"]') : null;
+        var titleEl = container ? container.querySelector('[data-news-title]') : null;
         var titleText = titleEl ? titleEl.textContent.trim() : '';
         analysisTargets.push({ el: div, title: titleText });
       });
@@ -1583,7 +1583,7 @@ async function loadBriefing() {
       console.log('[briefing] fallback bi-* 탐색 결과:', allBiDivs.length, '개');
       allBiDivs.forEach(function(div) {
         var container = div.parentElement;
-        var titleEl = container ? container.querySelector('span[style*="font-weight:500"]') : null;
+        var titleEl = container ? container.querySelector('[data-news-title]') : null;
         var titleText = titleEl ? titleEl.textContent.trim() : '';
         analysisTargets.push({ el: div, title: titleText });
       });
