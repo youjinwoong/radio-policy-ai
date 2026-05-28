@@ -814,6 +814,47 @@ def save_new_items(items: list, existing_urls: set) -> list:
 #  텔레그램 알림 (긴급 기사 전용)
 # ═══════════════════════════════════════════════════════
 
+def send_morning_telegram(items: list):
+    """아침 8시 일일 브리핑 Telegram 발송"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print('[텔레그램 모닝] 환경변수 미설정 — 건너뜀')
+        return
+    if not items:
+        print('[텔레그램 모닝] 신규 기사 없음 — 건너뜀')
+        return
+
+    now_str = datetime.now(KST).strftime('%Y.%m.%d')
+    urgent = [i for i in items if i.get('importance') == '긴급']
+    normal = [i for i in items if i.get('importance') == '보통']
+    ref    = [i for i in items if i.get('importance') == '참고']
+
+    lines = [f'☀️ *[전파정책 AI] {now_str} 아침 브리핑* — 신규 {len(items)}건\n']
+    for label, icon, group in [('긴급', '🔴', urgent), ('보통', '🟡', normal), ('참고', '🟢', ref)]:
+        if group:
+            lines.append(f'{icon} *{label} {len(group)}건*')
+            for item in group[:5]:
+                lines.append(f'  · {item.get("title", "")} ({item.get("source", "")})')
+            lines.append('')
+
+    lines.append('📊 대시보드: https://youjinwoong.github.io/radio-policy-ai/')
+    text = '\n'.join(lines)
+
+    api_url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+    try:
+        resp = requests.post(api_url, json={
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': text,
+            'parse_mode': 'Markdown',
+            'disable_web_page_preview': True,
+        }, timeout=15)
+        if resp.status_code == 200:
+            print(f'[텔레그램 모닝] {len(items)}건 발송 완료')
+        else:
+            print(f'[텔레그램 모닝 오류] HTTP {resp.status_code}: {resp.text[:200]}')
+    except Exception as e:
+        print(f'[텔레그램 모닝 오류] {e}')
+
+
 def send_telegram(urgent_items: list):
     """긴급 기사를 Telegram Bot으로 즉시 알림"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -1017,7 +1058,25 @@ def main():
     else:
         print('[긴급] 해당 없음')
 
-    send_email(new_items)
+    # 아침 8시 일일 브리핑 (이메일 + 텔레그램)
+    current_hour = datetime.now(KST).hour
+    if current_hour == 8:
+        print('[모닝 브리핑] 아침 8시 — 지난 24시간 기사 발송')
+        cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
+        try:
+            resp = sb.table('news_feed').select('*') \
+                .gte('created_at', cutoff) \
+                .order('published_at', desc=True) \
+                .limit(100) \
+                .execute()
+            morning_items = resp.data or []
+            print(f'[모닝 브리핑] {len(morning_items)}건 대상')
+            send_email(morning_items)
+            send_morning_telegram(morning_items)
+        except Exception as e:
+            print(f'[모닝 브리핑 오류] {e}')
+    else:
+        print(f'[모닝 브리핑] 현재 {current_hour}시 — 8시 아님, 건너뜀')
 
     print(f'{"="*50}')
     print('[완료]')
