@@ -22,7 +22,7 @@ jobs:
       - name: 의존성 패키지 설치
         run: |
           pip install --upgrade pip
-          pip install requests beautifulsoup4 supabase
+          pip install requests beautifulsoup4 supabase anthropic
 
       - name: 크롤러 실행
         env:
