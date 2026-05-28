@@ -255,6 +255,18 @@ function filterTerms(query) {
   renderTerms(filtered);
 }
 
+// 마크다운 → HTML 변환 (bold, 단락 분리)
+function mdToHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')  // escape first
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')                  // **bold**
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')                              // *italic*
+    .split(/\n\n+/)
+    .map(function(p) { return '<p style="margin:0 0 11px 0;line-height:1.75">' + p.replace(/\n/g,'<br>') + '</p>'; })
+    .join('');
+}
+
 function renderTermsModalHtml(t) {
   var catColor = {주파수:'badge-purple', 네트워크:'badge-teal', 위성:'badge-blue', 단말:'badge-amber', 규제:'badge-red', 기타:'badge-amber'};
   var cc = catColor[t.category] || 'badge-amber';
@@ -262,39 +274,44 @@ function renderTermsModalHtml(t) {
     return '<span class="badge badge-amber" style="cursor:pointer" onclick="closeTermsModal();document.getElementById(&quot;terms-search-input&quot;).value=&quot;' + r + '&quot;;filterTerms(&quot;' + r + '&quot;)">' + r + '</span>';
   }).join(' ');
 
-  var headerHtml = '<div style="margin-bottom:16px">' +
-    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+  var headerHtml =
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">' +
       '<span style="font-size:20px;font-weight:700;color:var(--text-primary)">' + t.term + '</span>' +
       (t.term_en ? '<span style="font-size:13px;color:var(--text-secondary)">' + t.term_en + '</span>' : '') +
       '<span class="badge ' + cc + '">' + (t.category||'기타') + '</span>' +
     '</div>' +
-    (t.source ? '<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">📌 출처: ' + t.source + '</div>' : '') +
-  '</div>';
+    (t.source ? '<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">📌 출처: ' + t.source + '</div>' : '<div style="margin-bottom:10px"></div>');
 
-  var bodyHtml = (t.definition ? '<div style="font-size:13px;font-weight:500;margin-bottom:12px;padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md)">' + t.definition + '</div>' : '');
+  // 한 줄 정의
+  var defHtml = t.definition
+    ? '<div style="font-size:13px;font-weight:500;margin-bottom:14px;padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md);border-left:3px solid var(--accent)">' + t.definition + '</div>'
+    : '';
+
+  var footerHtml =
+    (related ? '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)"><span style="font-size:11px;color:var(--text-secondary);margin-right:6px">관련 용어</span>' + related + '</div>' : '') +
+    '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="btn" style="font-size:11px;padding:4px 10px" onclick="generateTermDetail(&quot;' + t.id + '&quot;)" id="gen-btn-' + t.id + '">↺ 재생성</button>' +
+      '<button class="btn" onclick="askQ(&quot;' + t.term + ' 기술에 대해 자세히 설명해줘&quot;)">AI 자문에서 질문</button>' +
+    '</div>';
 
   if (t.description) {
-    // 캐시된 설명 있음 — 즉시 표시
-    bodyHtml +=
-      '<div style="font-size:13px;color:var(--text-primary);line-height:1.7;margin-bottom:16px;white-space:pre-wrap">' + t.description + '</div>' +
-      (t.diagram_html ? '<div style="margin-bottom:16px;overflow-x:auto">' + t.diagram_html + '</div>' : '') +
-      (related ? '<div style="margin-bottom:12px"><span style="font-size:11px;color:var(--text-secondary);margin-right:6px">관련 용어:</span>' + related + '</div>' : '') +
-      '<div style="display:flex;gap:8px;margin-top:16px">' +
-        '<button class="btn" style="font-size:11px;padding:4px 10px" onclick="generateTermDetail(&quot;' + t.id + '&quot;)" id="gen-btn-' + t.id + '">↺ 재생성</button>' +
-        '<button class="btn" onclick="askQ(&quot;' + t.term + ' 기술에 대해 자세히 설명해줘&quot;)">AI 자문에서 질문</button>' +
-      '</div>';
+    // 캐시된 설명 있음 — 다이어그램 상단, 설명 하단 레이아웃
+    var diagramHtml = t.diagram_html
+      ? '<div style="margin-bottom:16px;padding:12px;background:var(--bg-secondary);border-radius:var(--radius-md);overflow-x:auto;text-align:center">' + t.diagram_html + '</div>'
+      : '';
+    return headerHtml + defHtml + diagramHtml +
+      '<div style="font-size:13px;color:var(--text-primary)">' + mdToHtml(t.description) + '</div>' +
+      footerHtml;
   } else {
     // 설명 없음 — 자동 생성 로딩 상태
-    bodyHtml +=
-      '<div id="gen-body-' + t.id + '" style="padding:24px 0;text-align:center;color:var(--text-secondary)">' +
+    return headerHtml + defHtml +
+      '<div id="gen-body-' + t.id + '" style="padding:28px 0;text-align:center;color:var(--text-secondary)">' +
         '<div style="display:inline-flex;align-items:center;gap:8px;font-size:13px">' +
           '<span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>' +
-          'AI가 상세 설명을 생성하는 중...' +
+          'AI가 개념도와 상세 설명을 생성하는 중...' +
         '</div>' +
       '</div>';
   }
-
-  return headerHtml + bodyHtml;
 }
 
 function openTermsModal(id) {
@@ -327,13 +344,25 @@ async function generateTermDetail(id) {
     var systemMsg = '당신은 이동통신·전파 정책 전문가입니다. 반드시 지정된 XML 태그 형식으로만 답변하세요.';
     var userMsg = '기술 용어 [' + termLabel + '] 에 대해 아래 형식으로 정확히 답변하세요.\n' +
       '분야: ' + (t.category||'기타') + '. 현재 정의: ' + (t.definition||'없음') + '.\n\n' +
-      '<description>\n3~5문단 상세 설명(배경/원리/국내외현황/관련표준)\n</description>\n\n' +
-      '<diagram>\n<svg viewBox="0 0 500 240" xmlns="http://www.w3.org/2000/svg">한국어 개념도. 색상 #6366f1/#10b981/#f59e0b 사용.</svg>\n</diagram>\n\n' +
+      '<description>\n' +
+      '3~5문단 상세 설명. **굵은글씨**로 핵심 개념 강조. 단락 구분은 빈 줄로.\n' +
+      '내용: 개념 배경/기술 원리/국내외 현황/관련 표준 순서로 서술.\n' +
+      '</description>\n\n' +
+      '<diagram>\n' +
+      '아래 조건을 모두 지킨 SVG를 생성하라:\n' +
+      '- viewBox="0 0 680 320" xmlns="http://www.w3.org/2000/svg"\n' +
+      '- 배경: rect fill="#f8fafc" 전체 채움\n' +
+      '- 한국어 레이블 사용, font-family="sans-serif"\n' +
+      '- 주요 구성요소를 박스/원/화살표로 시각화 (최소 4개 요소)\n' +
+      '- 색상: 주요 박스 #6366f1(보라), 보조 #10b981(초록), 강조 #f59e0b(노랑), 배경박스 #e0e7ff\n' +
+      '- 화살표는 marker-end 사용하여 방향 표시\n' +
+      '- 개념 흐름이나 계층 구조를 한눈에 파악할 수 있게\n' +
+      '</diagram>\n\n' +
       '<related>관련용어1,관련용어2,관련용어3</related>';
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers:{'x-api-key':claudeKey,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system:systemMsg,messages:[{role:'user',content:userMsg}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,system:systemMsg,messages:[{role:'user',content:userMsg}]})
     });
     var data = await res.json();
 
