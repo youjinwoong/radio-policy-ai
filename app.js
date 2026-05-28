@@ -25,8 +25,14 @@ const SKT_IMPACT_SYSTEM_PROMPT =
 '② 사업 관점: 매출·가입자·CAPEX에 미치는 영향, KT·LGU+ 대비 유불리\n' +
 '③ 규제·CR 관점: 과기정통부·방통위 동향, 의견서 제출·국회 대응 필요성\n' +
 '④ 대응 방향: CR팀이 즉시 취해야 할 구체적 액션\n\n' +
+'[엄수 사항 — 할루시네이션 방지]\n' +
+'- 뉴스에 명시된 사실만 근거로 쓴다. 뉴스에 없는 내용을 지어내지 않는다.\n' +
+'- SKT 현황 정보는 국내 사업과의 관련성 분석에만 활용한다.\n' +
+'- SKT 해외 사업·자회사 현황은 뉴스에 직접 언급된 경우에만 언급한다.\n' +
+'- 경쟁사(KT·LGU+) 행동은 뉴스에 근거가 있을 때만 언급한다.\n' +
+'- 불확실한 내용은 반드시 "~가능성", "~우려", "~검토 필요" 등으로 표시한다.\n\n' +
 'XML 형식으로만 답변 (다른 텍스트 없이):\n' +
-'<impact>SKT에 미치는 구체적 영향 3~4문장. 주파수 대역명·사업명·규제조항 명시.</impact>\n' +
+'<impact>SKT에 미치는 구체적 영향 2~3문장. 뉴스 근거 + SKT 관련 사업·주파수 명시. 추측은 가능성 표현 사용.</impact>\n' +
 '<priority>즉시대응/금주검토/동향파악 중 하나</priority>';
 
 // ════════════════════════════════════════════
@@ -1058,7 +1064,13 @@ async function analyzeNewsImpact(newsId) {
 
   try {
     var sysMsg = SKT_IMPACT_SYSTEM_PROMPT;
-    var userMsg = '뉴스: ' + n.title + '\n출처: ' + (n.source || '') + '\n날짜: ' + (n.published_at||'').slice(0,10) + (n.summary ? '\n요약: ' + n.summary : '');
+    // 본문이 있으면 최대 2000자까지 포함 — 제목만 줄 때보다 훨씬 정확한 분석 가능
+    var bodySnippet = (n.body || n.content || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+    var userMsg = '제목: ' + n.title +
+      '\n출처: ' + (n.source || '') +
+      '\n날짜: ' + (n.published_at || '').slice(0, 10) +
+      (n.summary ? '\n요약: ' + n.summary : '') +
+      (bodySnippet ? '\n\n본문:\n' + bodySnippet : '');
 
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1530,14 +1542,24 @@ async function analyzeBriefingItemEl(el, titleText) {
   }
   try {
     var sysMsg = SKT_IMPACT_SYSTEM_PROMPT;
+
+    // 뉴스 캐시에서 제목 일치 기사를 찾아 본문 보강
+    var cached = (typeof newsDataCache !== 'undefined') && newsDataCache.find(function(x) {
+      return x.title && titleText && x.title.replace(/\s+/g,'').includes(titleText.replace(/\s+/g,'').slice(0,20));
+    });
+    var bodySnippet = cached ? (cached.body || cached.content || '').replace(/\s+/g,' ').trim().slice(0, 2000) : '';
+    var userContent = '제목: ' + titleText +
+      (cached ? '\n출처: ' + (cached.source||'') + '\n날짜: ' + (cached.published_at||'').slice(0,10) : '') +
+      (bodySnippet ? '\n\n본문:\n' + bodySnippet : '');
+
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01',
                  'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 300,
+        model: 'claude-haiku-4-5-20251001', max_tokens: 800,
         system: sysMsg,
-        messages: [{ role: 'user', content: '뉴스: ' + titleText }]
+        messages: [{ role: 'user', content: userContent }]
       })
     });
     if (!res.ok) throw new Error('API ' + res.status);
