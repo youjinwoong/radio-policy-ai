@@ -1081,6 +1081,13 @@ async function summarizeNews(newsId) {
     return;
   }
 
+  // ② 본문이 없으면 API 호출하지 않고 안내 메시지 표시
+  var bodySnippet = (n.content || '').replace(/\s+/g, ' ').trim().slice(0, 3000);
+  if (!bodySnippet) {
+    box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">본문이 수집되지 않은 기사입니다. 원문 보기를 통해 직접 확인해 주세요.</span>';
+    return;
+  }
+
   var { claudeKey } = getConfig();
   if (!claudeKey) {
     box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">Claude API 키 필요 — 설정에서 입력해 주세요.</span>';
@@ -1088,7 +1095,6 @@ async function summarizeNews(newsId) {
   }
 
   try {
-    var bodySnippet = (n.body || n.content || '').replace(/\s+/g, ' ').trim().slice(0, 3000);
     var userMsg =
       '다음 뉴스를 핵심 포인트 3~5개로 요약하세요.\n' +
       '- 각 포인트를 줄바꿈으로 구분하세요.\n' +
@@ -1149,6 +1155,12 @@ async function analyzeNewsImpact(newsId) {
       body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 800, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
     });
     var data = await res.json();
+
+    // API 오류 응답 명시 처리
+    if (data.error) {
+      throw new Error(data.error.message || 'API 오류');
+    }
+
     var text = (data.content && data.content[0] && data.content[0].text) || '';
 
     var impactM   = text.match(/<impact>([\s\S]*?)<\/impact>/);
@@ -1159,14 +1171,21 @@ async function analyzeNewsImpact(newsId) {
 
     var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
 
-    if (box && impactText) {
-      box.innerHTML =
-        '<div style="font-size:12px;line-height:1.7;margin-bottom:8px">' + impactText + '</div>' +
-        (priorityText ? '<div style="font-size:11px;color:' + rule.color + ';font-weight:600">⚡ ' + priorityText + '</div>' : '');
+    if (box) {
+      if (impactText) {
+        box.innerHTML =
+          '<div style="font-size:12px;line-height:1.7;margin-bottom:8px">' + impactText + '</div>' +
+          (priorityText ? '<div style="font-size:11px;color:' + rule.color + ';font-weight:600">⚡ ' + priorityText + '</div>' : '');
+      } else {
+        // XML 태그 없이 일반 텍스트로 응답한 경우 그대로 표시
+        box.innerHTML = text
+          ? '<div style="font-size:12px;line-height:1.7">' + text.trim() + '</div>'
+          : '<span style="color:var(--text-tertiary);font-size:11px">분석 결과를 받지 못했습니다 — AI 자문에서 직접 질문해 주세요.</span>';
+      }
     }
   } catch(e) {
     console.warn('영향도 분석 오류:', e);
-    if (box) { box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">분석 실패 — AI 자문에서 직접 질문해 주세요.</span>'; }
+    if (box) { box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">분석 실패 (' + e.message + ') — AI 자문에서 직접 질문해 주세요.</span>'; }
   }
 }
 
