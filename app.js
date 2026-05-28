@@ -993,13 +993,6 @@ function showNewsDetail(newsId) {
     ? '<a href="' + n.url + '" target="_blank" class="btn" style="font-size:11px;padding:4px 10px;text-decoration:none"><i class="ti ti-external-link"></i> 원문 보기</a>'
     : '';
 
-  // 주요 내용 요약 — DB summary 또는 본문 앞부분
-  var summaryText = (n.summary || '').trim();
-  if (!summaryText && (n.body || n.content)) {
-    summaryText = (n.body || n.content || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-    if (summaryText.length === 200) summaryText += '…';
-  }
-
   var html =
     // 헤더: 중요도 + 제목
     '<div style="border-left:3px solid ' + rule.color + ';padding-left:10px;margin-bottom:14px">' +
@@ -1012,13 +1005,16 @@ function showNewsDetail(newsId) {
       '<div style="font-size:11px;color:var(--text-secondary)">' + (n.source || '') + '</div>' +
     '</div>' +
 
-    // 주요 내용 요약
-    (summaryText ?
-      '<div style="margin-bottom:14px">' +
-        '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● 주요 내용 요약</div>' +
-        '<div style="font-size:12px;color:var(--text-primary);padding:9px 12px;background:var(--bg-secondary);border-radius:var(--radius-md);line-height:1.7">' + summaryText + '</div>' +
-      '</div>'
-    : '') +
+    // 주요 내용 요약 — AI 자동 생성 (스피너로 시작)
+    '<div style="margin-bottom:14px">' +
+      '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● 주요 내용 요약</div>' +
+      '<div style="font-size:12px;color:var(--text-primary);padding:9px 12px;background:var(--bg-secondary);border-radius:var(--radius-md);line-height:1.7" id="summary-box-' + n.id + '">' +
+        '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary)">' +
+          '<span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>' +
+          '요약 생성 중...' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
 
     // SKT 영향도 — 자동 분석 (로딩 스피너로 시작)
     '<div style="margin-bottom:14px">' +
@@ -1047,8 +1043,53 @@ function showNewsDetail(newsId) {
   if (sb) { sb.from('news_feed').update({ is_read: true }).eq('id', n.id).then(function() {}); }
   n.is_read = true;
 
-  // 영향도 분석 자동 실행 (버튼 클릭 없이 바로 시작)
+  // 요약 + 영향도 분석 자동 실행
+  summarizeNews(n.id);
   analyzeNewsImpact(n.id);
+}
+
+// ── 주요 내용 요약 (Claude Haiku) ─────────────────────────────
+async function summarizeNews(newsId) {
+  var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
+  if (!n) return;
+  var { claudeKey } = getConfig();
+  if (!claudeKey) return;
+
+  var box = document.getElementById('summary-box-' + newsId);
+  if (!box) return;
+
+  try {
+    var bodySnippet = (n.body || n.content || '').replace(/\s+/g, ' ').trim().slice(0, 3000);
+    var userMsg = '다음 뉴스를 한국어로 핵심만 요약해 주세요. ' +
+      '3~5문장으로, 무엇이 어떻게 왜 결정/발생했는지 중심으로 써주세요. ' +
+      '번호나 불릿 없이 자연스러운 문단으로 작성하세요.\n\n' +
+      '제목: ' + n.title + '\n' +
+      '출처: ' + (n.source || '') + '\n' +
+      '날짜: ' + (n.published_at || '').slice(0, 10) +
+      (bodySnippet ? '\n\n본문:\n' + bodySnippet : '');
+
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        system: '당신은 전파·통신 정책 뉴스를 간결하게 요약하는 전문가입니다. 사실만 기반으로 핵심 내용을 자연스러운 한국어 문단으로 요약하세요.',
+        messages: [{ role: 'user', content: userMsg }]
+      })
+    });
+    var data = await res.json();
+    var summaryText = (data.content && data.content[0] && data.content[0].text) || '';
+
+    if (box && summaryText) {
+      box.innerHTML = '<div style="font-size:12px;line-height:1.75;color:var(--text-primary)">' + summaryText.trim().replace(/\n/g, '<br>') + '</div>';
+    } else if (box) {
+      box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">요약 생성 실패 — 원문을 직접 확인해 주세요.</span>';
+    }
+  } catch(e) {
+    console.warn('요약 오류:', e);
+    if (box) { box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">요약 생성 실패 — 원문을 직접 확인해 주세요.</span>'; }
+  }
 }
 
 // ── AI 영향도 분석 (Claude Haiku — 빠른 분석) ───────────────
