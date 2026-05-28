@@ -997,7 +997,7 @@ function showNewsDetail(newsId) {
     // 헤더: 중요도 + 제목
     '<div style="border-left:3px solid ' + rule.color + ';padding-left:10px;margin-bottom:14px">' +
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
-        '<span style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px">' + rule.label + '</span>' +
+        '<span id="importance-badge-' + n.id + '" style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px">' + rule.label + '</span>' +
         '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
         (urlBtn ? '<div style="margin-left:auto">' + urlBtn + '</div>' : '') +
       '</div>' +
@@ -1180,6 +1180,28 @@ async function analyzeNewsImpact(newsId) {
         box.innerHTML = text
           ? renderSummaryHtml(text.trim())
           : '<span style="color:var(--text-tertiary);font-size:11px">분석 결과를 받지 못했습니다 — AI 자문에서 직접 질문해 주세요.</span>';
+      }
+    }
+
+    // ── AI priority → 배지 업데이트 ──────────────────────────
+    if (priorityText) {
+      var AI_PRIORITY_MAP = {
+        '즉시대응': '긴급',
+        '금주검토': '보통',
+        '동향파악': '참고'
+      };
+      var aiImportance = AI_PRIORITY_MAP[priorityText.trim()];
+      if (aiImportance && aiImportance !== n._importance) {
+        var aiRule  = IMPORTANCE_RULES[aiImportance] || IMPORTANCE_RULES['참고'];
+        var badge   = document.getElementById('importance-badge-' + newsId);
+        if (badge) {
+          badge.textContent = aiRule.label;
+          badge.style.color      = aiRule.color;
+          badge.style.background = aiRule.bg;
+        }
+        // 캐시도 갱신 — 뉴스 목록 재렌더링
+        n._importance = aiImportance;
+        renderNewsList();
       }
     }
   } catch(e) {
