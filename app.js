@@ -1418,7 +1418,7 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
       + '<div style="margin-bottom:6px">' + titleHtml + '</div>'
       + summaryHtml
       + linkHtml
-      + '<div id="' + analysisId + '" style="margin-top:10px;padding:10px 12px;background:rgba(239,68,68,0.06);border-radius:8px;border:1px solid rgba(239,68,68,0.2)">'
+      + '<div id="' + analysisId + '" data-briefing-analysis="1" style="margin-top:10px;padding:10px 12px;background:rgba(239,68,68,0.06);border-radius:8px;border:1px solid rgba(239,68,68,0.2)">'
       +   '<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary)">'
       +     '<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>'
       +     'AI 영향도 분석 중...'
@@ -1435,10 +1435,9 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
     + '</div>';
 }
 
-// 긴급 항목 AI 영향도 분석 (briefing 전용)
-async function analyzeBriefingItem(elemId, titleText) {
-  var el = document.getElementById(elemId);
-  if (!el) { console.warn('[analyzeBriefingItem] elem not found:', elemId); return; }
+// 긴급 항목 AI 영향도 분석 — DOM 요소를 직접 참조로 받음 (ID 탐색 없음)
+async function analyzeBriefingItemEl(el, titleText) {
+  if (!el) return;
   var { claudeKey } = getConfig();
   if (!claudeKey) {
     el.innerHTML = '<span style="font-size:11px;color:var(--text-secondary)">Claude API 키가 설정되지 않아 분석을 건너뜁니다.</span>';
@@ -1465,13 +1464,19 @@ async function analyzeBriefingItem(elemId, titleText) {
     var priorityText = priorityMatch ? priorityMatch[1].trim() : '';
     var priorityColor = { '즉시대응': '#ef4444', '금주검토': '#f59e0b', '동향파악': '#22c55e' };
     var pColor = priorityColor[priorityText] || '#64748b';
-    if (!el) return;
     el.innerHTML = ''
       + (priorityText ? '<span style="font-size:10px;font-weight:700;color:#fff;background:' + pColor + ';padding:2px 8px;border-radius:4px;margin-bottom:7px;display:inline-block">' + priorityText + '</span>' : '')
       + (impactText ? '<div style="font-size:12px;color:var(--text-primary);line-height:1.7;margin-top:4px">' + impactText + '</div>' : '<div style="font-size:12px;color:var(--text-secondary)">분석 결과 없음</div>');
   } catch(e) {
-    if (el) el.innerHTML = '<span style="font-size:11px;color:var(--text-secondary)">분석 실패: ' + e.message + '</span>';
+    el.innerHTML = '<span style="font-size:11px;color:var(--text-secondary)">분석 실패: ' + e.message + '</span>';
   }
+}
+
+// 하위 호환용 (ID 기반) — 기존 호출부에서 사용
+async function analyzeBriefingItem(elemId, titleText) {
+  var el = document.getElementById(elemId);
+  if (!el) { console.warn('[analyzeBriefingItem] elem not found:', elemId); return; }
+  return analyzeBriefingItemEl(el, titleText);
 }
 
 async function loadBriefing() {
@@ -1528,23 +1533,37 @@ async function loadBriefing() {
         + '</div>';
     }).join('');
 
-    // 최신 브리핑(idx=0)의 긴급 항목 AI 분석 — DOM 직접 스캔 방식
-    setTimeout(function() {
-      // id="bi-0-*" 인 모든 분석 컨테이너를 DOM에서 직접 탐색
-      var urgentDivs = listEl.querySelectorAll('[id^="bi-0-"]');
-      console.log('[briefing] DOM 스캔 결과 긴급 항목:', urgentDivs.length, '개');
+    // 최신 브리핑(idx=0)의 긴급 항목 AI 분석 — innerHTML 직후 요소 직접 참조
+    // (innerHTML 설정은 동기 완료이므로 바로 querySelectorAll 가능)
+    var analysisTargets = [];
+    // data-briefing-analysis 속성으로 분석 컨테이너를 정확히 식별
+    var firstBriefingEl = listEl.querySelector('#bf-0');
+    if (firstBriefingEl) {
+      var urgentDivs = firstBriefingEl.querySelectorAll('[data-briefing-analysis]');
+      console.log('[briefing] 긴급 분석 대상 (data attr):', urgentDivs.length, '개');
       urgentDivs.forEach(function(div) {
-        // 부모 컨테이너에서 제목 텍스트 추출
         var container = div.parentElement;
-        var titleText = '';
-        if (container) {
-          var titleEl = container.querySelector('span[style*="font-weight:500"]');
-          if (titleEl) titleText = titleEl.textContent.trim();
-        }
-        console.log('[briefing] 분석 시작:', div.id, '|', titleText.slice(0, 40));
-        analyzeBriefingItem(div.id, titleText);
+        var titleEl = container ? container.querySelector('span[style*="font-weight:500"]') : null;
+        var titleText = titleEl ? titleEl.textContent.trim() : '';
+        analysisTargets.push({ el: div, title: titleText });
       });
-    }, 300);
+    }
+    // data attr 방식 fallback: 모든 [id^="bi-"] 탐색
+    if (analysisTargets.length === 0) {
+      var allBiDivs = listEl.querySelectorAll('[id^="bi-"]');
+      console.log('[briefing] fallback bi-* 탐색 결과:', allBiDivs.length, '개');
+      allBiDivs.forEach(function(div) {
+        var container = div.parentElement;
+        var titleEl = container ? container.querySelector('span[style*="font-weight:500"]') : null;
+        var titleText = titleEl ? titleEl.textContent.trim() : '';
+        analysisTargets.push({ el: div, title: titleText });
+      });
+    }
+    console.log('[briefing] 최종 분석 대상:', analysisTargets.length, '개');
+    analysisTargets.forEach(function(item) {
+      console.log('[briefing] 분석 시작:', item.el.id || '(no id)', '|', item.title.slice(0, 40));
+      analyzeBriefingItemEl(item.el, item.title);
+    });
 
   } catch(e) {
     listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">브리핑 로드 실패: ' + e.message + '</div>';
