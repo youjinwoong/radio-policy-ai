@@ -1048,24 +1048,53 @@ function showNewsDetail(newsId) {
   analyzeNewsImpact(n.id);
 }
 
-// ── 주요 내용 요약 (Claude Haiku) ─────────────────────────────
+// ── 주요 내용 요약 렌더링 헬퍼 ──────────────────────────────────
+function renderSummaryHtml(text) {
+  // 줄바꿈 기준으로 단락 분리, 각 항목을 불릿으로 표시
+  var lines = text.split(/\n+/).map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+  if (lines.length <= 1) {
+    // 문장 단위로 분리 (마침표 기준)
+    lines = text.replace(/([.!?])\s+/g, '$1\n').split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 4; });
+  }
+  if (lines.length <= 1) {
+    return '<p style="margin:0;font-size:12px;line-height:1.8;color:var(--text-primary)">' + text.trim() + '</p>';
+  }
+  return lines.map(function(line) {
+    return '<div style="display:flex;gap:7px;margin-bottom:7px;font-size:12px;line-height:1.75;color:var(--text-primary)">' +
+      '<span style="flex-shrink:0;margin-top:5px;width:5px;height:5px;border-radius:50%;background:var(--accent);display:inline-block"></span>' +
+      '<span>' + line + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+// ── 주요 내용 요약 (Claude Haiku + Supabase 캐싱) ──────────────
 async function summarizeNews(newsId) {
   var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
   if (!n) return;
-  var { claudeKey } = getConfig();
-  if (!claudeKey) return;
 
   var box = document.getElementById('summary-box-' + newsId);
   if (!box) return;
 
+  // ① DB에 저장된 요약 있으면 즉시 표시 (API 호출 없음)
+  if (n.summary && n.summary.trim().length > 20) {
+    box.innerHTML = renderSummaryHtml(n.summary.trim());
+    return;
+  }
+
+  var { claudeKey } = getConfig();
+  if (!claudeKey) {
+    box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">Claude API 키 필요 — 설정에서 입력해 주세요.</span>';
+    return;
+  }
+
   try {
     var bodySnippet = (n.body || n.content || '').replace(/\s+/g, ' ').trim().slice(0, 3000);
-    var userMsg = '다음 뉴스를 한국어로 핵심만 요약해 주세요. ' +
-      '3~5문장으로, 무엇이 어떻게 왜 결정/발생했는지 중심으로 써주세요. ' +
-      '번호나 불릿 없이 자연스러운 문단으로 작성하세요.\n\n' +
-      '제목: ' + n.title + '\n' +
-      '출처: ' + (n.source || '') + '\n' +
-      '날짜: ' + (n.published_at || '').slice(0, 10) +
+    var userMsg =
+      '다음 뉴스를 핵심 포인트 3~5개로 요약하세요.\n' +
+      '- 각 포인트를 줄바꿈으로 구분하세요.\n' +
+      '- 각 포인트는 1~2문장, 육하원칙(누가/무엇을/왜/어떻게) 포함.\n' +
+      '- 불릿 기호(•, -, * 등)는 붙이지 마세요. 순수 텍스트만.\n\n' +
+      '제목: ' + n.title + '\n출처: ' + (n.source || '') + '\n날짜: ' + (n.published_at || '').slice(0, 10) +
       (bodySnippet ? '\n\n본문:\n' + bodySnippet : '');
 
     var res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1073,17 +1102,20 @@ async function summarizeNews(newsId) {
       headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 600,
-        system: '당신은 전파·통신 정책 뉴스를 간결하게 요약하는 전문가입니다. 사실만 기반으로 핵심 내용을 자연스러운 한국어 문단으로 요약하세요.',
+        max_tokens: 500,
+        system: '당신은 전파·통신 정책 뉴스를 간결하게 요약하는 전문가입니다. 사실만 기반으로 핵심 포인트를 줄바꿈으로 구분하여 작성하세요. 불릿 기호 없이 텍스트만 출력하세요.',
         messages: [{ role: 'user', content: userMsg }]
       })
     });
     var data = await res.json();
-    var summaryText = (data.content && data.content[0] && data.content[0].text) || '';
+    var summaryText = (data.content && data.content[0] && data.content[0].text || '').trim();
 
-    if (box && summaryText) {
-      box.innerHTML = '<div style="font-size:12px;line-height:1.75;color:var(--text-primary)">' + summaryText.trim().replace(/\n/g, '<br>') + '</div>';
-    } else if (box) {
+    if (summaryText) {
+      box.innerHTML = renderSummaryHtml(summaryText);
+      // ② Supabase에 저장 + 로컬 캐시 갱신
+      n.summary = summaryText;
+      if (sb) { sb.from('news_feed').update({ summary: summaryText }).eq('id', n.id).then(function() {}); }
+    } else {
       box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">요약 생성 실패 — 원문을 직접 확인해 주세요.</span>';
     }
   } catch(e) {
