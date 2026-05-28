@@ -795,12 +795,14 @@ def save_new_items(items: list, existing_urls: set) -> list:
 
                 time.sleep(1)  # 서버 부하 방지
 
-        # 긴급도 분류 추가
+        # 긴급도 분류 추가 (urgency + importance 동시 저장)
         for item in unique_new:
-            item['urgency'] = classify_urgency(
+            val = classify_urgency(
                 item.get('title', ''),
                 item.get('content', '') or ''
             )
+            item['urgency'] = val
+            item['importance'] = val
 
         sb.table('news_feed').insert(unique_new).execute()
         urgent_count = sum(1 for i in unique_new if i.get('urgency') == '긴급')
