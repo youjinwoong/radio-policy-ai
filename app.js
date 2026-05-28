@@ -1256,6 +1256,180 @@ async function runDiffAnalysis() {
 // ════════════════════════════════════════════
 //  Daily Briefing — Supabase daily_briefings 표시
 // ════════════════════════════════════════════
+
+// 브리핑 텍스트용 중요도 분류 (구조화된 news 객체 없이 raw 텍스트로 판별)
+function classifyBriefingItemImportance(text) {
+  var hay = text.toLowerCase();
+  var urgentKws = IMPORTANCE_RULES['긴급'].keywords;
+  for (var i = 0; i < urgentKws.length; i++) {
+    if (hay.includes(urgentKws[i].toLowerCase())) return '긴급';
+  }
+  var isRelevant = SKT_RELEVANT_TOPICS.some(function(t) { return hay.includes(t.toLowerCase()); });
+  var isNegative = NEGATIVE_SIGNALS.some(function(s) { return hay.includes(s.toLowerCase()); });
+  if (isRelevant && isNegative) return '긴급';
+  var normalKws = IMPORTANCE_RULES['보통'].keywords;
+  for (var i = 0; i < normalKws.length; i++) {
+    if (hay.includes(normalKws[i].toLowerCase())) return '보통';
+  }
+  if (isRelevant) return '보통';
+  return '참고';
+}
+
+// 브리핑 콘텐츠 파싱 — 뉴스 항목별로 긴급도 분류 후 HTML 생성
+function parseBriefingContent(rawContent, briefingIdx) {
+  var escaped = (rawContent || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  var lines = escaped.split('\n');
+  var html = '';
+  var itemLines = [];
+  var urgentCount = 0;
+
+  function flushItem(itemIdx) {
+    if (itemLines.length === 0) return '';
+    var block = itemLines.join('\n');
+    var importance = classifyBriefingItemImportance(block);
+    var out = renderBriefingNewsItem(block, importance, briefingIdx, itemIdx);
+    if (importance === '긴급') urgentCount++;
+    itemLines = [];
+    return out;
+  }
+
+  var itemIdx = 0;
+  var itemHtmlParts = [];
+  var headerHtml = '';
+
+  for (var li = 0; li < lines.length; li++) {
+    var line = lines[li];
+    // 섹션 헤더 [주요 뉴스] 등
+    if (/^\[.+\]$/.test(line.trim())) {
+      if (itemLines.length > 0) { itemHtmlParts.push(flushItem(itemIdx)); itemIdx++; }
+      headerHtml += '<div style="font-weight:600;font-size:12px;color:var(--text-secondary);margin:14px 0 8px;letter-spacing:0.04em">' + line.trim() + '</div>';
+      continue;
+    }
+    // 제목 헤더 (📡로 시작)
+    if (/^📡/.test(line)) {
+      if (itemLines.length > 0) { itemHtmlParts.push(flushItem(itemIdx)); itemIdx++; }
+      headerHtml += '<div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:12px">' + line + '</div>';
+      continue;
+    }
+    // 뉴스 항목 시작
+    if (/^• /.test(line)) {
+      if (itemLines.length > 0) { itemHtmlParts.push(flushItem(itemIdx)); itemIdx++; }
+      itemLines.push(line);
+      continue;
+    }
+    // 항목 내 들여쓰기 줄
+    if (/^  /.test(line) && itemLines.length > 0) {
+      itemLines.push(line);
+      continue;
+    }
+    // 빈 줄 또는 기타
+    if (itemLines.length > 0) {
+      itemLines.push(line);
+    } else {
+      headerHtml += (line ? '<div style="font-size:13px;line-height:1.8">' + line + '</div>' : '<div style="height:6px"></div>');
+    }
+  }
+  if (itemLines.length > 0) { itemHtmlParts.push(flushItem(itemIdx)); }
+
+  return { html: headerHtml + itemHtmlParts.join(''), urgentCount: urgentCount };
+}
+
+// 뉴스 항목 1건 HTML 렌더링
+function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
+  var lines = block.split('\n');
+  var titleLine = '';
+  var summaryLines = [];
+  var linkUrl = '';
+
+  for (var i = 0; i < lines.length; i++) {
+    var l = lines[i];
+    if (/^• /.test(l)) {
+      titleLine = l.replace(/^• /, '');
+    } else if (/^  🔗 /.test(l)) {
+      linkUrl = l.replace(/^  🔗 /, '').trim();
+    } else if (/^  → /.test(l)) {
+      summaryLines.push(l.replace(/^  → /, '').trim());
+    }
+  }
+
+  var titleHtml = '<span style="font-weight:500;font-size:13px;line-height:1.6">' + titleLine + '</span>';
+  var summaryHtml = summaryLines.map(function(s) {
+    return '<div style="font-size:12px;color:var(--text-secondary);padding-left:4px;margin-top:3px;line-height:1.6">→ ' + s + '</div>';
+  }).join('');
+  var linkHtml = linkUrl
+    ? '<div style="margin-top:6px"><a href="' + linkUrl + '" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none">🔗 원문 보기</a></div>'
+    : '';
+
+  var analysisId = 'bi-' + briefingIdx + '-' + itemIdx;
+
+  if (importance === '긴급') {
+    var rule = IMPORTANCE_RULES['긴급'];
+    return '<div style="border:2px solid ' + rule.color + ';border-radius:10px;padding:12px 14px;margin-bottom:10px;background:' + rule.bg + '">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+      +   '<span style="background:' + rule.color + ';color:#fff;font-size:10px;font-weight:700;padding:2px 9px;border-radius:5px;flex-shrink:0">' + rule.label + '</span>'
+      +   '<span style="font-size:11px;color:' + rule.color + ';font-weight:500">' + rule.desc + '</span>'
+      + '</div>'
+      + '<div style="margin-bottom:6px">' + titleHtml + '</div>'
+      + summaryHtml
+      + linkHtml
+      + '<div id="' + analysisId + '" style="margin-top:10px;padding:10px 12px;background:rgba(239,68,68,0.06);border-radius:8px;border:1px solid rgba(239,68,68,0.2)">'
+      +   '<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary)">'
+      +     '<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>'
+      +     'AI 영향도 분석 중...'
+      +   '</div>'
+      + '</div>'
+      + '</div>';
+  }
+
+  // 보통·참고는 기존 스타일 (심플)
+  var dotColor = importance === '보통' ? '#f59e0b' : '#22c55e';
+  return '<div style="padding:8px 0 8px 10px;border-left:3px solid ' + dotColor + ';margin-bottom:8px">'
+    + '<div style="margin-bottom:4px">' + titleHtml + '</div>'
+    + summaryHtml
+    + linkHtml
+    + '</div>';
+}
+
+// 긴급 항목 AI 영향도 분석 (briefing 전용)
+async function analyzeBriefingItem(elemId, titleText) {
+  var el = document.getElementById(elemId);
+  if (!el) return;
+  var { claudeKey } = getConfig();
+  if (!claudeKey) {
+    el.innerHTML = '<span style="font-size:11px;color:var(--text-secondary)">Claude API 키가 설정되지 않아 분석을 건너뜁니다.</span>';
+    return;
+  }
+  try {
+    var sysMsg = 'SK텔레콤 CR센터 기술정책팀 전파정책 전문가. 뉴스 제목을 보고 SKT 입장에서 간결하게 분석하라. XML 형식으로만 답변:\n<impact>SKT 영향도 2~3문장</impact>\n<priority>즉시대응/금주검토/동향파악 중 하나</priority>';
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01',
+                 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 300,
+        system: sysMsg,
+        messages: [{ role: 'user', content: '뉴스: ' + titleText }]
+      })
+    });
+    if (!res.ok) throw new Error('API ' + res.status);
+    var json = await res.json();
+    var txt = json.content && json.content[0] ? json.content[0].text : '';
+    var impactMatch = txt.match(/<impact>([\s\S]*?)<\/impact>/);
+    var priorityMatch = txt.match(/<priority>([\s\S]*?)<\/priority>/);
+    var impactText = impactMatch ? impactMatch[1].trim() : '';
+    var priorityText = priorityMatch ? priorityMatch[1].trim() : '';
+    var priorityColor = { '즉시대응': '#ef4444', '금주검토': '#f59e0b', '동향파악': '#22c55e' };
+    var pColor = priorityColor[priorityText] || '#64748b';
+    if (!el) return;
+    el.innerHTML = ''
+      + (priorityText ? '<span style="font-size:10px;font-weight:700;color:#fff;background:' + pColor + ';padding:2px 8px;border-radius:4px;margin-bottom:7px;display:inline-block">' + priorityText + '</span>' : '')
+      + (impactText ? '<div style="font-size:12px;color:var(--text-primary);line-height:1.7;margin-top:4px">' + impactText + '</div>' : '<div style="font-size:12px;color:var(--text-secondary)">분석 결과 없음</div>');
+  } catch(e) {
+    if (el) el.innerHTML = '<span style="font-size:11px;color:var(--text-secondary)">분석 실패: ' + e.message + '</span>';
+  }
+}
+
 async function loadBriefing() {
   const listEl = document.getElementById('briefing-list');
   if (!listEl) return;
@@ -1278,35 +1452,63 @@ async function loadBriefing() {
     listEl.innerHTML = data.map(function(b, idx) {
       const d = new Date(b.briefing_date).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
       const isToday = b.briefing_date === new Date().toISOString().slice(0,10);
-      const contentHtml = (b.content || '')
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-        .replace(/📡[^\n]*/g, '<span style="font-size:15px;font-weight:700;color:var(--accent)">$&</span>')
-        .replace(/\[([^\]]+)\]/g, '<span style="font-weight:600;color:var(--text-primary)">[$1]</span>')
-        .replace(/^• (.+)$/gm, '<span style="display:block;padding-left:12px">• $1</span>')
-        .replace(/^  → (.+)$/gm, '<span style="display:block;padding-left:24px;color:var(--text-secondary);font-size:12px">→ $1</span>')
-        .replace(/^  🔗 (.+)$/gm, '<span style="display:block;padding-left:24px;font-size:12px"><a href="$1" target="_blank" style="color:var(--accent)">🔗 원문 보기</a></span>')
-        .replace(/\n/g, '<br>');
+      const parsed = parseBriefingContent(b.content, idx);
+      const contentHtml = parsed.html;
+      const urgentCount = parsed.urgentCount;
       const badgeHtml = isToday ? '<span style="background:var(--accent);color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;margin-left:8px">오늘</span>' : '';
-      const metaHtml = (b.news_count || b.terms_count)
-        ? `<span style="color:var(--text-secondary);font-size:11px">뉴스 ${b.news_count||0}건 · 용어 ${b.terms_count||0}건</span>`
+      const urgentBadge = urgentCount > 0
+        ? '<span style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px">🔴 긴급 ' + urgentCount + '건</span>'
         : '';
-      return `<div class="card" style="margin-bottom:12px;cursor:default">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;cursor:pointer"
-             onclick="toggleBriefing('bf-${idx}')">
-          <div style="display:flex;align-items:center;gap:6px">
-            <i class="ti ti-coffee" style="color:var(--accent)"></i>
-            <span style="font-weight:600">${d}</span>${badgeHtml}
-          </div>
-          <div style="display:flex;align-items:center;gap:10px">
-            ${metaHtml}
-            <i class="ti ti-chevron-${idx===0?'up':'down'}" id="chevron-bf-${idx}" style="color:var(--text-secondary)"></i>
-          </div>
-        </div>
-        <div id="bf-${idx}" style="display:${idx===0?'block':'none'};font-size:13px;line-height:1.8;white-space:pre-wrap;border-top:1px solid var(--border);padding-top:10px">
-          ${contentHtml}
-        </div>
-      </div>`;
+      const metaHtml = (b.news_count || b.terms_count)
+        ? '<span style="color:var(--text-secondary);font-size:11px">뉴스 ' + (b.news_count||0) + '건 · 용어 ' + (b.terms_count||0) + '건</span>'
+        : '';
+      return '<div class="card" style="margin-bottom:12px;cursor:default">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;cursor:pointer" onclick="toggleBriefing(\'bf-' + idx + '\')">'
+        +   '<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
+        +     '<i class="ti ti-coffee" style="color:var(--accent)"></i>'
+        +     '<span style="font-weight:600">' + d + '</span>' + badgeHtml + urgentBadge
+        +   '</div>'
+        +   '<div style="display:flex;align-items:center;gap:10px">'
+        +     metaHtml
+        +     '<i class="ti ti-chevron-' + (idx===0?'up':'down') + '" id="chevron-bf-' + idx + '" style="color:var(--text-secondary)"></i>'
+        +   '</div>'
+        + '</div>'
+        + '<div id="bf-' + idx + '" style="display:' + (idx===0?'block':'none') + ';border-top:1px solid var(--border);padding-top:12px">'
+        +   contentHtml
+        + '</div>'
+        + '</div>';
     }).join('');
+
+    // 긴급 항목 AI 분석 자동 실행 (오늘 브리핑만)
+    data.forEach(function(b, idx) {
+      if (idx !== 0) return; // 오늘(최신) 브리핑만
+      var lines = (b.content || '').split('\n');
+      var itemIdx = 0;
+      var itemLines = [];
+      function tryAnalyze() {
+        if (itemLines.length === 0) return;
+        var block = itemLines.join('\n');
+        var importance = classifyBriefingItemImportance(block);
+        if (importance === '긴급') {
+          var titleLine = '';
+          for (var k = 0; k < itemLines.length; k++) {
+            if (/^• /.test(itemLines[k])) { titleLine = itemLines[k].replace(/^• /, ''); break; }
+          }
+          var elemId = 'bi-' + idx + '-' + itemIdx;
+          analyzeBriefingItem(elemId, titleLine);
+        }
+        itemIdx++;
+        itemLines = [];
+      }
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li];
+        if (/^• /.test(line)) { tryAnalyze(); itemLines.push(line); }
+        else if (/^  /.test(line) && itemLines.length > 0) { itemLines.push(line); }
+        else if (itemLines.length > 0) { itemLines.push(line); }
+      }
+      tryAnalyze();
+    });
+
   } catch(e) {
     listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">브리핑 로드 실패: ' + e.message + '</div>';
     console.warn('Briefing load error:', e);
