@@ -232,6 +232,32 @@ textarea:focus { border-color: var(--accent); }
   /* 뉴스 2열 → 1열 (모바일) */
   #news-two-col { flex-direction: column !important; }
   #news-detail-panel { width: 100% !important; position: static !important; }
+
+  /* 뉴스 목록 모바일 가독성 */
+  .news-item { overflow: hidden; padding: 12px 0; }
+  .news-title {
+    word-break: break-word;
+    overflow-wrap: break-word;
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: normal !important;
+  }
+  .news-meta {
+    white-space: normal !important;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 12px !important;
+    line-height: 1.5;
+  }
+  /* 뉴스 아이템 헤더: 출처를 배지/날짜 아래 줄로 분리 */
+  .news-item-header { flex-wrap: wrap; row-gap: 2px; }
+  .news-item-source { margin-left: 0 !important; width: 100%; max-width: none !important; }
 }
 
 /* 하단 네비 (모바일 전용, 기본 hidden) */

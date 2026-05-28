@@ -967,14 +967,14 @@ function renderNewsList() {
       : '';
     return '<div class="news-item" onclick="showNewsDetail(\'' + n.id + '\')" style="cursor:pointer;border-left:' + rule.border + ';' + (isSelected ? 'background:var(--bg-secondary);border-radius:var(--radius-md)' : '') + '">' +
       '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '"></div>' +
-      '<div style="flex:1;min-width:0">' +
-        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
-          '<span style="font-size:10px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 7px;border-radius:4px">' + rule.label + '</span>' +
-          '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
-          (n.source ? '<span style="font-size:10px;color:var(--text-tertiary);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px">' + n.source + '</span>' : '') +
+      '<div style="flex:1;min-width:0;overflow:hidden">' +
+        '<div class="news-item-header" style="display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap">' +
+          '<span style="font-size:10px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 7px;border-radius:4px;flex-shrink:0">' + rule.label + '</span>' +
+          '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0">' + date + '</span>' +
+          (n.source ? '<span class="news-item-source" style="font-size:10px;color:var(--text-tertiary);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px">' + n.source + '</span>' : '') +
         '</div>' +
-        '<div class="news-title" style="font-size:13px;line-height:1.5">' + n.title + urlIcon + '</div>' +
-        (n.summary ? '<div class="news-meta" style="margin-top:3px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + n.summary.slice(0,60) + (n.summary.length>60?'…':'') + '</div>' : '') +
+        '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + '</div>' +
+        (n.summary ? '<div class="news-meta" style="margin-top:3px;font-size:11px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:var(--text-tertiary)">' + n.summary.slice(0, 80) + (n.summary.length > 80 ? '…' : '') + '</div>' : '') +
       '</div>' +
     '</div>';
   }).join('');
