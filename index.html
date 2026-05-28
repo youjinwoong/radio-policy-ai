@@ -233,33 +233,42 @@
         </div>
       </div>
 
-      <!-- 뉴스 -->
+      <!-- 뉴스 — 팀 중요도 기반 분류 -->
       <div class="panel active" id="panel-news">
-        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
-          <span style="font-size:11px;color:var(--text-secondary);line-height:1.6">
-            <b style="color:var(--text-primary)">자동 수집 대상</b><br>
-            <span style="opacity:.8">IT전문지:</span> 전자신문 · 디지털데일리 · 아이뉴스24 · ZDNet Korea · 블로터<br>
-            <span style="opacity:.8">통신전문:</span> 스트라베이스 · 정보통신신문<br>
-            <span style="opacity:.8">경제·종합:</span> 한국경제 · 서울경제 · 매일경제 · 머니투데이 · 연합뉴스 · 뉴시스<br>
-            <span style="opacity:.8">정부·연구기관:</span> 과기정통부 · 국립전파연구원 · 방통위 · ETRI · KISDI · 법제처
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+          <span style="font-size:11px;color:var(--text-secondary);flex:1">
+            <b style="color:var(--text-primary)">자동 수집 뉴스</b>
+            <span style="opacity:.8"> — SKT 팀 관련성 기준 중요도 자동 분류</span>
           </span>
-          <button class="btn" style="margin-left:auto" onclick="loadNews()"><i class="ti ti-refresh"></i>새로고침</button>
+          <button class="btn" onclick="loadNews()"><i class="ti ti-refresh"></i>새로고침</button>
         </div>
-        <div class="tag-list" style="margin-bottom:14px">
-          <span class="tag selected" onclick="filterNews(this,'전체')">전체</span>
-          <span class="tag" onclick="filterNews(this,'주파수')">주파수</span>
-          <span class="tag" onclick="filterNews(this,'기술기준')">기술기준</span>
-          <span class="tag" onclick="filterNews(this,'5G·6G')">5G·6G</span>
-          <span class="tag" onclick="filterNews(this,'ITU·WRC')">ITU·WRC</span>
-          <span class="tag" onclick="filterNews(this,'전자파')">전자파</span>
+
+        <!-- 중요도 필터 탭 -->
+        <div class="tag-list" style="margin-bottom:12px" id="news-filter-tabs">
+          <span class="tag selected" onclick="filterNewsByImportance(this,'전체')">전체</span>
+          <span class="tag" onclick="filterNewsByImportance(this,'긴급')" style="border-color:#ef4444;color:#ef4444">🔴 긴급</span>
+          <span class="tag" onclick="filterNewsByImportance(this,'보통')" style="border-color:#f59e0b;color:#d97706">🟡 보통</span>
+          <span class="tag" onclick="filterNewsByImportance(this,'참고')" style="border-color:#22c55e;color:#16a34a">🟢 참고</span>
         </div>
-        <div class="card" style="cursor:default" id="news-list">
-          <div class="news-item"><div class="news-dot dot-new"></div><div><div class="news-title">과기정통부, 전기통신사업용 무선설비 기술기준 개정안 행정예고</div><div class="news-meta">과기정통부 보도자료 · 2026.04.27 · 기술기준</div></div></div>
-          <div class="news-item"><div class="news-dot dot-new"></div><div><div class="news-title">방송통신기자재 시험기관 지정 관리 고시 일부개정안 행정예고</div><div class="news-meta">국립전파연구원 · 2026.05.04 · 기술기준</div></div></div>
-          <div class="news-item"><div class="news-dot dot-new"></div><div><div class="news-title">ITU-R WP5D, M.2150 Rev.3 추가 개정 완료 (2026.02)</div><div class="news-meta">ITU · 2026.02 · ITU·WRC</div></div></div>
-          <div class="news-item"><div class="news-dot dot-new"></div><div><div class="news-title">과기정통부, 6GHz 대역 주파수 분배 공청회 개최 예정</div><div class="news-meta">디지털타임스 · 2026.05.18 · 주파수</div></div></div>
-          <div class="news-item"><div class="news-dot dot-read"></div><div><div class="news-title">6G 표준화 로드맵 — ITU-R M.2160 이후 일정 확정</div><div class="news-meta">전자신문 · 2026.05.01 · 5G·6G</div></div></div>
-          <div class="news-item"><div class="news-dot dot-read"></div><div><div class="news-title">주파수할당 신청 절차 개정 고시 시행 (제2026-23호)</div><div class="news-meta">과기정통부 · 2026.04.16 · 주파수</div></div></div>
+
+        <!-- 2열 레이아웃: 뉴스 목록(왼쪽) + 상세 패널(오른쪽) -->
+        <div style="display:flex;gap:12px;align-items:flex-start" id="news-two-col">
+          <!-- 왼쪽: 뉴스 목록 -->
+          <div style="flex:1;min-width:0">
+            <div id="news-list">
+              <div style="color:var(--text-secondary);padding:20px;text-align:center;font-size:12px">불러오는 중...</div>
+            </div>
+          </div>
+
+          <!-- 오른쪽: 상세 & 액션 패널 (뉴스 선택 시 표시) -->
+          <div id="news-detail-panel" style="width:310px;flex-shrink:0;display:none;position:sticky;top:16px">
+            <div class="card" style="cursor:default;padding:16px" id="news-detail-content">
+              <div style="color:var(--text-secondary);text-align:center;padding:30px 16px;font-size:12px">
+                <i class="ti ti-news" style="font-size:28px;opacity:.3;display:block;margin-bottom:8px"></i>
+                뉴스를 선택하면<br>상세 분석이 표시됩니다
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

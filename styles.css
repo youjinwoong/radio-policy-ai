@@ -204,9 +204,14 @@ textarea:focus { border-color: var(--accent); }
   .chat-area { flex: 1; overflow-y: auto; min-height: 0; }
   .chat-input-wrap input { font-size: 16px; } /* iOS 줌 방지 */
   .tag-list { display: none; } /* 모바일에선 태그 숨김 */
+  #news-filter-tabs { display: flex !important; } /* 뉴스 중요도 탭은 모바일에서도 표시 */
 
   /* 법령 패널 */
   .law-section { margin-bottom: 16px; }
+
+  /* 뉴스 2열 → 1열 (모바일) */
+  #news-two-col { flex-direction: column !important; }
+  #news-detail-panel { width: 100% !important; position: static !important; }
 }
 
 /* 하단 네비 (모바일 전용, 기본 hidden) */

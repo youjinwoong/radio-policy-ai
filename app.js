@@ -721,52 +721,260 @@ async function refreshDashboard() {
 }
 
 // ════════════════════════════════════════════
-//  News
+//  News — 팀 중요도 기반 분류 & 액션 아이템 패널
 // ════════════════════════════════════════════
 let currentNewsFilter = '전체';
+let newsDataCache = [];      // 전체 로드된 뉴스 캐시
+let selectedNewsId = null;   // 현재 선택된 뉴스 id
+
+// ── 중요도 분류 규칙 ──────────────────────────────────────
+// SKT CR센터 기술정책팀 KPI 기준으로 키워드 매핑
+var IMPORTANCE_RULES = {
+  긴급: {
+    color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: '2px solid #ef4444',
+    label: '🔴 긴급', badge_class: 'badge-red',
+    desc: '즉각 임원 보고 및 대관 대응 필요',
+    keywords: ['취소','회수','처분','반납','강제','의무화','시정명령','이행강제','과징금',
+               '청문','위반','제재','즉시','긴급','주파수 반납','할당 취소','할당취소',
+               '재할당 거부','시행 완료','고시 시행','법령 시행','효력 발생'],
+    response_guide: [
+      '즉시 현황 파악 — 해당 주파수·허가 영향 범위 확인',
+      '법무팀 협의 — 법적 대응 근거 검토',
+      '임원 보고서 작성 (1p 이내, 배경·쟁점·리스크·대응방향)',
+      '정부 회신 또는 의견서 준비',
+      '유관부서(네트워크·재무·법무) 긴급 공유'
+    ]
+  },
+  보통: {
+    color: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: '2px solid #f59e0b',
+    label: '🟡 보통', badge_class: 'badge-amber',
+    desc: '당일~금주 내 검토 및 팀 공유 필요',
+    keywords: ['행정예고','입법예고','개정안','발의','공청회','계획 확정','추진 계획','논의',
+               '심의','의견수렴','고시 개정','시행령 개정','정책 발표','방침','예정','추진',
+               '제정안','신설','협의 중','검토 중','연구반','태스크포스','TF','로드맵'],
+    response_guide: [
+      '내용 검토 및 1p 요약 작성',
+      '팀 내부 공유 (채널/메일)',
+      '검토의견서 또는 입장문 준비',
+      '유관부서 사전 협의 여부 판단',
+      '향후 일정 캘린더 등록'
+    ]
+  },
+  참고: {
+    color: '#22c55e', bg: 'rgba(34,197,94,0.06)', border: '1px solid var(--border)',
+    label: '🟢 참고', badge_class: 'badge-teal',
+    desc: '동향 파악 — 필요시 브리핑 반영',
+    keywords: [],   // 위 두 기준에 해당하지 않으면 참고
+    response_guide: [
+      '내용 확인 및 키워드 태그 정리',
+      '필요시 모닝 브리핑 반영',
+      '지식 DB 저장 (장기 트렌드 추적)'
+    ]
+  }
+};
+
+function classifyNewsImportance(news) {
+  var hay = ((news.title || '') + ' ' + (news.summary || '')).toLowerCase();
+  var urgentKws = IMPORTANCE_RULES['긴급'].keywords;
+  for (var i = 0; i < urgentKws.length; i++) {
+    if (hay.includes(urgentKws[i].toLowerCase())) return '긴급';
+  }
+  var normalKws = IMPORTANCE_RULES['보통'].keywords;
+  for (var i = 0; i < normalKws.length; i++) {
+    if (hay.includes(normalKws[i].toLowerCase())) return '보통';
+  }
+  return '참고';
+}
+
+// ── 뉴스 로드 & 렌더링 ────────────────────────────────────
 async function loadNews() {
   if (!sb) return;
   try {
-    let query = sb.from('news_feed').select('*').order('published_at', { ascending: false, nullsFirst: false }).limit(30);
-    if (currentNewsFilter !== '전체') query = query.eq('category', currentNewsFilter);
-    const { data } = await query;
-    if (data && data.length > 0) {
-      // published_at 없는 항목은 created_at 기준으로 정렬 보완
-      const sorted = data.slice().sort(function(a, b) {
-        var da = new Date(a.published_at || a.created_at);
-        var db = new Date(b.published_at || b.created_at);
-        return db - da;
-      });
-      const list = document.getElementById('news-list');
-      list.innerHTML = sorted.map(n => {
-        const dateStr = n.published_at || n.created_at;
-        const date = new Date(dateStr).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
-        const urlHtml = n.url ? ` <a href="${n.url}" target="_blank" style="color:var(--accent);font-size:11px;margin-left:4px"><i class="ti ti-external-link"></i></a>` : '';
-        return `<div class="news-item">
-          <div class="news-dot ${n.is_read ? 'dot-read' : 'dot-new'}"></div>
-          <div style="flex:1">
-            <div class="news-title" onclick="markRead('${n.id}')" style="cursor:pointer">${n.title}${urlHtml}</div>
-            <div class="news-meta">${n.source || ''} · ${date} · ${n.category || ''}</div>
-            ${n.summary ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:3px">${n.summary}</div>` : ''}
-          </div>
-        </div>`;
-      }).join('');
-    } else {
-      document.getElementById('news-list').innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">수집된 뉴스가 없습니다.</div>';
+    var { data } = await sb.from('news_feed').select('*')
+      .order('published_at', { ascending: false, nullsFirst: false }).limit(50);
+    newsDataCache = data || [];
+    // 중요도 분류 (캐시에 저장)
+    newsDataCache.forEach(function(n) { n._importance = classifyNewsImportance(n); });
+    renderNewsList();
+  } catch(e) {
+    console.warn('News load error:', e);
+    var el = document.getElementById('news-list');
+    if (el) el.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center;font-size:12px">뉴스 로드 실패: ' + e.message + '</div>';
+  }
+}
+
+function renderNewsList() {
+  var data = currentNewsFilter === '전체'
+    ? newsDataCache
+    : newsDataCache.filter(function(n) { return n._importance === currentNewsFilter; });
+
+  // 날짜 내림차순 정렬
+  var sorted = data.slice().sort(function(a, b) {
+    return new Date(b.published_at || b.created_at) - new Date(a.published_at || a.created_at);
+  });
+
+  var listEl = document.getElementById('news-list');
+  if (!listEl) return;
+
+  if (sorted.length === 0) {
+    listEl.innerHTML = '<div style="color:var(--text-secondary);padding:24px;text-align:center;font-size:12px">해당 중요도의 뉴스가 없습니다.</div>';
+    return;
+  }
+
+  listEl.innerHTML = sorted.map(function(n) {
+    var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
+    var date = new Date(n.published_at || n.created_at).toLocaleDateString('ko-KR', {month:'2-digit', day:'2-digit'});
+    var isSelected = String(n.id) === String(selectedNewsId);
+    var urlIcon = n.url
+      ? ' <a href="' + n.url + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:11px;vertical-align:middle"><i class="ti ti-external-link"></i></a>'
+      : '';
+    return '<div class="news-item" onclick="showNewsDetail(\'' + n.id + '\')" style="cursor:pointer;border-left:' + rule.border + ';' + (isSelected ? 'background:var(--bg-secondary);border-radius:var(--radius-md)' : '') + '">' +
+      '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '"></div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
+          '<span style="font-size:10px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 7px;border-radius:4px">' + rule.label + '</span>' +
+          '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
+          (n.source ? '<span style="font-size:10px;color:var(--text-tertiary);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px">' + n.source + '</span>' : '') +
+        '</div>' +
+        '<div class="news-title" style="font-size:13px;line-height:1.5">' + n.title + urlIcon + '</div>' +
+        (n.summary ? '<div class="news-meta" style="margin-top:3px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + n.summary.slice(0,60) + (n.summary.length>60?'…':'') + '</div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function filterNewsByImportance(el, importance) {
+  document.querySelectorAll('#news-filter-tabs .tag').forEach(function(t) { t.classList.remove('selected'); });
+  el.classList.add('selected');
+  currentNewsFilter = importance;
+  renderNewsList();
+}
+
+// ── 뉴스 상세 패널 ─────────────────────────────────────────
+function showNewsDetail(newsId) {
+  selectedNewsId = newsId;
+  var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
+  if (!n) return;
+
+  // 목록 선택 표시 업데이트
+  renderNewsList();
+
+  var rule   = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
+  var date   = (n.published_at || n.created_at || '').slice(0, 10);
+  var urlBtn = n.url
+    ? '<a href="' + n.url + '" target="_blank" class="btn" style="font-size:11px;padding:4px 10px;text-decoration:none"><i class="ti ti-external-link"></i> 원문 보기</a>'
+    : '';
+
+  // 팀 액션 아이템 HTML
+  var actionsHtml = rule.response_guide.map(function(a, i) {
+    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--border-light)">' +
+      '<span style="background:var(--accent);color:#fff;border-radius:50%;width:18px;height:18px;min-width:18px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-top:1px">' + (i+1) + '</span>' +
+      '<span style="font-size:12px;color:var(--text-primary);line-height:1.6">' + a + '</span>' +
+    '</div>';
+  }).join('');
+
+  var html =
+    // 헤더: 중요도 + 제목
+    '<div style="border-left:3px solid ' + rule.color + ';padding-left:10px;margin-bottom:14px">' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+        '<span style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px">' + rule.label + '</span>' +
+        '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
+        (urlBtn ? '<div style="margin-left:auto">' + urlBtn + '</div>' : '') +
+      '</div>' +
+      '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.55;margin-bottom:4px">' + n.title + '</div>' +
+      '<div style="font-size:11px;color:var(--text-secondary)">' + (n.source || '') + '</div>' +
+    '</div>' +
+
+    // 요약 (있는 경우)
+    (n.summary ? '<div style="font-size:12px;color:var(--text-secondary);padding:9px 12px;background:var(--bg-secondary);border-radius:var(--radius-md);margin-bottom:14px;line-height:1.7">' + n.summary + '</div>' : '') +
+
+    // SKT 영향도
+    '<div style="margin-bottom:14px">' +
+      '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● SKT 영향도 분석</div>' +
+      '<div style="font-size:12px;color:var(--text-primary);padding:10px 12px;background:' + rule.bg + ';border-radius:var(--radius-md);line-height:1.7" id="impact-box-' + n.id + '">' +
+        '<span style="color:var(--text-secondary)">' + rule.desc + '</span>' +
+        '<div style="margin-top:8px">' +
+          '<button onclick="analyzeNewsImpact(\'' + n.id + '\')" class="btn" id="analyze-btn-' + n.id + '" style="font-size:11px;padding:4px 12px">' +
+            '<i class="ti ti-robot"></i> AI 영향도 분석' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+
+    // 팀 액션 아이템
+    '<div style="margin-bottom:14px">' +
+      '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">● 팀 액션 아이템</div>' +
+      actionsHtml +
+    '</div>' +
+
+    // AI 자문 연동
+    '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">' +
+      '<button onclick="askQ(\'' + n.title.replace(/'/g, "\\'").slice(0,50) + ' SKT 영향 분석해줘\')" class="btn btn-primary" style="width:100%;font-size:12px;justify-content:center">' +
+        '<i class="ti ti-message-2"></i> AI 자문에서 상세 분석' +
+      '</button>' +
+    '</div>';
+
+  var panel   = document.getElementById('news-detail-panel');
+  var content = document.getElementById('news-detail-content');
+  if (panel)   { panel.style.display = 'block'; }
+  if (content) { content.innerHTML = html; }
+
+  // 읽음 처리
+  if (sb) { sb.from('news_feed').update({ is_read: true }).eq('id', n.id).then(function() {}); }
+  n.is_read = true;
+}
+
+// ── AI 영향도 분석 (Claude Haiku — 빠른 분석) ───────────────
+async function analyzeNewsImpact(newsId) {
+  var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
+  if (!n) return;
+  var { claudeKey } = getConfig();
+  if (!claudeKey) { alert('Claude API 키가 필요합니다.'); return; }
+
+  var btn = document.getElementById('analyze-btn-' + newsId);
+  var box = document.getElementById('impact-box-' + newsId);
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 분석 중...'; }
+
+  try {
+    var sysMsg = 'SK텔레콤 CR센터 기술정책팀 전파정책 전문가. 뉴스 제목을 보고 SKT 입장에서 간결하게 분석하라. XML 형식으로만 답변:\n<impact>SKT 영향도 2~3문장</impact>\n<kpi>관련 KPI 태그: KPI1(주파수 대가 최소화)/KPI2(적합성평가 리스크)/KPI3(선제적 규제 대응)/KPI4(국제표준 기여) 중 해당하는 것</kpi>\n<priority>즉시대응/금주검토/동향파악 중 하나</priority>';
+    var userMsg = '뉴스: ' + n.title + '\n출처: ' + (n.source || '') + '\n날짜: ' + (n.published_at||'').slice(0,10) + (n.summary ? '\n요약: ' + n.summary : '');
+
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 500, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
+    });
+    var data = await res.json();
+    var text = (data.content && data.content[0] && data.content[0].text) || '';
+
+    var impactM  = text.match(/<impact>([\s\S]*?)<\/impact>/);
+    var kpiM     = text.match(/<kpi>([\s\S]*?)<\/kpi>/);
+    var priorityM = text.match(/<priority>([\s\S]*?)<\/priority>/);
+
+    var impactText   = impactM   ? impactM[1].trim()   : '';
+    var kpiText      = kpiM      ? kpiM[1].trim()      : '';
+    var priorityText = priorityM ? priorityM[1].trim() : '';
+
+    var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
+
+    if (box && impactText) {
+      box.innerHTML =
+        '<div style="font-size:12px;line-height:1.7;margin-bottom:8px">' + impactText + '</div>' +
+        (kpiText      ? '<div style="font-size:11px;color:var(--accent);margin-bottom:4px">🎯 ' + kpiText + '</div>' : '') +
+        (priorityText ? '<div style="font-size:11px;color:' + rule.color + ';font-weight:600">⚡ ' + priorityText + '</div>' : '');
     }
-  } catch(e) { console.warn('News load error:', e); }
+  } catch(e) {
+    console.warn('영향도 분석 오류:', e);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-robot"></i> AI 영향도 분석'; }
+  }
 }
 
 async function markRead(id) {
   if (sb) { try { await sb.from('news_feed').update({ is_read: true }).eq('id', id); } catch(e) {} }
 }
 
-function filterNews(el, cat) {
-  document.querySelectorAll('.tag-list .tag').forEach(t => t.classList.remove('selected'));
-  el.classList.add('selected');
-  currentNewsFilter = cat;
-  loadNews();
-}
+// 구 filterNews 호환용 (혹시 다른 곳에서 호출 시)
+function filterNews(el, cat) { filterNewsByImportance(el, cat); }
 
 // ════════════════════════════════════════════
 //  Daily Briefing — Supabase daily_briefings 표시
