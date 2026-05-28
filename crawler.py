@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 전파정책 전문가 AI — 자동 크롤러
-매일 오전 8시 KST GitHub Actions에서 실행
-크롤링 대상: 국립전파연구원 · 과기정통부 · 전자신문
-결과: Supabase news_feed 저장 + 이메일 발송
+매시간 GitHub Actions에서 실행
+크롤링 대상: 국립전파연구원 · 과기정통부 · 전자신문 외 다수
+결과: Supabase news_feed 저장 + 이메일 발송 + 긴급 시 텔레그램 알림
 """
 
 import os
@@ -17,13 +17,17 @@ from email.mime.text import MIMEText
 import requests
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
+import anthropic
 
 # ── 환경변수 ────────────────────────────────────────────
-SUPABASE_URL = os.environ['SUPABASE_URL']
-SUPABASE_KEY = os.environ['SUPABASE_SERVICE_KEY']
-EMAIL_FROM   = os.environ.get('EMAIL_FROM', '')
-EMAIL_PASS   = os.environ.get('EMAIL_PASSWORD', '')
-EMAIL_TO     = os.environ.get('EMAIL_TO', '')
+SUPABASE_URL       = os.environ['SUPABASE_URL']
+SUPABASE_KEY       = os.environ['SUPABASE_SERVICE_KEY']
+EMAIL_FROM         = os.environ.get('EMAIL_FROM', '')
+EMAIL_PASS         = os.environ.get('EMAIL_PASSWORD', '')
+EMAIL_TO           = os.environ.get('EMAIL_TO', '')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID   = os.environ.get('TELEGRAM_CHAT_ID', '')
+ANTHROPIC_API_KEY  = os.environ.get('ANTHROPIC_API_KEY', '')
 
 # ── 초기화 ─────────────────────────────────────────────
 sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -37,6 +41,65 @@ HEADERS = {
     'Accept-Language': 'ko-KR,ko;q=0.9',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
+
+
+# ═══════════════════════════════════════════════════════
+#  긴급 분류 — Claude Haiku AI 판단
+# ═══════════════════════════════════════════════════════
+
+_URGENCY_SYSTEM = """당신은 SK텔레콤 CR센터 기술정책팀의 전파정책 모니터링 AI입니다.
+기사 제목과 본문을 읽고 SKT 관점에서 대응 우선순위를 판단합니다.
+
+아래 기준으로 셋 중 하나만 출력하세요 (다른 말 없이 단어만):
+
+즉시대응:
+- 이동통신 품질·장비·기지국·공공 와이파이 관련 불만/민원/장애/사고 기사
+- 전파·전자파·무선국·주파수 관련 불만·규제강화·위반·처분 기사
+- 과징금·허가취소·영업정지·행정처분 등 통신사에 직접 영향을 주는 기사
+
+금주검토:
+- 이동통신·전파·무선 관련 정보성·정책 동향·기술 소개 기사
+- 입법예고·개정안·정책 발표 등 간접적으로 영향을 줄 수 있는 기사
+
+동향파악:
+- 위 두 기준에 해당하지 않는 해외 동향·업계 일반 트렌드·참고용 기사"""
+
+_AI_PRIORITY_MAP = {'즉시대응': '긴급', '금주검토': '보통', '동향파악': '참고'}
+_FALLBACK_MOBILE = ['이동통신', '기지국', '공공와이파이', '와이파이', '전파', '전자파', '무선국', '주파수']
+
+
+def classify_urgency(title: str, content: str = '') -> str:
+    """
+    Claude Haiku로 기사 긴급도 AI 판단.
+    API 키 없거나 오류 시 키워드 기반 폴백.
+    반환값: '긴급' | '보통' | '참고'
+    """
+    if not ANTHROPIC_API_KEY:
+        # API 키 없을 때 간단 폴백
+        text = title + ' ' + (content or '')[:300]
+        return '보통' if any(k in text for k in _FALLBACK_MOBILE) else '참고'
+
+    snippet = (content or '').replace('\s+', ' ').strip()[:600]
+    user_msg = f"제목: {title}\n본문: {snippet}" if snippet else f"제목: {title}"
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model='claude-haiku-4-5',
+            max_tokens=10,
+            system=_URGENCY_SYSTEM,
+            messages=[{'role': 'user', 'content': user_msg}],
+        )
+        answer = resp.content[0].text.strip()
+        # 응답에서 키워드 추출 (앞뒤 공백·줄바꿈 제거)
+        for key in _AI_PRIORITY_MAP:
+            if key in answer:
+                return _AI_PRIORITY_MAP[key]
+        return '참고'
+    except Exception as e:
+        print(f'  [AI 분류 오류] {title[:30]}... → 폴백 사용: {e}')
+        text = title + ' ' + (content or '')[:300]
+        return '보통' if any(k in text for k in _FALLBACK_MOBILE) else '참고'
 
 
 # ═══════════════════════════════════════════════════════
@@ -574,13 +637,21 @@ def fetch_article_body(url: str, source: str) -> str:
             '전자신문':    ['div.article_body', 'div#articleBody', 'div.news_view', 'div#articleView'],
             '연합뉴스':    ['div.article-txt', 'article.story-news', 'div#articleWrap'],
             '디지털타임스': ['div#article_txt', 'div.article_content', 'div#articleBody'],
-            'ZDNet Korea': ['div#article_body', 'div.article_view', 'div#articleContent'],
+            'ZDNet Korea': ['div#article_body', 'div.article_view', 'div#articleContent',
+                            'div.article_content', 'div.view_txt', 'div#article-view-content-div'],
             '아이뉴스24':  ['div#news_body_area', 'div.article_txt', 'div#articleBody'],
-            '매일경제':    ['div#article_body', 'div.art_txt', 'div#newsDetailBody'],
+            '매일경제':    ['div#article_body', 'div.art_txt', 'div#newsDetailBody',
+                            'div.article_wrap', 'div#article-body'],
             '머니투데이':  ['div#textBody', 'div.news_text', 'div#content_text'],
             '디지털데일리': ['div#articleBody', 'div.article_txt'],
             '지디넷코리아': ['div#article_content', 'div.article_view'],
             '블로터':      ['div.article_content'],
+            '한국경제':    ['div#articalbody', 'div.article-body', 'div#articleBody',
+                            'div.article_body', 'div#newsView', 'div.news-contents'],
+            '파이낸셜뉴스': ['div#article_content', 'div.article_view', 'div#articleBody'],
+            '뉴스1':       ['div.article-body', 'div#articleBody', 'div.news_body_area'],
+            '정보통신신문': ['div#article_body', 'div.article-content', 'div.view_cont'],
+            'Telecom Reseller': ['div.entry-content', 'article', 'div.post-content'],
         }
         candidates = selectors_map.get(source, []) + [
             'article', 'div.article', 'div.news-content',
@@ -623,11 +694,113 @@ def save_new_items(items: list, existing_urls: set) -> list:
                 item['content_fetched_at'] = datetime.now(KST).isoformat()
                 time.sleep(1)  # 서버 부하 방지
 
+        # 긴급도 분류 추가
+        for item in unique_new:
+            item['urgency'] = classify_urgency(
+                item.get('title', ''),
+                item.get('content', '') or ''
+            )
+
         sb.table('news_feed').insert(unique_new).execute()
-        print(f'[저장] {len(unique_new)}건 본문 포함 저장 완료')
+        urgent_count = sum(1 for i in unique_new if i.get('urgency') == '긴급')
+        print(f'[저장] {len(unique_new)}건 저장 완료 (긴급 {urgent_count}건)')
     else:
         print('[저장] 신규 항목 없음')
     return unique_new
+
+
+# ═══════════════════════════════════════════════════════
+#  텔레그램 알림 (긴급 기사 전용)
+# ═══════════════════════════════════════════════════════
+
+def send_telegram(urgent_items: list):
+    """긴급 기사를 Telegram Bot으로 즉시 알림"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print('[텔레그램] 환경변수 미설정 (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — 건너뜀')
+        return
+    if not urgent_items:
+        return
+
+    now_str = datetime.now(KST).strftime('%Y.%m.%d %H:%M KST')
+    lines = [f'🚨 *[전파정책 AI] 긴급 기사 {len(urgent_items)}건* — {now_str}\n']
+    for i, item in enumerate(urgent_items, 1):
+        title = item.get('title', '')
+        source = item.get('source', '')
+        url = item.get('url', '')
+        lines.append(f'*{i}. {title}*')
+        lines.append(f'   출처: {source}')
+        lines.append(f'   🔗 {url}\n')
+
+    lines.append('📊 대시보드: https://youjinwoong.github.io/radio-policy-ai/')
+    text = '\n'.join(lines)
+
+    api_url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+    try:
+        resp = requests.post(api_url, json={
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': text,
+            'parse_mode': 'Markdown',
+            'disable_web_page_preview': True,
+        }, timeout=15)
+        if resp.status_code == 200:
+            print(f'[텔레그램] 긴급 {len(urgent_items)}건 발송 완료')
+        else:
+            print(f'[텔레그램 오류] HTTP {resp.status_code}: {resp.text[:200]}')
+    except Exception as e:
+        print(f'[텔레그램 오류] {e}')
+
+
+# ═══════════════════════════════════════════════════════
+#  긴급 전용 이메일 알림
+# ═══════════════════════════════════════════════════════
+
+def send_urgent_email(urgent_items: list):
+    """긴급 기사 발생 시 즉시 이메일 발송 (정기 메일과 별개)"""
+    if not all([EMAIL_FROM, EMAIL_PASS, EMAIL_TO]):
+        print('[긴급 이메일] 환경변수 미설정 — 건너뜀')
+        return
+    if not urgent_items:
+        return
+
+    now_str = datetime.now(KST).strftime('%Y.%m.%d %H:%M KST')
+    subject = f'🚨 [전파정책 AI 긴급] {now_str} — 즉시 대응 기사 {len(urgent_items)}건'
+
+    rows_html = ''
+    for item in urgent_items:
+        rows_html += f'''
+  <li style="margin-bottom:14px;padding:10px;background:#fff5f5;border-left:4px solid #e53e3e;border-radius:4px">
+    <a href="{item['url']}" style="color:#c53030;font-weight:700;font-size:14px">{item['title']}</a><br>
+    <small style="color:#666">{item['source']}</small>
+  </li>'''
+
+    body_html = f'''
+<html><body style="font-family:sans-serif;max-width:600px;margin:auto;padding:20px">
+<h2 style="color:#c53030">🚨 전파정책 AI — 긴급 대응 알림</h2>
+<p style="color:#666">{now_str} | 즉시 대응이 필요한 기사 <strong>{len(urgent_items)}건</strong>이 감지되었습니다.</p>
+<hr style="border-color:#fed7d7">
+<ul style="padding-left:20px;list-style:none">
+{rows_html}
+</ul>
+<hr>
+<p style="color:#999;font-size:12px">
+이 메일은 긴급 기사 감지 시 자동 발송됩니다. SKT CR센터 기술정책팀<br>
+대시보드: <a href="https://youjinwoong.github.io/radio-policy-ai/">https://youjinwoong.github.io/radio-policy-ai/</a>
+</p>
+</body></html>'''
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From']    = f'전파정책 AI <{EMAIL_FROM}>'
+    msg['To']      = EMAIL_TO
+    msg.attach(MIMEText(body_html, 'html', 'utf-8'))
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as smtp:
+            smtp.login(EMAIL_FROM, EMAIL_PASS)
+            smtp.sendmail(EMAIL_FROM, EMAIL_TO.split(','), msg.as_string())
+        print(f'[긴급 이메일] {EMAIL_TO}로 발송 완료')
+    except Exception as e:
+        print(f'[긴급 이메일 오류] {e}')
 
 
 # ═══════════════════════════════════════════════════════
@@ -733,6 +906,15 @@ def main():
 
     new_items = save_new_items(all_items, existing_urls)
     print(f'[신규] {len(new_items)}건')
+
+    # 긴급 기사 알림 (텔레그램 + 이메일 즉시 발송)
+    urgent_items = [i for i in new_items if i.get('urgency') == '긴급']
+    if urgent_items:
+        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
+        send_telegram(urgent_items)
+        send_urgent_email(urgent_items)
+    else:
+        print('[긴급] 해당 없음')
 
     send_email(new_items)
 
