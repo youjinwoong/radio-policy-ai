@@ -1275,64 +1275,97 @@ function classifyBriefingItemImportance(text) {
   return '참고';
 }
 
-// 브리핑 콘텐츠 파싱 — 뉴스 항목별로 긴급도 분류 후 HTML 생성
+// 비뉴스 섹션(주목 포인트·기술 용어 등) bullet 항목 렌더링
+function renderPlainBulletItem(block) {
+  var lines = block.split('\n');
+  var out = '';
+  for (var i = 0; i < lines.length; i++) {
+    var l = lines[i];
+    if (/^• /.test(l)) {
+      out += '<div style="font-size:13px;line-height:1.8;padding-left:2px">• ' + l.replace(/^• /, '') + '</div>';
+    } else if (/^  → /.test(l)) {
+      out += '<div style="font-size:12px;color:var(--text-secondary);padding-left:16px;line-height:1.6">→ ' + l.replace(/^  → /, '') + '</div>';
+    } else if (/^  🔗 /.test(l)) {
+      var url = l.replace(/^  🔗 /, '').trim();
+      out += '<div style="padding-left:16px;font-size:12px;margin-top:2px"><a href="' + url + '" target="_blank" style="color:var(--accent);text-decoration:none">🔗 원문 보기</a></div>';
+    } else if (l.trim()) {
+      out += '<div style="font-size:13px;line-height:1.8">' + l + '</div>';
+    }
+  }
+  return '<div style="margin-bottom:6px">' + out + '</div>';
+}
+
+// 브리핑 콘텐츠 파싱 — 섹션 순서 보존, 뉴스 섹션만 긴급도 분류
 function parseBriefingContent(rawContent, briefingIdx) {
   var escaped = (rawContent || '')
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   var lines = escaped.split('\n');
-  var html = '';
+  var output = [];          // 순서 보존 HTML 청크 배열
   var itemLines = [];
-  var urgentCount = 0;
-
-  function flushItem(itemIdx) {
-    if (itemLines.length === 0) return '';
-    var block = itemLines.join('\n');
-    var importance = classifyBriefingItemImportance(block);
-    var out = renderBriefingNewsItem(block, importance, briefingIdx, itemIdx);
-    if (importance === '긴급') urgentCount++;
-    itemLines = [];
-    return out;
-  }
-
   var itemIdx = 0;
-  var itemHtmlParts = [];
-  var headerHtml = '';
+  var urgentCount = 0;
+  var currentSection = 'news'; // 현재 섹션 추적 (news | other)
+
+  function flushItem() {
+    if (itemLines.length === 0) return;
+    var block = itemLines.join('\n');
+    if (currentSection === 'news') {
+      var importance = classifyBriefingItemImportance(block);
+      output.push(renderBriefingNewsItem(block, importance, briefingIdx, itemIdx));
+      if (importance === '긴급') urgentCount++;
+    } else {
+      // 주목 포인트·기술 용어 등 — 일반 텍스트로 표시
+      output.push(renderPlainBulletItem(block));
+    }
+    itemIdx++;
+    itemLines = [];
+  }
 
   for (var li = 0; li < lines.length; li++) {
     var line = lines[li];
-    // 섹션 헤더 [주요 뉴스] 등
-    if (/^\[.+\]$/.test(line.trim())) {
-      if (itemLines.length > 0) { itemHtmlParts.push(flushItem(itemIdx)); itemIdx++; }
-      headerHtml += '<div style="font-weight:600;font-size:12px;color:var(--text-secondary);margin:14px 0 8px;letter-spacing:0.04em">' + line.trim() + '</div>';
+    var trimmed = line.trim();
+
+    // 섹션 헤더 [주요 뉴스], [주목 포인트], [기술 용어] 등
+    if (/^\[.+\]$/.test(trimmed)) {
+      flushItem();
+      // 뉴스 섹션인지 여부 판단
+      currentSection = /뉴스|news/i.test(trimmed) ? 'news' : 'other';
+      output.push('<div style="font-weight:600;font-size:12px;color:var(--text-secondary);margin:14px 0 8px;letter-spacing:0.04em">' + trimmed + '</div>');
       continue;
     }
-    // 제목 헤더 (📡로 시작)
+    // 제목 헤더 (📡)
     if (/^📡/.test(line)) {
-      if (itemLines.length > 0) { itemHtmlParts.push(flushItem(itemIdx)); itemIdx++; }
-      headerHtml += '<div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:12px">' + line + '</div>';
+      flushItem();
+      output.push('<div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:12px">' + line + '</div>');
       continue;
     }
-    // 뉴스 항목 시작
+    // bullet 항목 시작
     if (/^• /.test(line)) {
-      if (itemLines.length > 0) { itemHtmlParts.push(flushItem(itemIdx)); itemIdx++; }
+      flushItem();
       itemLines.push(line);
       continue;
     }
-    // 항목 내 들여쓰기 줄
+    // 들여쓰기 줄 — 현재 항목에 추가
     if (/^  /.test(line) && itemLines.length > 0) {
       itemLines.push(line);
       continue;
     }
-    // 빈 줄 또는 기타
+    // 빈 줄 — 항목 종료
+    if (trimmed === '' && itemLines.length > 0) {
+      flushItem();
+      output.push('<div style="height:4px"></div>');
+      continue;
+    }
+    // 일반 텍스트 줄
     if (itemLines.length > 0) {
-      itemLines.push(line);
+      itemLines.push(line); // 항목 내 연속 줄
     } else {
-      headerHtml += (line ? '<div style="font-size:13px;line-height:1.8">' + line + '</div>' : '<div style="height:6px"></div>');
+      output.push(trimmed ? '<div style="font-size:13px;line-height:1.8">' + line + '</div>' : '<div style="height:4px"></div>');
     }
   }
-  if (itemLines.length > 0) { itemHtmlParts.push(flushItem(itemIdx)); }
+  flushItem();
 
-  return { html: headerHtml + itemHtmlParts.join(''), urgentCount: urgentCount };
+  return { html: output.join(''), urgentCount: urgentCount };
 }
 
 // 뉴스 항목 1건 HTML 렌더링
