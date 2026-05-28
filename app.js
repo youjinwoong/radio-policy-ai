@@ -773,16 +773,53 @@ var IMPORTANCE_RULES = {
   }
 };
 
+// ── SKT 관련 주제 키워드 (공공 와이파이 / 이동통신 품질·장비 / 전파·전자파·무선국·주파수)
+var SKT_RELEVANT_TOPICS = [
+  // 공공 와이파이
+  '공공 와이파이', '공공와이파이', '공공wi-fi', '공공wifi', '공중 와이파이', '공중와이파이',
+  '공공 인터넷', '무료 와이파이', '공용 와이파이',
+  // 이동통신 품질·장비
+  '이동통신 품질', '통신 품질', '5g 품질', '5g 속도', '네트워크 품질', '기지국',
+  '통신 장비', '중계기', '통신망', '망 품질', '서비스 품질', '커버리지',
+  '통신 불량', '전파 수신', '수신 불량', '전파 품질', '신호 약함', '음영지역',
+  // 전파·전자파·무선국·주파수
+  '전파', '전자파', '무선국', '주파수'
+];
+
+// ── 부정적·불만 기사 감지 키워드
+var NEGATIVE_SIGNALS = [
+  '민낯', '속터지는', '절레절레', '불만', '비판', '논란', '갈등', '문제점', '미흡', '부실',
+  '실패', '형편없', '최악', '불편', '차별', '피해', '민원', '어이없', '황당', '역부족',
+  '허점', '사각지대', '외면', '방치', '방관', '지적', '질타', '성토', '처참', '엉터리',
+  '먹통', '불통', '불량', '낙제점', '끊김', '느린', '불만족', '개선 촉구', '개선 요구',
+  '꼴', '망신', '비난', '성난', '분통', '뿔난', '꼬집', '꼬집어', '분노', '항의',
+  'nobody\'s ready', 'fails', 'problem', 'issue', 'concern', 'complaint', 'poor',
+  'slow', 'unreliable', 'disappointing', 'frustrat'
+];
+
 function classifyNewsImportance(news) {
   var hay = ((news.title || '') + ' ' + (news.summary || '')).toLowerCase();
+
+  // [1단계] 법적 조치·행정처분 등 기존 긴급 키워드 → 긴급
   var urgentKws = IMPORTANCE_RULES['긴급'].keywords;
   for (var i = 0; i < urgentKws.length; i++) {
     if (hay.includes(urgentKws[i].toLowerCase())) return '긴급';
   }
+
+  // [2단계] SKT 관련 주제 + 부정적 신호 → 긴급
+  var isRelevant = SKT_RELEVANT_TOPICS.some(function(t) { return hay.includes(t.toLowerCase()); });
+  var isNegative = NEGATIVE_SIGNALS.some(function(s) { return hay.includes(s.toLowerCase()); });
+  if (isRelevant && isNegative) return '긴급';
+
+  // [3단계] 정책 움직임 (입법예고·개정안 등) → 보통
   var normalKws = IMPORTANCE_RULES['보통'].keywords;
   for (var i = 0; i < normalKws.length; i++) {
     if (hay.includes(normalKws[i].toLowerCase())) return '보통';
   }
+
+  // [4단계] SKT 관련 주제 + 정보성 → 보통
+  if (isRelevant) return '보통';
+
   return '참고';
 }
 
