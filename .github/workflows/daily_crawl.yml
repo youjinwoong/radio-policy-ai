@@ -2,13 +2,15 @@ name: 전파정책 일일 자동 크롤링
 
 on:
   schedule:
-    - cron: '0 23 * * *'   # 매일 23:00 UTC = 오전 8:00 KST
+    - cron: '0 * * * *'    # 매시간 정각 실행 (1시간 주기)
   workflow_dispatch:         # GitHub에서 수동 실행 버튼
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: 저장소 체크아웃
@@ -26,9 +28,12 @@ jobs:
 
       - name: 크롤러 실행
         env:
-          SUPABASE_URL:        ${{ secrets.SUPABASE_URL }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          EMAIL_FROM:          ${{ secrets.EMAIL_FROM }}
-          EMAIL_PASSWORD:      ${{ secrets.EMAIL_PASSWORD }}
-          EMAIL_TO:            ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM:           ${{ secrets.EMAIL_FROM }}
+          EMAIL_PASSWORD:       ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO:             ${{ secrets.EMAIL_TO }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
         run: python crawler.py
