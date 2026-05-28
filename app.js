@@ -1528,21 +1528,23 @@ async function loadBriefing() {
         + '</div>';
     }).join('');
 
-    // 최신 브리핑(idx=0)의 긴급 항목 AI 분석 — DOM 렌더링 완료 후 실행
-    if (allParsed.length > 0) {
-      var urgentItems0 = allParsed[0].urgentItems;
-      setTimeout(function() {
-        urgentItems0.forEach(function(item) {
-          var chk = document.getElementById(item.elemId);
-          if (!chk) {
-            console.warn('[briefing] 분석 대상 elem 없음:', item.elemId, '— 렌더링 확인 필요');
-          } else {
-            console.log('[briefing] 분석 시작:', item.elemId, item.title);
-          }
-          analyzeBriefingItem(item.elemId, item.title);
-        });
-      }, 0);
-    }
+    // 최신 브리핑(idx=0)의 긴급 항목 AI 분석 — DOM 직접 스캔 방식
+    setTimeout(function() {
+      // id="bi-0-*" 인 모든 분석 컨테이너를 DOM에서 직접 탐색
+      var urgentDivs = listEl.querySelectorAll('[id^="bi-0-"]');
+      console.log('[briefing] DOM 스캔 결과 긴급 항목:', urgentDivs.length, '개');
+      urgentDivs.forEach(function(div) {
+        // 부모 컨테이너에서 제목 텍스트 추출
+        var container = div.parentElement;
+        var titleText = '';
+        if (container) {
+          var titleEl = container.querySelector('span[style*="font-weight:500"]');
+          if (titleEl) titleText = titleEl.textContent.trim();
+        }
+        console.log('[briefing] 분석 시작:', div.id, '|', titleText.slice(0, 40));
+        analyzeBriefingItem(div.id, titleText);
+      });
+    }, 300);
 
   } catch(e) {
     listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">브리핑 로드 실패: ' + e.message + '</div>';
