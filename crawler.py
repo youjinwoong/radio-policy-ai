@@ -13,6 +13,7 @@ import smtplib
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
 import requests
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
@@ -49,7 +50,7 @@ HEADERS = {
 _URGENCY_SYSTEM = """당신은 SK텔레콤 CR센터 기술정책팀의 전파정책 모니터링 AI입니다.
 기사 제목과 본문을 읽고 SKT 관점에서 대응 우선순위를 판단합니다.
 
-아래 기준으로 넷 중 하나만 출력하세요 (다른 말 없이 단어만):
+아래 기준으로 셋 중 하나만 출력하세요 (다른 말 없이 단어만):
 
 즉시대응:
 - 이동통신 품질·장비·기지국·공공 와이파이 관련 불만/민원/장애/사고 기사
@@ -61,13 +62,9 @@ _URGENCY_SYSTEM = """당신은 SK텔레콤 CR센터 기술정책팀의 전파정
 - 입법예고·개정안·정책 발표 등 간접적으로 영향을 줄 수 있는 기사
 
 동향파악:
-- 위 두 기준에 해당하지 않는 해외 동향·업계 일반 트렌드·참고용 기사
+- 위 두 기준에 해당하지 않는 해외 동향·업계 일반 트렌드·참고용 기사"""
 
-무관:
-- 전파·이동통신·주파수·무선 정책과 전혀 무관한 기사
-- 예: 반도체, 디스플레이, 가전, 게임, AI 하드웨어, 방산, 금융, 의료 등"""
-
-_AI_PRIORITY_MAP = {'즉시대응': '긴급', '금주검토': '보통', '동향파악': '참고', '무관': '무관'}
+_AI_PRIORITY_MAP = {'즉시대응': '긴급', '금주검토': '보통', '동향파악': '참고'}
 _FALLBACK_MOBILE = ['이동통신', '기지국', '공공와이파이', '와이파이', '전파', '전자파', '무선국', '주파수']
 
 
@@ -430,7 +427,7 @@ def crawl_etri() -> list:
                     'title': title,
                     'source': source,
                     'category': detect_category(title),
-                    'url': href,
+  2                 'url': href,
                     'is_read': False,
                     'published_at': parse_date(date_str),
                 })
@@ -658,7 +655,7 @@ def crawl_news_site(cfg: dict) -> list:
 
                 # 날짜 추출 (부모 컨테이너에서 탐색)
                 date_str = ''
-                parent = link.parent
+  2             parent = link.parent
                 for _ in range(4):  # 최대 4단계 부모까지
                     if parent is None:
                         break
@@ -778,26 +775,6 @@ def save_new_items(items: list, existing_urls: set) -> list:
             seen_urls.add(url)
             unique_new.append(item)
 
-    # 태그·카테고리 페이지 URL 필터링 (실제 기사 아닌 목록 페이지 제외)
-    TAG_URL_PATTERNS = ['/tag/', '/tags/', '/category/', '/categories/', '/topic/', '/topics/', '/search/', '?tag=', '?cat=', '?q=']
-    skipped_tag = [i for i in unique_new if any(p in i.get('url','') for p in TAG_URL_PATTERNS) or i.get('title','').startswith('#')]
-    unique_new   = [i for i in unique_new if not any(p in i.get('url','') for p in TAG_URL_PATTERNS) and not i.get('title','').startswith('#')]
-    if skipped_tag:
-        print(f'[URL 필터] {len(skipped_tag)}건 제외 (태그/카테고리 페이지)')
-
-    # AI 무관 판정 기사 저장 제외
-    skipped_irr = [i for i in unique_new if i.get('urgency') == '무관']
-    unique_new   = [i for i in unique_new if i.get('urgency') != '무관']
-    if skipped_irr:
-        print(f'[무관 필터] {len(skipped_irr)}건 제외 (전파/통신 무관 기사)')
-
-    # 발행일 3일 이내 기사만 저장 (날짜 없는 기사는 허용)
-    cutoff_3d = (datetime.now(KST) - timedelta(days=3)).isoformat()
-    skipped_old = [i for i in unique_new if i.get('published_at') and i.get('published_at', '') < cutoff_3d]
-    unique_new  = [i for i in unique_new if not i.get('published_at') or i.get('published_at', '') >= cutoff_3d]
-    if skipped_old:
-        print(f'[날짜 필터] {len(skipped_old)}건 제외 (발행 3일 초과)')
-
     if unique_new:
         # 기사 본문 수집 (항목당 1초 간격)
         print(f'[본문 수집] {len(unique_new)}건 시작...')
@@ -836,11 +813,188 @@ def save_new_items(items: list, existing_urls: set) -> list:
 
 
 # ═══════════════════════════════════════════════════════
+#  기술 용어 추출 — Claude API (매일 08:00)
+# ═══════════════════════════════════════════════════════
+
+_TERM_SYSTEM = """당신은 이동통신·전파 분야 기술 용어 추출 전문가입니다.
+아래 뉴스 목록에서 신규 전문 기술 용어를 추출하여 JSON 배열로만 반환하세요.
+
+추출 기준 (반드시 준수):
+✅ 포함: 국제 표준 번호(IEEE 802.11be), 프로토콜명(NR-U), 기술 약어(NTN, HAPS, RIS), 주파수 대역명(FR3, sub-THz)
+❌ 제외: 기술 약어 뒤에 시장/동향/경쟁/산업/전략/분야/서비스/플랫폼이 붙은 복합어
+❌ 제외: 요금제·상품명(5G-LTE 통합요금제, AI 토큰요금제 등)
+❌ 제외: 정책·제도·전략명(최적요금제 고지 제도, 하이퍼 AI네트워크 전략 등)
+❌ 제외: 흔한 용어(5G, LTE, Wi-Fi, AI, IoT 등)
+❌ 제외: 이미 알려진 기술의 동의어·변형(Wi-Fi 7 있으면 와이파이7 제외)
+
+출력 형식 (JSON 배열, 다른 말 없이):
+[{"term":"용어","term_en":"English Name","category":"주파수|네트워크|위성|단말|규제|기타","definition":"50자 이내 정의","source":"출처 언론사"}]
+신규 용어가 없으면 빈 배열 [] 반환."""
+
+
+def extract_tech_terms(items: list) -> list:
+    """뉴스 기사 목록에서 신규 기술 용어 추출 후 tech_terms 테이블에 저장."""
+    if not ANTHROPIC_API_KEY or not items:
+        return []
+
+    # 기존 용어 목록 조회 (중복 방지)
+    try:
+        existing = sb.table('tech_terms').select('term').execute()
+        existing_terms = {r['term'].lower() for r in (existing.data or [])}
+    except Exception as e:
+        print(f'[용어] 기존 목록 조회 실패: {e}')
+        existing_terms = set()
+
+    # 기사 목록 텍스트 구성 (제목 + 출처)
+    news_text = '\n'.join(
+        f"- {it.get('title','')} ({it.get('source','')})"
+        for it in items[:60]
+    )
+    existing_text = ', '.join(sorted(existing_terms)[:80]) if existing_terms else '없음'
+    user_msg = f"이미 등록된 용어(제외 대상):\n{existing_text}\n\n뉴스 목록:\n{news_text}"
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model='claude-haiku-4-5',
+            max_tokens=1000,
+            system=_TERM_SYSTEM,
+            messages=[{'role': 'user', 'content': user_msg}],
+        )
+        raw = resp.content[0].text.strip()
+        import json
+        # JSON 배열 추출
+        start = raw.find('[')
+        end = raw.rfind(']') + 1
+        if start == -1 or end == 0:
+            return []
+        terms = json.loads(raw[start:end])
+        if not terms:
+            print('[용어] 신규 용어 없음')
+            return []
+
+        # 중복 제거 후 저장
+        new_terms = [
+            t for t in terms
+            if isinstance(t, dict) and t.get('term')
+            and t['term'].lower() not in existing_terms
+        ]
+        if new_terms:
+            rows = [{
+                'term': t.get('term', ''),
+                'term_en': t.get('term_en', ''),
+                'category': t.get('category', '기타'),
+                'definition': t.get('definition', '')[:100],
+                'source': t.get('source', '자동 추출'),
+                'is_reviewed': False,
+            } for t in new_terms]
+            sb.table('tech_terms').insert(rows).execute()
+            print(f'[용어] 신규 {len(new_terms)}건 저장: {[t["term"] for t in new_terms]}')
+        return new_terms
+    except Exception as e:
+        print(f'[용어 추출 오류] {e}')
+        return []
+
+
+# ═══════════════════════════════════════════════════════
+#  브리핑 생성 — Claude API + Supabase 저장 (매일 08:00)
+# ═══════════════════════════════════════════════════════
+
+_BRIEFING_SYSTEM = """당신은 SK텔레콤 CR센터 기술정책팀의 전파정책 모닝 브리핑 작성 AI입니다.
+제공된 뉴스 목록과 신규 기술 용어를 바탕으로 간결하고 실용적인 브리핑을 작성하세요.
+
+작성 규칙:
+- [주요 뉴스]는 제공된 기사에서만 선별 (최대 8건, 긴급·중요 기사 우선)
+- [주목 포인트]는 SKT CR센터 정책·기술 관점에서 핵심 이슈 1~3개 도출
+- 뉴스 외부 배경 지식이나 추측 포함 금지
+- 각 뉴스에 한 줄 요약 포함
+
+출력 형식 (아래 형식 그대로):
+📡 전파정책 모닝 브리핑 — {날짜}
+
+[주요 뉴스]
+• 제목 — 출처
+  → 한 줄 요약
+  🔗 URL
+
+[주목 포인트]
+• 핵심 이슈 1
+• 핵심 이슈 2
+
+[새로 추가된 기술 용어]
+• 용어: 정의
+
+[저장 결과]
+뉴스 N건 / 기술 용어 N건"""
+
+
+def generate_daily_briefing(items: list, new_terms: list) -> str:
+    """Claude API로 브리핑 텍스트 생성 후 daily_briefings 테이블에 저장."""
+    if not items:
+        return ''
+
+    today_str = datetime.now(KST).strftime('%Y년 %m월 %d일')
+
+    # 기사 목록 구성
+    news_lines = []
+    for it in items[:50]:
+        urgency_icon = {'긴급': '🔴', '보통': '🟡', '참고': '🟢'}.get(it.get('urgency', '참고'), '🟢')
+        news_lines.append(
+            f"{urgency_icon} {it.get('title','')} — {it.get('source','')}\n"
+            f"   URL: {it.get('url','')}\n"
+            f"   발행: {str(it.get('published_at',''))[:10]}"
+        )
+
+    # 신규 용어 목록
+    term_lines = '\n'.join(
+        f"- {t.get('term','')}: {t.get('definition','')}"
+        for t in new_terms
+    ) if new_terms else '신규 용어 없음'
+
+    user_msg = (
+        f"날짜: {today_str}\n\n"
+        f"[브리핑 대상 뉴스 {len(items)}건]\n"
+        + '\n'.join(news_lines)
+        + f"\n\n[오늘 신규 추출된 기술 용어]\n{term_lines}"
+    )
+
+    briefing_text = ''
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model='claude-haiku-4-5',
+            max_tokens=2000,
+            system=_BRIEFING_SYSTEM,
+            messages=[{'role': 'user', 'content': user_msg}],
+        )
+        briefing_text = resp.content[0].text.strip()
+        print(f'[브리핑] 텍스트 생성 완료 ({len(briefing_text)}자)')
+    except Exception as e:
+        print(f'[브리핑 생성 오류] {e}')
+        return ''
+
+    # daily_briefings 저장 (날짜 충돌 시 덮어쓰기)
+    try:
+        today_date = datetime.now(KST).strftime('%Y-%m-%d')
+        sb.table('daily_briefings').upsert({
+            'briefing_date': today_date,
+            'content': briefing_text,
+            'news_count': len(items),
+            'terms_count': len(new_terms),
+        }, on_conflict='briefing_date').execute()
+        print(f'[브리핑] daily_briefings 저장 완료 (뉴스 {len(items)}건, 용어 {len(new_terms)}건)')
+    except Exception as e:
+        print(f'[브리핑 DB 저장 오류] {e}')
+
+    return briefing_text
+
+
+# ═══════════════════════════════════════════════════════
 #  텔레그램 알림 (긴급 기사 전용)
 # ═══════════════════════════════════════════════════════
 
-def send_morning_telegram(items: list):
-    """아침 8시 일일 브리핑 Telegram 발송"""
+def send_morning_telegram(items: list, briefing_text: str = ''):
+    """아침 8시 일일 브리핑 Telegram 발송 — briefing_text 있으면 AI 브리핑 전송"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print('[텔레그램 모닝] 환경변수 미설정 — 건너뜀')
         return
@@ -848,21 +1002,27 @@ def send_morning_telegram(items: list):
         print('[텔레그램 모닝] 신규 기사 없음 — 건너뜀')
         return
 
-    now_str = datetime.now(KST).strftime('%Y.%m.%d')
-    urgent = [i for i in items if i.get('importance') == '긴급']
-    normal = [i for i in items if i.get('importance') == '보통']
-    ref    = [i for i in items if i.get('importance') == '참고']
-
-    lines = [f'☀️ *[전파정책 AI] {now_str} 아침 브리핑* — 신규 {len(items)}건\n']
-    for label, icon, group in [('긴급', '🔴', urgent), ('보통', '🟡', normal), ('참고', '🟢', ref)]:
-        if group:
-            lines.append(f'{icon} *{label} {len(group)}건*')
-            for item in group[:5]:
-                lines.append(f'  · {item.get("title", "")} ({item.get("source", "")})')
-            lines.append('')
-
-    lines.append('📊 대시보드: https://youjinwoong.github.io/radio-policy-ai/')
-    text = '\n'.join(lines)
+    # AI 브리핑 텍스트가 있으면 그대로 발송 (4096자 텔레그램 제한 고려)
+    if briefing_text:
+        text = briefing_text[:4000]
+        if len(briefing_text) > 4000:
+            text += '\n\n...(전문은 대시보드 참조)'
+        text += '\n\n📊 https://youjinwoong.github.io/radio-policy-ai/'
+    else:
+        # 폴백: 원시 목록 발송
+        now_str = datetime.now(KST).strftime('%Y.%m.%d')
+        urgent = [i for i in items if i.get('urgency') == '긴급']
+        normal = [i for i in items if i.get('urgency') == '보통']
+        ref    = [i for i in items if i.get('urgency') == '참고']
+        lines = [f'☀️ *[전파정책 AI] {now_str} 아침 브리핑* — {len(items)}건\n']
+        for label, icon, group in [('긴급', '🔴', urgent), ('보통', '🟡', normal), ('참고', '🟢', ref)]:
+            if group:
+                lines.append(f'{icon} *{label} {len(group)}건*')
+                for item in group[:5]:
+                    lines.append(f'  · {item.get("title", "")} ({item.get("source", "")})')
+                lines.append('')
+        lines.append('📊 https://youjinwoong.github.io/radio-policy-ai/')
+        text = '\n'.join(lines)
 
     api_url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
     try:
@@ -943,169 +1103,4 @@ def send_urgent_email(urgent_items: list):
     body_html = f'''
 <html><body style="font-family:sans-serif;max-width:600px;margin:auto;padding:20px">
 <h2 style="color:#c53030">🚨 전파정책 AI — 긴급 대응 알림</h2>
-<p style="color:#666">{now_str} | 즉시 대응이 필요한 기사 <strong>{len(urgent_items)}건</strong>이 감지되었습니다.</p>
-<hr style="border-color:#fed7d7">
-<ul style="padding-left:20px;list-style:none">
-{rows_html}
-</ul>
-<hr>
-<p style="color:#999;font-size:12px">
-이 메일은 긴급 기사 감지 시 자동 발송됩니다. SKT CR센터 기술정책팀<br>
-대시보드: <a href="https://youjinwoong.github.io/radio-policy-ai/">https://youjinwoong.github.io/radio-policy-ai/</a>
-</p>
-</body></html>'''
-
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From']    = f'전파정책 AI <{EMAIL_FROM}>'
-    msg['To']      = EMAIL_TO
-    msg.attach(MIMEText(body_html, 'html', 'utf-8'))
-
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as smtp:
-            smtp.login(EMAIL_FROM, EMAIL_PASS)
-            smtp.sendmail(EMAIL_FROM, list({a.strip() for a in (EMAIL_TO + ',lampman@sktelecom.com').split(',')}), msg.as_string())
-        print(f'[긴급 이메일] {EMAIL_TO}로 발송 완료')
-    except Exception as e:
-        print(f'[긴급 이메일 오류] {e}')
-
-
-# ═══════════════════════════════════════════════════════
-#  이메일 발송
-# ═══════════════════════════════════════════════════════
-
-def send_email(new_items: list):
-    if not all([EMAIL_FROM, EMAIL_PASS, EMAIL_TO]):
-        print('[이메일] 환경변수 미설정 — 건너뜀')
-        return
-
-    today = datetime.now(KST).strftime('%Y.%m.%d')
-
-    if not new_items:
-        subject = f'[전파정책 AI] {today} — 신규 고시·뉴스 없음'
-        body_html = f'''
-<html><body style="font-family:sans-serif;max-width:600px;margin:auto;padding:20px">
-<h2 style="color:#534AB7">전파정책 전문가 AI — 일일 모니터링 리포트</h2>
-<p style="color:#666">{today} | 오늘은 새로운 항목이 없습니다.</p>
-<hr>
-<p style="color:#999;font-size:12px">
-대시보드: <a href="https://youjinwoong.github.io/radio-policy-ai/">바로가기</a>
-</p>
-</body></html>'''
-    else:
-        subject = f'[전파정책 AI] {today} 신규 {len(new_items)}건 — 확인 필요'
-
-        by_cat: dict = {}
-        for item in new_items:
-            cat = item.get('category', '기타')
-            by_cat.setdefault(cat, []).append(item)
-
-        cat_icons = {
-            '주파수': '📶', '전자파': '⚡', '기술기준': '📋',
-            'ITU·WRC': '🌐', '전기통신사업': '📡', '정보통신망': '🔒', '기타': '📌'
-        }
-
-        rows_html = ''
-        for cat, cat_items in by_cat.items():
-            icon = cat_icons.get(cat, '📌')
-            rows_html += f'''
-<h3 style="color:#1a1a1a;margin:20px 0 8px">{icon} {cat} ({len(cat_items)}건)</h3>
-<ul style="padding-left:20px">'''
-            for item in cat_items:
-                rows_html += f'''
-  <li style="margin-bottom:10px">
-    <a href="{item['url']}" style="color:#534AB7;font-weight:500">{item['title']}</a><br>
-    <small style="color:#999">{item['source']}</small>
-  </li>'''
-            rows_html += '</ul>'
-
-        body_html = f'''
-<html><body style="font-family:sans-serif;max-width:600px;margin:auto;padding:20px">
-<h2 style="color:#534AB7">전파정책 전문가 AI — 일일 모니터링 리포트</h2>
-<p style="color:#666">{today} | 신규 항목 <strong>{len(new_items)}건</strong></p>
-<hr>
-{rows_html}
-<hr>
-<p style="color:#999;font-size:12px">
-이 메일은 자동 발송됩니다. 문의: SKT CR센터 기술정책팀<br>
-대시보드: <a href="https://youjinwoong.github.io/radio-policy-ai/">https://youjinwoong.github.io/radio-policy-ai/</a>
-</p>
-</body></html>'''
-
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From']    = f'전파정책 AI <{EMAIL_FROM}>'
-    msg['To']      = EMAIL_TO
-    msg.attach(MIMEText(body_html, 'html', 'utf-8'))
-
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as smtp:
-            smtp.login(EMAIL_FROM, EMAIL_PASS)
-            smtp.sendmail(EMAIL_FROM, list({a.strip() for a in (EMAIL_TO + ',lampman@sktelecom.com').split(',')}), msg.as_string())
-        print(f'[이메일] {EMAIL_TO}로 발송 완료')
-    except Exception as e:
-        print(f'[이메일 오류] {e}')
-
-
-# ═══════════════════════════════════════════════════════
-#  메인
-# ═══════════════════════════════════════════════════════
-
-def main():
-    now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M KST')
-    print(f'{"="*50}')
-    print(f'[시작] {now_str}')
-    print(f'{"="*50}')
-
-    existing_urls = get_existing_urls()
-    print(f'[기존] Supabase 저장 항목 {len(existing_urls)}건')
-
-    all_items: list = []
-    all_items += crawl_rra()
-    all_items += crawl_msit()
-    all_items += crawl_kcc()
-    all_items += crawl_etri()
-    all_items += crawl_kisdi()
-    all_items += crawl_etnews()
-    for cfg in NEWS_SITE_CONFIGS:
-        all_items += crawl_news_site(cfg)
-    print(f'[수집] 총 {len(all_items)}건')
-
-    new_items = save_new_items(all_items, existing_urls)
-    print(f'[신규] {len(new_items)}건')
-
-    # 긴급 기사 알림 (텔레그램 + 이메일 즉시 발송)
-    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and (not i.get('published_at') or i.get('published_at','') >= (datetime.now(KST)-timedelta(hours=24)).isoformat())]
-    if urgent_items:
-        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
-        send_telegram(urgent_items)
-        send_urgent_email(urgent_items)
-    else:
-        print('[긴급] 해당 없음')
-
-    # 아침 8시 일일 브리핑 (이메일 + 텔레그램)
-    current_hour = datetime.now(KST).hour
-    if current_hour == 8:
-        print('[모닝 브리핑] 아침 8시 — 지난 24시간 기사 발송')
-        cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
-        try:
-            resp = sb.table('news_feed').select('*') \
-                .gte('published_at', cutoff) \
-                .order('published_at', desc=True) \
-                .limit(100) \
-                .execute()
-            morning_items = resp.data or []
-            print(f'[모닝 브리핑] {len(morning_items)}건 대상')
-            send_email(morning_items)
-            send_morning_telegram(morning_items)
-        except Exception as e:
-            print(f'[모닝 브리핑 오류] {e}')
-    else:
-        print(f'[모닝 브리핑] 현재 {current_hour}시 — 8시 아님, 건너뜀')
-
-    print(f'{"="*50}')
-    print('[완료]')
-
-
-if __name__ == '__main__':
-    main()
+<p style="color:#666">{now_str} | 즉시 대응이 필요한 기사 <strong>{len(ur
