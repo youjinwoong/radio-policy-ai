@@ -774,14 +774,14 @@ def save_new_items(items: list, existing_urls: set) -> list:
             seen_urls.add(url)
             unique_new.append(item)
 
-    # 발행일 3일 이내 기사만 저장 (날짜 없는 기사는 허용)
-    cutoff_3d = (datetime.now(KST) - timedelta(days=3)).isoformat()
-    skipped_old = [i for i in unique_new if i.get('published_at') and i.get('published_at', '') < cutoff_3d]
-    unique_new  = [i for i in unique_new if not i.get('published_at') or i.get('published_at', '') >= cutoff_3d]
-    if skipped_old:
-        print(f'[날짜 필터] {len(skipped_old)}건 제외 (발행 3일 초과)')
+    # 태그·카테고리 페이지 URL 필터링 (실제 기사 아닌 목록 페이지 제외)
+    TAG_URL_PATTERNS = ['/tag/', '/tags/', '/category/', '/categories/', '/topic/', '/topics/', '/search/', '?tag=', '?cat=', '?q=']
+    skipped_tag = [i for i in unique_new if any(p in i.get('url','') for p in TAG_URL_PATTERNS) or i.get('title','').startswith('#')]
+    unique_new   = [i for i in unique_new if not any(p in i.get('url','') for p in TAG_URL_PATTERNS) and not i.get('title','').startswith('#')]
+    if skipped_tag:
+        print(f'[URL 필터] {len(skipped_tag)}건 제외 (태그/카테고리 페이지)')
 
-    # 발행일 3일 초과 기사 저장 제외
+    # 발행일 3일 이내 기사만 저장 (날짜 없는 기사는 허용)
     cutoff_3d = (datetime.now(KST) - timedelta(days=3)).isoformat()
     skipped_old = [i for i in unique_new if i.get('published_at') and i.get('published_at', '') < cutoff_3d]
     unique_new  = [i for i in unique_new if not i.get('published_at') or i.get('published_at', '') >= cutoff_3d]
