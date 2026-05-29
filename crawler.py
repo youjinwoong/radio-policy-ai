@@ -1075,7 +1075,7 @@ def main():
 
     # 아침 8시 일일 브리핑 (이메일 + 텔레그램)
     current_hour = datetime.now(KST).hour
-    if current_hour == 8:
+    if True:  # FORCE_BRIEFING
         print('[모닝 브리핑] 아침 8시 — 지난 24시간 기사 발송')
         cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
         try:
