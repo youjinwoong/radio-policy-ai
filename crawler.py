@@ -781,6 +781,13 @@ def save_new_items(items: list, existing_urls: set) -> list:
     if skipped_old:
         print(f'[날짜 필터] {len(skipped_old)}건 제외 (발행 3일 초과)')
 
+    # 발행일 3일 초과 기사 저장 제외
+    cutoff_3d = (datetime.now(KST) - timedelta(days=3)).isoformat()
+    skipped_old = [i for i in unique_new if i.get('published_at') and i.get('published_at', '') < cutoff_3d]
+    unique_new  = [i for i in unique_new if not i.get('published_at') or i.get('published_at', '') >= cutoff_3d]
+    if skipped_old:
+        print(f'[날짜 필터] {len(skipped_old)}건 제외 (발행 3일 초과)')
+
     if unique_new:
         # 기사 본문 수집 (항목당 1초 간격)
         print(f'[본문 수집] {len(unique_new)}건 시작...')
@@ -1068,12 +1075,12 @@ def main():
 
     # 아침 8시 일일 브리핑 (이메일 + 텔레그램)
     current_hour = datetime.now(KST).hour
-    if True:  # FORCE_BRIEFING — 수동 발송 후 되돌릴 것
+    if current_hour == 8:
         print('[모닝 브리핑] 아침 8시 — 지난 24시간 기사 발송')
         cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
         try:
             resp = sb.table('news_feed').select('*') \
-                .gte('created_at', cutoff) \
+                .gte('published_at', cutoff) \
                 .order('published_at', desc=True) \
                 .limit(100) \
                 .execute()
