@@ -49,7 +49,7 @@ HEADERS = {
 _URGENCY_SYSTEM = """당신은 SK텔레콤 CR센터 기술정책팀의 전파정책 모니터링 AI입니다.
 기사 제목과 본문을 읽고 SKT 관점에서 대응 우선순위를 판단합니다.
 
-아래 기준으로 셋 중 하나만 출력하세요 (다른 말 없이 단어만):
+아래 기준으로 넷 중 하나만 출력하세요 (다른 말 없이 단어만):
 
 즉시대응:
 - 이동통신 품질·장비·기지국·공공 와이파이 관련 불만/민원/장애/사고 기사
@@ -61,9 +61,13 @@ _URGENCY_SYSTEM = """당신은 SK텔레콤 CR센터 기술정책팀의 전파정
 - 입법예고·개정안·정책 발표 등 간접적으로 영향을 줄 수 있는 기사
 
 동향파악:
-- 위 두 기준에 해당하지 않는 해외 동향·업계 일반 트렌드·참고용 기사"""
+- 위 두 기준에 해당하지 않는 해외 동향·업계 일반 트렌드·참고용 기사
 
-_AI_PRIORITY_MAP = {'즉시대응': '긴급', '금주검토': '보통', '동향파악': '참고'}
+무관:
+- 전파·이동통신·주파수·무선 정책과 전혀 무관한 기사
+- 예: 반도체, 디스플레이, 가전, 게임, AI 하드웨어, 방산, 금융, 의료 등"""
+
+_AI_PRIORITY_MAP = {'즉시대응': '긴급', '금주검토': '보통', '동향파악': '참고', '무관': '무관'}
 _FALLBACK_MOBILE = ['이동통신', '기지국', '공공와이파이', '와이파이', '전파', '전자파', '무선국', '주파수']
 
 
@@ -780,6 +784,12 @@ def save_new_items(items: list, existing_urls: set) -> list:
     unique_new   = [i for i in unique_new if not any(p in i.get('url','') for p in TAG_URL_PATTERNS) and not i.get('title','').startswith('#')]
     if skipped_tag:
         print(f'[URL 필터] {len(skipped_tag)}건 제외 (태그/카테고리 페이지)')
+
+    # AI 무관 판정 기사 저장 제외
+    skipped_irr = [i for i in unique_new if i.get('urgency') == '무관']
+    unique_new   = [i for i in unique_new if i.get('urgency') != '무관']
+    if skipped_irr:
+        print(f'[무관 필터] {len(skipped_irr)}건 제외 (전파/통신 무관 기사)')
 
     # 발행일 3일 이내 기사만 저장 (날짜 없는 기사는 허용)
     cutoff_3d = (datetime.now(KST) - timedelta(days=3)).isoformat()
