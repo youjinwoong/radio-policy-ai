@@ -13,7 +13,6 @@ import smtplib
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-h
 import requests
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
