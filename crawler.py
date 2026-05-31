@@ -352,7 +352,7 @@ def crawl_etnews() -> list:
 
 
 # ═══════════════════════════════════════════════════════
-#  크롤러 — KCC (kcc.go.kr)
+#  크롤러 — 방송통신위원회 (kcc.go.kr)
 # ═══════════════════════════════════════════════════════
 
 def crawl_kcc() -> list:
@@ -396,7 +396,6 @@ def crawl_kcc() -> list:
 
 # ═══════════════════════════════════════════════════════
 #  크롤러 — ETRI (etri.re.kr)
-# ═══re.kr)
 # ═══════════════════════════════════════════════════════
 
 def crawl_etri() -> list:
@@ -487,9 +486,9 @@ def crawl_kisdi() -> list:
 
 NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이']
 
-# 언론사별 검색 설정 ─ (source, search_url, article_sel, date_sel, base_url)
+# 언론사별 검색 설정 — (source, search_url, article_sel, date_sel, base_url)
 NEWS_SITE_CONFIGS = [
-    # ── IT·통신 전문지 ─────────────────────────────────
+    # ── IT·통신 전문지 ─────────────────────────────────────────────
     {
         'source': '디지털타임스',
         'search_url': 'https://www.dt.co.kr/search.php?q={kw}',
@@ -532,7 +531,7 @@ NEWS_SITE_CONFIGS = [
         'date_sel':    ['em.info', 'span.date', 'em.date'],
         'base_url':    'https://www.koit.co.kr',
     },
-    # ── 경제지 ────────────────────────────────────────
+    # ── 경제지 ────────────────────────────────────────────────────
     {
         'source': '매일경제',
         'search_url': 'https://search.mk.co.kr/search.php?q={kw}',
@@ -561,7 +560,7 @@ NEWS_SITE_CONFIGS = [
         'date_sel':    ['span.date', 'em.date', 'span.txt_date'],
         'base_url':    'https://www.sedaily.com',
     },
-    # ── 종합일간지·통신 ──────────────────────────────
+    # ── 종합일간지·통신 ──────────────────────────────────────────────────
     {
         'source': '연합뉴스',
         'search_url': 'https://www.yna.co.kr/search/index?query={kw}&lang=KOR',
@@ -695,7 +694,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
 
-        # ── 발행일 추출 (meta 태그 우선) ───────────────────
+        # ── 발행일 추출 (meta 태그 우선) ───────────────────────────
         pub_date = ''
 
         # 1순위: Open Graph / schema.org meta 태그
@@ -722,7 +721,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
                     pub_date = parsed
                     break
 
-        # ── 본문 추출 ───────────────────────────────────────
+        # ── 본문 추출 ───────────────────────────────────────────────
         selectors_map = {
             '전자신문':    ['div.article_body', 'div#articleBody', 'div.news_view', 'div#articleView'],
             '연합뉴스':    ['div.article-txt', 'article.story-news', 'div#articleWrap'],
@@ -752,7 +751,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
         for sel in candidates:
             tag = soup.select_one(sel)
             if tag:
-                   text = tag.get_text(separator=' ', strip=True)
+                text = tag.get_text(separator=' ', strip=True)
                 if len(text) > 100:
                     body = text[:1500]
                     break
@@ -990,7 +989,7 @@ def generate_daily_briefing(items: list, new_terms: list) -> str:
     return briefing_text
 
 
-# ════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
 #  텔레그램 알림 (긴급 기사 전용)
 # ═══════════════════════════════════════════════════════
 
@@ -1009,7 +1008,29 @@ def send_morning_telegram(items: list, briefing_text: str = ''):
         if len(briefing_text) > 4000:
             text += '\n\n...(전문은 대시보드 참조)'
         text += '\n\n📊 https://youjinwoong.github.io/radio-policy-ai/'
-          'disable_web_page_preview': True,
+    else:
+        # 폴백: 원시 목록 발송
+        now_str = datetime.now(KST).strftime('%Y.%m.%d')
+        urgent = [i for i in items if i.get('urgency') == '긴급']
+        normal = [i for i in items if i.get('urgency') == '보통']
+        ref    = [i for i in items if i.get('urgency') == '참고']
+        lines = [f'☀️ *[전파정책 AI] {now_str} 아침 브리핑* — {len(items)}건\n']
+        for label, icon, group in [('긴급', '🔴', urgent), ('보통', '🟡', normal), ('참고', '🟢', ref)]:
+            if group:
+                lines.append(f'{icon} *{label} {len(group)}건*')
+                for item in group[:5]:
+                    lines.append(f'  · {item.get("title", "")} ({item.get("source", "")})')
+                lines.append('')
+        lines.append('📊 https://youjinwoong.github.io/radio-policy-ai/')
+        text = '\n'.join(lines)
+
+    api_url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+    try:
+        resp = requests.post(api_url, json={
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': text,
+            'parse_mode': 'Markdown',
+            'disable_web_page_preview': True,
         }, timeout=15)
         if resp.status_code == 200:
             print(f'[텔레그램 모닝] {len(items)}건 발송 완료')
@@ -1309,35 +1330,6 @@ def main():
 
             # ② 브리핑 텍스트 생성 → daily_briefings 저장
             briefing_text = generate_daily_briefing(morning_items, new_terms)
-
-            # ③ 이메일 · 텔레그램 발송 (브리핑 텍스트 기반)
-            if briefing_text:
-                send_email(morning_items, briefing_text=briefing_text)
-                send_morning_telegram(morning_items, briefing_text=briefing_text)
-            else:
-                send_email(morning_items)
-                send_morning_telegram(morning_items)
-
-            # ④ 브리핑 완료 표시 (briefed_date 갱신 → 다음 브리핑 중복 방지)
-            if morning_items:
-                ids = [it['id'] for it in morning_items if it.get('id')]
-                if ids:
-                    sb.table('news_feed').update({'briefed_date': today_date}) \
-                        .in_('id', ids).execute()
-                    print(f'[모닝 브리핑] briefed_date 갱신 완료 ({len(ids)}건)')
-
-        except Exception as e:
-            print(f'[모닝 브리핑 오류] {e}')
-    else:
-        print(f'[모닝 브리핑] 현재 {current_hour}시 — 8시 아님, 건너뜀')
-
-    print(f'{"="*50}')
-    print('[완료]')
-
-
-if __name__ == '__main__':
-    main()
-ning_items, new_terms)
 
             # ③ 이메일 · 텔레그램 발송 (브리핑 텍스트 기반)
             if briefing_text:
