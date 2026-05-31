@@ -484,7 +484,7 @@ def crawl_kisdi() -> list:
 #  크롤러 — 범용 키워드 검색 (IT전문지·경제지·종합일간지)
 # ═══════════════════════════════════════════════════════
 
-NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이', '와이파이', '공공 와이파이']
+NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '5G 주파수', '6G주파수', '6G 주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이', '공공 와이파이', '지하철 와이파이']
 
 # 언론사별 검색 설정 ─ (source, search_url, article_sel, date_sel, base_url)
 NEWS_SITE_CONFIGS = [
@@ -775,6 +775,9 @@ def save_new_items(items: list, existing_urls: set) -> list:
         url = item.get('url', '')
         if url and url not in seen_urls:
             seen_urls.add(url)
+            # # 으로 시작하는 제목(태그/토픽 페이지) 제외
+            if item.get('title', '').startswith('#'):
+                continue
             unique_new.append(item)
 
     if not unique_new:
