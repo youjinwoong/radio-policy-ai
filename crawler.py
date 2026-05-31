@@ -766,7 +766,9 @@ def fetch_article_body(url: str, source: str) -> tuple:
 # ═══════════════════════════════════════════════════════
 
 def save_new_items(items: list, existing_urls: set) -> list:
-    """기존에 없는 항목만 필터링 → 본문 수집 → 저장"""
+    """규칙1: 72시간 이내 & 날짜 확인된 신규 기사만 저장"""
+    now_kst = datetime.now(KST)
+    cutoff_72h = now_kst - timedelta(hours=72)
     seen_urls = set(existing_urls)
     unique_new = []
     for item in items:
@@ -775,41 +777,63 @@ def save_new_items(items: list, existing_urls: set) -> list:
             seen_urls.add(url)
             unique_new.append(item)
 
-    if unique_new:
-        # 기사 본문 수집 (항목당 1초 간격)
-        print(f'[본문 수집] {len(unique_new)}건 시작...')
-        for item in unique_new:
-            if item.get('url'):
-                body, article_date = fetch_article_body(item['url'], item.get('source', ''))
-                item['content'] = body if body else None
-                item['content_fetched_at'] = datetime.now(KST).isoformat()
-
-                # 발행일 확정: 목록 페이지 날짜 → 기사 본문 meta 날짜 → 현재 시각(최후 수단)
-                current_pub = item.get('published_at', '')
-                if not current_pub and article_date:
-                    item['published_at'] = article_date
-                    print(f'  [날짜 보정] {item.get("title","")[:30]}... → {article_date}')
-                elif not current_pub:
-                    item['published_at'] = datetime.now(KST).isoformat()
-                    print(f'  [날짜 미확인] {item.get("title","")[:30]}... → 현재 시각 사용')
-
-                time.sleep(1)  # 서버 부하 방지
-
-        # 긴급도 분류 추가 (urgency + importance 동시 저장)
-        for item in unique_new:
-            val = classify_urgency(
-                item.get('title', ''),
-                item.get('content', '') or ''
-            )
-            item['urgency'] = val
-            item['importance'] = val
-
-        sb.table('news_feed').insert(unique_new).execute()
-        urgent_count = sum(1 for i in unique_new if i.get('urgency') == '긴급')
-        print(f'[저장] {len(unique_new)}건 저장 완료 (긴급 {urgent_count}건)')
-    else:
+    if not unique_new:
         print('[저장] 신규 항목 없음')
-    return unique_new
+        return []
+
+    # ① 본문 수집 및 발행일 확정
+    print(f'[본문 수집] {len(unique_new)}건 시작...')
+    for item in unique_new:
+        if item.get('url'):
+            body, article_date = fetch_article_body(item['url'], item.get('source', ''))
+            item['content'] = body if body else None
+            item['content_fetched_at'] = now_kst.isoformat()
+            current_pub = item.get('published_at', '')
+            if not current_pub and article_date:
+                item['published_at'] = article_date
+                print(f'  [날짜보정] {item.get("title","")[:30]}... → {article_date}')
+            elif not current_pub:
+                item['published_at'] = ''  # 날짜 불명
+            time.sleep(1)
+
+    # ② 72시간 초과 또는 발행일 불명 제외 (규칙1)
+    valid, skipped_unknown, skipped_old = [], 0, 0
+    for item in unique_new:
+        pub = item.get('published_at', '')
+        if not pub:
+            skipped_unknown += 1
+            continue
+        try:
+            from dateutil import parser as _dtp
+            pub_dt = _dtp.parse(pub)
+            if pub_dt.tzinfo is None:
+                pub_dt = pub_dt.replace(tzinfo=KST)
+            if pub_dt < cutoff_72h:
+                skipped_old += 1
+                continue
+        except Exception:
+            skipped_unknown += 1
+            continue
+        valid.append(item)
+
+    if skipped_unknown:
+        print(f'[필터] {skipped_unknown}건 발행일 불명 — 제외')
+    if skipped_old:
+        print(f'[필터] {skipped_old}건 72시간 초과 — 제외')
+    if not valid:
+        print('[저장] 유효한 신규 항목 없음')
+        return []
+
+    # ③ 긴급도 분류
+    for item in valid:
+        val = classify_urgency(item.get('title', ''), item.get('content', '') or '')
+        item['urgency'] = val
+        item['importance'] = val
+
+    sb.table('news_feed').insert(valid).execute()
+    urgent_count = sum(1 for i in valid if i.get('urgency') == '긴급')
+    print(f'[저장] {len(valid)}건 저장 완료 (긴급 {urgent_count}건)')
+    return valid
 
 
 # ═══════════════════════════════════════════════════════
@@ -1162,15 +1186,28 @@ def send_email(new_items: list, briefing_text: str = ''):
         import html as html_lib
 
         def text_to_html(text: str) -> str:
+            """규칙3: 브리핑 HTML 변환. 🔴 긴급 항목은 빨간 네모 박스."""
             lines = text.split('\n')
             html_lines = []
+            in_box = False
             for line in lines:
                 escaped = html_lib.escape(line)
-                if escaped.startswith('📡'):
+                is_urgent = '🔴' in line
+                # 긴급 박스 닫기 조건
+                if in_box and not is_urgent and (escaped.startswith('[') or escaped.startswith('📡') or escaped == ''):
+                    html_lines.append('</div>')
+                    in_box = False
+                # 긴급 항목 → 박스 열기
+                if is_urgent:
+                    if not in_box:
+                        html_lines.append('<div style="border:2px solid #c53030;border-radius:6px;background:#fff5f5;padding:10px 14px;margin:10px 0;">')
+                        in_box = True
+                    html_lines.append(f'<p style="margin:3px 0">{escaped}</p>')
+                elif escaped.startswith('📡'):
                     html_lines.append(f'<h2 style="color:#534AB7;margin-bottom:4px">{escaped}</h2>')
                 elif escaped.startswith('[') and escaped.endswith(']'):
                     html_lines.append(f'<h3 style="color:#1a1a1a;margin:20px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px">{escaped}</h3>')
-                elif escaped.startswith('•') or escaped.startswith('·'):
+                elif escaped.startswith('•') or escaped.startswith('·') or '🟡' in line or '🟢' in line:
                     html_lines.append(f'<p style="margin:4px 0 4px 12px">{escaped}</p>')
                 elif escaped.startswith('  →'):
                     html_lines.append(f'<p style="margin:2px 0 2px 24px;color:#555;font-size:13px">{escaped}</p>')
@@ -1181,6 +1218,8 @@ def send_email(new_items: list, briefing_text: str = ''):
                     html_lines.append('<br>')
                 else:
                     html_lines.append(f'<p style="margin:4px 0">{escaped}</p>')
+            if in_box:
+                html_lines.append('</div>')
             return '\n'.join(html_lines)
 
         briefing_html = text_to_html(briefing_text)
@@ -1284,21 +1323,22 @@ def main():
     now_kst = datetime.now(KST)
     cutoff_24h = now_kst - timedelta(hours=24)
 
-    def is_recent(item):
+    def is_within_24h(item):
+        """규칙2: 발행일이 24시간 이내인 기사만 긴급 알림"""
         pub = item.get('published_at', '')
         if not pub:
-            return True  # 날짜 불명 시 알림 허용
+            return False  # 날짜 불명 → 알림 제외
         try:
-            from dateutil import parser as dtparser
-            pub_dt = dtparser.parse(pub)
+            from dateutil import parser as _dtp2
+            pub_dt = _dtp2.parse(pub)
             if pub_dt.tzinfo is None:
                 pub_dt = pub_dt.replace(tzinfo=KST)
             return pub_dt >= cutoff_24h
         except Exception:
-            return True  # 파싱 실패 시 알림 허용
+            return False
 
-    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_recent(i)]
-    skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_recent(i)]
+    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
+    skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
     if skipped:
         print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
     if urgent_items:
