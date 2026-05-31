@@ -486,9 +486,9 @@ def crawl_kisdi() -> list:
 
 NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이']
 
-# 언론사별 검색 설정 — (source, search_url, article_sel, date_sel, base_url)
+# 언론사별 검색 설정 ─ (source, search_url, article_sel, date_sel, base_url)
 NEWS_SITE_CONFIGS = [
-    # ── IT·통신 전문지 ─────────────────────────────────────────────
+    # ── IT·통신 전문지 ─────────────────────────────────
     {
         'source': '디지털타임스',
         'search_url': 'https://www.dt.co.kr/search.php?q={kw}',
@@ -531,7 +531,7 @@ NEWS_SITE_CONFIGS = [
         'date_sel':    ['em.info', 'span.date', 'em.date'],
         'base_url':    'https://www.koit.co.kr',
     },
-    # ── 경제지 ────────────────────────────────────────────────────
+    # ── 경제지 ────────────────────────────────────────
     {
         'source': '매일경제',
         'search_url': 'https://search.mk.co.kr/search.php?q={kw}',
@@ -560,7 +560,7 @@ NEWS_SITE_CONFIGS = [
         'date_sel':    ['span.date', 'em.date', 'span.txt_date'],
         'base_url':    'https://www.sedaily.com',
     },
-    # ── 종합일간지·통신 ──────────────────────────────────────────────────
+    # ── 종합일간지·통신 ──────────────────────────────
     {
         'source': '연합뉴스',
         'search_url': 'https://www.yna.co.kr/search/index?query={kw}&lang=KOR',
@@ -694,7 +694,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
 
-        # ── 발행일 추출 (meta 태그 우선) ───────────────────────────
+        # ── 발행일 추출 (meta 태그 우선) ───────────────────
         pub_date = ''
 
         # 1순위: Open Graph / schema.org meta 태그
@@ -721,7 +721,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
                     pub_date = parsed
                     break
 
-        # ── 본문 추출 ───────────────────────────────────────────────
+        # ── 본문 추출 ───────────────────────────────────────
         selectors_map = {
             '전자신문':    ['div.article_body', 'div#articleBody', 'div.news_view', 'div#articleView'],
             '연합뉴스':    ['div.article-txt', 'article.story-news', 'div#articleWrap'],
