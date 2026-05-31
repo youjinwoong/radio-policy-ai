@@ -484,7 +484,7 @@ def crawl_kisdi() -> list:
 #  크롤러 — 범용 키워드 검색 (IT전문지·경제지·종합일간지)
 # ═══════════════════════════════════════════════════════
 
-NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이']
+NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이', '와이파이', '공공 와이파이']
 
 # 언론사별 검색 설정 ─ (source, search_url, article_sel, date_sel, base_url)
 NEWS_SITE_CONFIGS = [
