@@ -768,7 +768,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
 def save_new_items(items: list, existing_urls: set) -> list:
     """규칙1: 72시간 이내 & 날짜 확인된 신규 기사만 저장"""
     now_kst = datetime.now(KST)
-    cutoff_72h = now_kst - timedelta(hours=720)  # 백필: 30일
+    cutoff_72h = now_kst - timedelta(hours=720)
     seen_urls = set(existing_urls)
     unique_new = []
     for item in items:
