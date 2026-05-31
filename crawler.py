@@ -1310,8 +1310,8 @@ def main():
 
     # 아침 8시 일일 브리핑 (기술용어 추출 → 브리핑 생성 → 이메일 + 텔레그램)
     current_hour = datetime.now(KST).hour
-    if True:  # TEMP: force briefing send
-        print('[모닝 브리핑] 강제 실행 — 브리핑 생성 시작')
+    if current_hour == 8:
+        print('[모닝 브리핑] 아침 8시 — 브리핑 생성 시작')
         cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
         today_date = datetime.now(KST).strftime('%Y-%m-%d')
         try:
