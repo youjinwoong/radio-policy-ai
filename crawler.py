@@ -1025,7 +1025,7 @@ def send_morning_telegram(items: list, briefing_text: str = ''):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print('[텔레그램 모닝] 환경변수 미설정 — 건너뜀')
         return
-    if not items:
+    if not items and not briefing_text:
         print('[텔레그램 모닝] 신규 기사 없음 — 건너뜀')
         return
 
