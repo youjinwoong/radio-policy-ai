@@ -263,6 +263,11 @@ RADIO_KEYWORDS = [
     '단말장치', '통신서비스', '과징금',
     # 정보통신망법 계열
     '정보통신망', '정보보호', '사이버', '불법정보', '개인정보',
+    # NEWS_SEARCH_KEYWORDS 통합 (와이파이·이동통신·기지국 등)
+    '전파정책', '이동통신', '6GHz', '와이파이', '공공와이파이',
+    '공공 와이파이', '지하철 와이파이', '기지국', 'LTE', '3G',
+    '이동통신 품질', '5G 기지국', 'LTE 기지국', '기지국 장애', '이동통신 장비',
+    '무선국', '5G주파수', '6G주파수',
 ]
 
 def crawl_msit() -> list:
@@ -766,9 +771,9 @@ def fetch_article_body(url: str, source: str) -> tuple:
 # ═══════════════════════════════════════════════════════
 
 def save_new_items(items: list, existing_urls: set) -> list:
-    """규칙1: 72시간 이내 & 날짜 확인된 신규 기사만 저장"""
+    """백필용: 10일(240시간) 이내 & 날짜 확인된 신규 기사만 저장"""
     now_kst = datetime.now(KST)
-    cutoff_72h = now_kst - timedelta(hours=240)  # 백필: 10일
+    cutoff_72h = now_kst - timedelta(hours=240)  # 백필: 10일 기준
     seen_urls = set(existing_urls)
     unique_new = []
     for item in items:
@@ -822,7 +827,7 @@ def save_new_items(items: list, existing_urls: set) -> list:
     if skipped_unknown:
         print(f'[필터] {skipped_unknown}건 발행일 불명 — 제외')
     if skipped_old:
-        print(f'[필터] {skipped_old}건 72시간 초과 — 제외')
+        print(f'[필터] {skipped_old}건 10일(240시간) 초과 — 제외')
     if not valid:
         print('[저장] 유효한 신규 항목 없음')
         return []
