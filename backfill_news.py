@@ -484,7 +484,7 @@ def crawl_kisdi() -> list:
 #  크롤러 — 범용 키워드 검색 (IT전문지·경제지·종합일간지)
 # ═══════════════════════════════════════════════════════
 
-NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이']
+NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '5G 주파수', '6G주파수', '6G 주파수', '전자파', '무선국', '이동통신', 'WRC', '6GHz', '공공와이파이', '공공 와이파이', '지하철 와이파이', '기지국', 'LTE', '3G', '이동통신 품질', '5G 기지국', 'LTE 기지국', '기지국 장애', '이동통신 장비']
 
 # 언론사별 검색 설정 ─ (source, search_url, article_sel, date_sel, base_url)
 NEWS_SITE_CONFIGS = [
@@ -768,13 +768,16 @@ def fetch_article_body(url: str, source: str) -> tuple:
 def save_new_items(items: list, existing_urls: set) -> list:
     """규칙1: 72시간 이내 & 날짜 확인된 신규 기사만 저장"""
     now_kst = datetime.now(KST)
-    cutoff_72h = now_kst - timedelta(hours=720)
+    cutoff_72h = now_kst - timedelta(hours=720)  # 백필: 30일
     seen_urls = set(existing_urls)
     unique_new = []
     for item in items:
         url = item.get('url', '')
         if url and url not in seen_urls:
             seen_urls.add(url)
+            # # 으로 시작하는 제목(태그/토픽 페이지) 제외
+            if item.get('title', '').startswith('#'):
+                continue
             unique_new.append(item)
 
     if not unique_new:
@@ -1022,7 +1025,7 @@ def send_morning_telegram(items: list, briefing_text: str = ''):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print('[텔레그램 모닝] 환경변수 미설정 — 건너뜀')
         return
-    if not items:
+    if not items and not briefing_text:
         print('[텔레그램 모닝] 신규 기사 없음 — 건너뜀')
         return
 
