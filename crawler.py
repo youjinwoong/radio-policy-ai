@@ -554,8 +554,11 @@ NEWS_SITE_CONFIGS = [
     {
         'source': '한국경제',
         'search_url': 'https://search.hankyung.com/search/news?query={kw}',
-        'article_sel': ['ul.article__list li a', 'div.article_title a', 'h3.tit a'],
-        'date_sel':    ['span.date', 'em.date', 'span.txt-date'],
+        'article_sel': ['ul.article__list li a', 'div.article_title a', 'h3.tit a',
+                        'div.news-list a', 'li.news-item a', 'a.news-tit'],
+        'date_sel':    ['span.date', 'em.date', 'span.txt-date', 'span.txt_date',
+                        'span.article-date', 'p.date', 'div.date', 'span.info',
+                        'span.byline', 'p.byline', 'span.writer'],
         'base_url':    'https://www.hankyung.com',
     },
     {
