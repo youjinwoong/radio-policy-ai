@@ -1303,105 +1303,119 @@ def send_email(new_items: list, briefing_text: str = ''):
 
 
 # ═══════════════════════════════════════════════════════
+#  하트비트 — PC ↔ GitHub 동기화
+# ═══════════════════════════════════════════════════════
+
+def check_pc_heartbeat() -> bool:
+    """PC가 최근 2시간 이내 실행됐는지 확인. True=PC 활성(크롤링 스킵)"""
+    try:
+        resp = sb.table('system_status').select('value').eq('key', 'last_pc_crawl').execute()
+        if not resp.data:
+            return False
+        from dateutil import parser as _dtp
+        last_dt = _dtp.parse(resp.data[0]['value'])
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=KST)
+        elapsed = (datetime.now(KST) - last_dt).total_seconds()
+        active = elapsed < 7200  # 2시간 기준
+        print(f'[하트비트] 마지막 PC 실행: {str(resp.data[0]["value"])[:16]} ({int(elapsed//60)}분 전) — {"활성" if active else "비활성"}')
+        return active
+    except Exception as e:
+        print(f'[하트비트 확인 오류] {e}')
+        return False  # 확인 실패 시 크롤링 진행 (안전 기본값)
+
+
+# ═══════════════════════════════════════════════════════
 #  메인
 # ═══════════════════════════════════════════════════════
 
 def main():
+    GITHUB_MODE = os.environ.get('GITHUB_MODE', '').lower() == 'true'
+    mode_label = '[GitHub 모드]' if GITHUB_MODE else '[PC 모드]'
+
     now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M KST')
     print(f'{"="*50}')
-    print(f'[시작] {now_str}')
+    print(f'[시작] {now_str} {mode_label}')
     print(f'{"="*50}')
 
-    existing_urls = get_existing_urls()
-    print(f'[기존] Supabase 저장 항목 {len(existing_urls)}건')
+    # ── GitHub 모드: PC 하트비트 확인 ──────────────────
+    pc_active = False
+    if GITHUB_MODE:
+        pc_active = check_pc_heartbeat()
+        if pc_active:
+            print('[GitHub 모드] PC 활성 확인 — 크롤링 스킵, 브리핑만 실행')
+        else:
+            print('[GitHub 모드] PC 비활성 — GitHub 크롤링 실행 (한국 IP 차단 일부 있음)')
 
-    all_items: list = []
-    all_items += crawl_rra()
-    all_items += crawl_msit()
-    all_items += crawl_kcc()
-    all_items += crawl_etri()
-    all_items += crawl_kisdi()
-    all_items += crawl_etnews()
-    for cfg in NEWS_SITE_CONFIGS:
-        all_items += crawl_news_site(cfg)
-    print(f'[수집] 총 {len(all_items)}건')
+    # ── 크롤링 (PC 모드 또는 GitHub+PC 비활성인 경우) ──
+    new_items = []
+    if not (GITHUB_MODE and pc_active):
+        existing_urls = get_existing_urls()
+        print(f'[기존] Supabase 저장 항목 {len(existing_urls)}건')
 
-    new_items = save_new_items(all_items, existing_urls)
-    print(f'[신규] {len(new_items)}건')
+        all_items: list = []
+        all_items += crawl_rra()
+        all_items += crawl_msit()
+        all_items += crawl_kcc()
+        all_items += crawl_etri()
+        all_items += crawl_kisdi()
+        all_items += crawl_etnews()
+        for cfg in NEWS_SITE_CONFIGS:
+            all_items += crawl_news_site(cfg)
+        print(f'[수집] 총 {len(all_items)}건')
 
-    # 긴급 기사 알림 (텔레그램 + 이메일 즉시 발송)
-    # 발행일이 24시간 이내인 기사만 알림 대상으로 제한
-    now_kst = datetime.now(KST)
-    cutoff_24h = now_kst - timedelta(hours=24)
+        new_items = save_new_items(all_items, existing_urls)
+        print(f'[신규] {len(new_items)}건')
 
-    def is_within_24h(item):
-        """규칙2: 발행일이 24시간 이내인 기사만 긴급 알림"""
-        pub = item.get('published_at', '')
-        if not pub:
-            return False  # 날짜 불명 → 알림 제외
-        try:
-            from dateutil import parser as _dtp2
-            pub_dt = _dtp2.parse(pub)
-            if pub_dt.tzinfo is None:
-                pub_dt = pub_dt.replace(tzinfo=KST)
-            return pub_dt >= cutoff_24h
-        except Exception:
-            return False
+        # 긴급 기사 알림 (텔레그램 + 이메일 즉시 발송)
+        # 발행일이 24시간 이내인 기사만 알림 대상으로 제한
+        now_kst = datetime.now(KST)
+        cutoff_24h = now_kst - timedelta(hours=24)
 
-    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
-    skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
-    if skipped:
-        print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
-    if urgent_items:
-        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
-        send_telegram(urgent_items)
-        send_urgent_email(urgent_items)
-    else:
-        print('[긴급] 해당 없음')
+        def is_within_24h(item):
+            """규칙2: 발행일이 24시간 이내인 기사만 긴급 알림"""
+            pub = item.get('published_at', '')
+            if not pub:
+                return False  # 날짜 불명 → 알림 제외
+            try:
+                from dateutil import parser as _dtp2
+                pub_dt = _dtp2.parse(pub)
+                if pub_dt.tzinfo is None:
+                    pub_dt = pub_dt.replace(tzinfo=KST)
+                return pub_dt >= cutoff_24h
+            except Exception:
+                return False
 
-    # 아침 8시 일일 브리핑 (기술용어 추출 → 브리핑 생성 → 이메일 + 텔레그램)
-    current_hour = datetime.now(KST).hour
-    if current_hour == 8:
-        print('[모닝 브리핑] 아침 8시 — 브리핑 생성 시작')
-        cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
-        today_date = datetime.now(KST).strftime('%Y-%m-%d')
-        try:
-            # 미브리핑 기사 조회 (briefed_date IS NULL, 최근 24시간)
-            resp = sb.table('news_feed').select('*') \
-                .is_('briefed_date', 'null') \
-                .gte('created_at', cutoff) \
-                .order('published_at', desc=True) \
-                .limit(100) \
-                .execute()
-            morning_items = resp.data or []
-            print(f'[모닝 브리핑] 대상 {len(morning_items)}건')
+        urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
+        skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
+        if skipped:
+            print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
+        if urgent_items:
+            print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
+            send_telegram(urgent_items)
+            send_urgent_email(urgent_items)
+        else:
+            print('[긴급] 해당 없음')
 
-            # ① 기술 용어 추출 → tech_terms 저장
-            new_terms = extract_tech_terms(morning_items)
+        # PC 모드: 하트비트 기록 (크롤링 완료 표시 → GitHub가 감지)
+        if not GITHUB_MODE:
+            try:
+                sb.table('system_status').upsert(
+                    {'key': 'last_pc_crawl',
+                     'value': datetime.now(KST).isoformat(),
+                     'updated_at': datetime.now(KST).isoformat()},
+                    on_conflict='key'
+                ).execute()
+                print('[하트비트] PC 실행 완료 기록')
+            except Exception as e:
+                print(f'[하트비트 오류] {e}')
 
-            # ② 브리핑 텍스트 생성 → daily_briefings 저장
-            briefing_text = generate_daily_briefing(morning_items, new_terms)
-
-            # ③ 이메일 · 텔레그램 발송 (브리핑 텍스트 기반)
-            if briefing_text:
-                send_email(morning_items, briefing_text=briefing_text)
-                send_morning_telegram(morning_items, briefing_text=briefing_text)
-            else:
-                send_email(morning_items)
-                send_morning_telegram(morning_items)
-
-            # ④ 브리핑 완료 표시 (briefed_date 갱신 → 다음 브리핑 중복 방지)
-            if morning_items:
-                ids = [it['id'] for it in morning_items if it.get('id')]
-                if ids:
-                    sb.table('news_feed').update({'briefed_date': today_date}) \
-                        .in_('id', ids).execute()
-                    print(f'[모닝 브리핑] briefed_date 갱신 완료 ({len(ids)}건)')
-
-        except Exception as e:
-            print(f'[모닝 브리핑 오류] {e}')
-    else:
-        print(f'[모닝 브리핑] 현재 {current_hour}시 — 8시 아님, 건너뜀')
+    # ── 모닝 브리핑: morning-telecom-news (Cowork 스케줄)가 단독 담당 ──
+    # crawler.py 브리핑 비활성화 이유:
+    #   1. morning-telecom-news가 WebSearch로 더 넓게 수집 (정부사이트 포함)
+    #   2. Claude Sonnet 브리핑이 Haiku보다 품질 높음
+    #   3. 중복 브리핑/이메일 방지
+    print('[모닝 브리핑] morning-telecom-news 태스크가 담당 — 건너뜀')
 
     print(f'{"="*50}')
     print('[완료]')
