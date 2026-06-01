@@ -618,7 +618,7 @@ def crawl_news_site(cfg: dict) -> list:
     items = []
     source = cfg['source']
     seen_urls: set = set()
-    for kw in NEWS_SEARCH_KEYWORDS[:5]:  # 키워드 5개까지
+    for kw in NEWS_SEARCH_KEYWORDS:  # 키워드 전체
         url = cfg['search_url'].format(kw=requests.utils.quote(kw))
         try:
             res = requests.get(url, headers=HEADERS, timeout=15)
