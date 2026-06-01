@@ -219,7 +219,7 @@ def crawl_rra() -> list:
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
 
-            rows = soup.select('table.board_list tbody tr, table tbody tr')[:15]
+            rows = soup.select('table.board_list tbody tr, table tbody tr')
             for row in rows:
                 tds = row.find_all('td')
                 if len(tds) < 2:
@@ -278,7 +278,7 @@ def crawl_msit() -> list:
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
 
-            rows = soup.select('table tbody tr, ul.bbs_list li')[:20]
+            rows = soup.select('table tbody tr, ul.bbs_list li')
             for row in rows:
                 title_tag = row.find('a')
                 if not title_tag:
@@ -322,7 +322,7 @@ def crawl_etnews() -> list:
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
 
-            articles = soup.select('ul.c_list_article li, div.news_list article')[:5]
+            articles = soup.select('ul.c_list_article li, div.news_list article')
             for article in articles:
                 title_tag = article.find('a')
                 if not title_tag:
@@ -367,7 +367,7 @@ def crawl_kcc() -> list:
             res.raise_for_status()
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
-            rows = soup.select('table tbody tr, ul.bbs_list li')[:15]
+            rows = soup.select('table tbody tr, ul.bbs_list li')
             for row in rows:
                 title_tag = row.find('a')
                 if not title_tag:
@@ -410,7 +410,7 @@ def crawl_etri() -> list:
             res.raise_for_status()
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
-            rows = soup.select('table tbody tr')[:15]
+            rows = soup.select('table tbody tr')
             for row in rows:
                 title_tag = row.find('a')
                 if not title_tag:
@@ -453,7 +453,7 @@ def crawl_kisdi() -> list:
             res.raise_for_status()
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
-            rows = soup.select('table tbody tr, ul.bbs_list li')[:15]
+            rows = soup.select('table tbody tr, ul.bbs_list li')
             for row in rows:
                 title_tag = row.find('a')
                 if not title_tag:
@@ -636,7 +636,7 @@ def crawl_news_site(cfg: dict) -> list:
                 links = [a for a in soup.find_all('a', href=True)
                          if any(k in a.get_text() for k in ['전파', '주파수', '5G', '6G', '이동통신', '무선'])]
 
-            for link in links[:8]:
+            for link in links:  # 백필: 제한 없음
                 title = link.get_text(strip=True)
                 if not title or len(title) < 8:
                     continue
@@ -768,7 +768,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
 def save_new_items(items: list, existing_urls: set) -> list:
     """규칙1: 72시간 이내 & 날짜 확인된 신규 기사만 저장"""
     now_kst = datetime.now(KST)
-    cutoff_72h = now_kst - timedelta(hours=720)  # 백필: 30일
+    cutoff_72h = now_kst - timedelta(hours=240)  # 백필: 10일
     seen_urls = set(existing_urls)
     unique_new = []
     for item in items:
