@@ -807,12 +807,15 @@ def save_new_items(items: list, existing_urls: set) -> list:
                 item['published_at'] = ''  # 날짜 불명
             time.sleep(1)
 
-    # ② 72시간 초과 또는 발행일 불명 제외 (규칙1)
+    # ② 10일(240시간) 초과 제외 — 발행일 불명은 백필이므로 허용 (현재시각으로 대체)
     valid, skipped_unknown, skipped_old = [], 0, 0
     for item in unique_new:
         pub = item.get('published_at', '')
         if not pub:
+            # 백필: 날짜 불명이어도 저장 (published_at = 현재시각)
+            item['published_at'] = now_kst.isoformat()
             skipped_unknown += 1
+            valid.append(item)
             continue
         try:
             from dateutil import parser as _dtp
@@ -823,12 +826,14 @@ def save_new_items(items: list, existing_urls: set) -> list:
                 skipped_old += 1
                 continue
         except Exception:
+            item['published_at'] = now_kst.isoformat()
             skipped_unknown += 1
+            valid.append(item)
             continue
         valid.append(item)
 
     if skipped_unknown:
-        print(f'[필터] {skipped_unknown}건 발행일 불명 — 제외')
+        print(f'[필터] {skipped_unknown}건 발행일 불명 — 현재시각으로 저장')
     if skipped_old:
         print(f'[필터] {skipped_old}건 10일(240시간) 초과 — 제외')
     if not valid:
