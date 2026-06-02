@@ -946,9 +946,17 @@ var _newsGroupOpen = {};
 function _extractKeywords(title) {
   var stopwords = ['관련','대한','위한','통해','대해','기반','위해','이후','이전',
     '지난','오는','올해','내년','지금','현재','새로운','이번','해당','추진',
-    '확대','강화','개선','지원','마련','발표','구축','제공','활용','도입'];
+    '강화한다','강화하는','나선다','밝혔다','위해서'];
+  // 한글 단어 추출 (2글자 이상)
   var words = title.match(/[가-힣]{2,}/g) || [];
-  return words.filter(function(w){ return !stopwords.includes(w) && w.length >= 2; });
+  // 숫자+한글 혼합 추출 (예: 6300개, 5G, 6GHz)
+  var mixed = title.match(/[0-9]+[가-힣]+/g) || [];
+  // 지명 정규화: '제주도' → '제주', '서울시' → '서울'
+  var normalized = words.map(function(w){
+    return w.replace(/([가-힣]{2,})(도|시|군|구)$/, '$1');
+  });
+  var all = normalized.concat(mixed);
+  return all.filter(function(w){ return !stopwords.includes(w) && w.length >= 2; });
 }
 
 function _titleSimilarity(t1, t2) {
@@ -956,6 +964,7 @@ function _titleSimilarity(t1, t2) {
   var k2 = _extractKeywords(t2);
   if (!k1.length || !k2.length) return 0;
   var shared = k1.filter(function(w){ return k2.includes(w); });
+  if (shared.length === 0) return 0;
   return shared.length / Math.max(k1.length, k2.length);
 }
 
