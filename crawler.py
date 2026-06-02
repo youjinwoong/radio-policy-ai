@@ -251,6 +251,8 @@ def crawl_google_news_rss() -> list:
                     continue
                 if not any(k in title for k in RADIO_KEYWORDS):
                     continue
+                if any(k in title for k in EXCLUDE_KEYWORDS):
+                    continue
                 if title in seen_titles:
                     continue
                 seen_titles.add(title)
@@ -351,6 +353,20 @@ RADIO_KEYWORDS = [
     '공공 와이파이', '지하철 와이파이', '기지국', 'LTE', '3G',
     '이동통신 품질', '5G 기지국', 'LTE 기지국', '기지국 장애', '이동통신 장비',
     '무선국', '5G주파수', '6G주파수',
+]
+
+# 비관련 기사 제외 키워드 — 스포츠·연예·부동산 등
+EXCLUDE_KEYWORDS = [
+    # 스포츠
+    '안타', '홈런', '타율', '경기장', '야구', '축구', '농구', '골프', '테니스',
+    'MLB', 'NBA', 'KBO', 'EPL', '올림픽', '월드컵', '선수', '감독', '코치',
+    '우익수', '좌익수', '투수', '포수', '타자', '세리머니', '연속경기',
+    # 연예·방송
+    '아이돌', '드라마', '영화', '콘서트', '팬미팅', '데뷔', '컴백',
+    # 부동산·금융
+    '아파트', '분양', '재건축', '청약', '주식', '코스피', '나스닥',
+    # 기타
+    '레시피', '맛집', '여행', '날씨',
 ]
 
 def crawl_msit() -> list:
