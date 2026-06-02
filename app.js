@@ -940,12 +940,91 @@ async function loadNews() {
   }
 }
 
+// ── 뉴스 그룹핑 유틸 ─────────────────────────────────────
+var _newsGroupOpen = {};
+
+function _extractKeywords(title) {
+  var stopwords = ['관련','대한','위한','통해','대해','기반','위해','이후','이전',
+    '지난','오는','올해','내년','지금','현재','새로운','이번','해당','추진',
+    '확대','강화','개선','지원','마련','발표','구축','제공','활용','도입'];
+  var words = title.match(/[가-힣]{2,}/g) || [];
+  return words.filter(function(w){ return !stopwords.includes(w) && w.length >= 2; });
+}
+
+function _titleSimilarity(t1, t2) {
+  var k1 = _extractKeywords(t1);
+  var k2 = _extractKeywords(t2);
+  if (!k1.length || !k2.length) return 0;
+  var shared = k1.filter(function(w){ return k2.includes(w); });
+  return shared.length / Math.max(k1.length, k2.length);
+}
+
+function _groupNews(items) {
+  var used = {};
+  var groups = [];
+  for (var i = 0; i < items.length; i++) {
+    if (used[i]) continue;
+    var group = [items[i]];
+    var d1 = (items[i].published_at || items[i].created_at || '').slice(0, 10);
+    for (var j = i + 1; j < items.length; j++) {
+      if (used[j]) continue;
+      var d2 = (items[j].published_at || items[j].created_at || '').slice(0, 10);
+      if (d1 !== d2) continue;
+      if (_titleSimilarity(items[i].title, items[j].title) >= 0.35) {
+        group.push(items[j]);
+        used[j] = true;
+      }
+    }
+    used[i] = true;
+    groups.push(group);
+  }
+  return groups;
+}
+
+function _groupTitle(items) {
+  var allKw = [];
+  items.forEach(function(n){ allKw = allKw.concat(_extractKeywords(n.title)); });
+  var freq = {};
+  allKw.forEach(function(w){ freq[w] = (freq[w]||0) + 1; });
+  var top = Object.keys(freq).filter(function(w){ return freq[w] >= 2; })
+    .sort(function(a,b){ return freq[b]-freq[a]; }).slice(0,3);
+  return top.length ? top.join(' ') + ' 관련' : items[0].title.slice(0,20) + '…';
+}
+
+function toggleNewsGroup(gid) {
+  _newsGroupOpen[gid] = !_newsGroupOpen[gid];
+  var body = document.getElementById('ng-body-' + gid);
+  var icon = document.getElementById('ng-icon-' + gid);
+  if (body) body.style.display = _newsGroupOpen[gid] ? 'block' : 'none';
+  if (icon) icon.style.transform = _newsGroupOpen[gid] ? 'rotate(180deg)' : '';
+}
+
+function _renderSingleItem(n) {
+  var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
+  var date = new Date(n.published_at || n.created_at).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
+  var isSelected = String(n.id) === String(selectedNewsId);
+  var urlIcon = n.url
+    ? ' <a href="' + n.url + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:11px;vertical-align:middle"><i class="ti ti-external-link"></i></a>'
+    : '';
+  return '<div class="news-item" onclick="showNewsDetail(\'' + n.id + '\')" style="cursor:pointer;border-left:' + rule.border + ';' + (isSelected ? 'background:var(--bg-secondary);border-radius:var(--radius-md)' : '') + '">' +
+    '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '"></div>' +
+    '<div style="flex:1;min-width:0;overflow:hidden">' +
+      '<div class="news-item-header" style="display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap">' +
+        '<span style="font-size:10px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 7px;border-radius:4px;flex-shrink:0">' + rule.label + '</span>' +
+        '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0">' + date + '</span>' +
+        (n.source ? '<span class="news-item-source" style="font-size:10px;color:var(--text-tertiary);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px">' + n.source + '</span>' : '') +
+      '</div>' +
+      '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + '</div>' +
+      (n.summary ? '<div class="news-meta" style="margin-top:3px;font-size:11px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:var(--text-tertiary)">' + n.summary.slice(0, 80) + (n.summary.length > 80 ? '…' : '') + '</div>' : '') +
+    '</div>' +
+  '</div>';
+}
+
 function renderNewsList() {
   var data = currentNewsFilter === '전체'
     ? newsDataCache
     : newsDataCache.filter(function(n) { return n._importance === currentNewsFilter; });
 
-  // 날짜 내림차순 정렬
   var sorted = data.slice().sort(function(a, b) {
     return new Date(b.published_at || b.created_at) - new Date(a.published_at || a.created_at);
   });
@@ -958,26 +1037,51 @@ function renderNewsList() {
     return;
   }
 
-  listEl.innerHTML = sorted.map(function(n) {
-    var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
-    var date = new Date(n.published_at || n.created_at).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
-    var isSelected = String(n.id) === String(selectedNewsId);
-    var urlIcon = n.url
-      ? ' <a href="' + n.url + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:11px;vertical-align:middle"><i class="ti ti-external-link"></i></a>'
-      : '';
-    return '<div class="news-item" onclick="showNewsDetail(\'' + n.id + '\')" style="cursor:pointer;border-left:' + rule.border + ';' + (isSelected ? 'background:var(--bg-secondary);border-radius:var(--radius-md)' : '') + '">' +
-      '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '"></div>' +
-      '<div style="flex:1;min-width:0;overflow:hidden">' +
-        '<div class="news-item-header" style="display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap">' +
-          '<span style="font-size:10px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 7px;border-radius:4px;flex-shrink:0">' + rule.label + '</span>' +
+  var groups = _groupNews(sorted);
+  var html = '';
+
+  groups.forEach(function(group, gi) {
+    if (group.length === 1) {
+      html += _renderSingleItem(group[0]);
+    } else {
+      var gid = 'g' + gi;
+      var isOpen = !!_newsGroupOpen[gid];
+      var gtitle = _groupTitle(group);
+      var date = (group[0].published_at || group[0].created_at || '').slice(0, 10);
+      var hasUrgent = group.some(function(n){ return n._importance === '긴급'; });
+      var badgeColor = hasUrgent ? 'color:#c53030;background:#fff5f5' : 'color:var(--text-secondary);background:var(--bg-secondary)';
+      html += '<div style="border:0.5px solid var(--border-secondary);border-radius:var(--radius-md);margin:4px 0;overflow:hidden">' +
+        '<div onclick="toggleNewsGroup(\'' + gid + '\')" style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--bg-secondary);cursor:pointer;user-select:none">' +
+          '<i class="ti ti-news" style="font-size:14px;color:var(--text-tertiary);flex-shrink:0"></i>' +
+          '<span style="font-size:13px;font-weight:500;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + gtitle + '</span>' +
+          '<span style="font-size:11px;padding:1px 7px;border-radius:8px;flex-shrink:0;' + badgeColor + '">' + group.length + '건</span>' +
           '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0">' + date + '</span>' +
-          (n.source ? '<span class="news-item-source" style="font-size:10px;color:var(--text-tertiary);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px">' + n.source + '</span>' : '') +
+          '<i id="ng-icon-' + gid + '" class="ti ti-chevron-down" style="font-size:14px;color:var(--text-tertiary);flex-shrink:0;transition:transform .2s;' + (isOpen ? 'transform:rotate(180deg)' : '') + '"></i>' +
         '</div>' +
-        '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + '</div>' +
-        (n.summary ? '<div class="news-meta" style="margin-top:3px;font-size:11px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:var(--text-tertiary)">' + n.summary.slice(0, 80) + (n.summary.length > 80 ? '…' : '') + '</div>' : '') +
-      '</div>' +
-    '</div>';
-  }).join('');
+        '<div id="ng-body-' + gid + '" style="display:' + (isOpen ? 'block' : 'none') + ';padding:0 12px;border-top:0.5px solid var(--border-tertiary)">' +
+          group.map(function(n) {
+            var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
+            var urlIcon = n.url ? ' <a href="' + n.url + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:11px"><i class="ti ti-external-link"></i></a>' : '';
+            return '<div onclick="showNewsDetail(\'' + n.id + '\')" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border-tertiary);cursor:pointer">' +
+              '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '" style="flex-shrink:0"></div>' +
+              '<span style="font-size:12px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 6px;border-radius:4px;flex-shrink:0">' + rule.label + '</span>' +
+              '<span style="font-size:13px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + n.title + urlIcon + '</span>' +
+              '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0;margin-left:8px">' + (n.source||'') + '</span>' +
+            '</div>';
+          }).join('') +
+        '</div>' +
+      '</div>';
+    }
+  });
+
+  var groupCount = groups.filter(function(g){ return g.length > 1; }).length;
+  var totalGrouped = groups.filter(function(g){ return g.length > 1; }).reduce(function(s,g){ return s+g.length; }, 0);
+  if (groupCount > 0) {
+    html += '<div style="font-size:11px;color:var(--text-tertiary);text-align:center;padding:8px 0">' +
+      sorted.length + '건 중 ' + totalGrouped + '건 → ' + groupCount + '개 그룹으로 묶음</div>';
+  }
+
+  listEl.innerHTML = html;
 }
 
 function filterNewsByImportance(el, importance) {
