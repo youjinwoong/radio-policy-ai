@@ -2,13 +2,14 @@ name: 전파정책 일일 자동 크롤링
 
 on:
   schedule:
-    - cron: '0 * * * *'    # 매시간 정각 실행 (1시간 주기)
+    - cron: '0 * * * *'    # 매시간 정각 실행 (크롤링)
+    - cron: '0 23 * * *'   # 매일 23:00 UTC = 08:00 KST (모닝 브리핑)
   workflow_dispatch:         # GitHub에서 수동 실행 버튼
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -37,3 +38,37 @@ jobs:
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
           ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
         run: python crawler.py
+
+  morning-briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 23:00 UTC (= 08:00 KST) 또는 수동 실행 시에만 동작
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 23 * * *'
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 의존성 패키지 설치
+        run: |
+          pip install --upgrade pip
+          pip install requests supabase anthropic python-dateutil
+
+      - name: 모닝 브리핑 생성 및 발송
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          EMAIL_FROM:           ${{ secrets.EMAIL_FROM }}
+          EMAIL_PASSWORD:       ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO:             ${{ secrets.EMAIL_TO }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python morning_briefing.py
