@@ -14,6 +14,13 @@ from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+# .env 파일 자동 로딩 (PC 로컬 실행 시)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # GitHub Actions에서는 환경변수 직접 주입, dotenv 불필요
+
 import requests
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
@@ -107,9 +114,11 @@ def classify_urgency(title: str, content: str = '') -> str:
 # ═══════════════════════════════════════════════════════
 
 def get_existing_urls() -> set:
-    """Supabase에 이미 저장된 URL 목록 조회"""
-    res = sb.table('news_feed').select('url').execute()
-    return {row['url'] for row in (res.data or []) if row.get('url')}
+    """Supabase에 이미 저장된 URL + 제목 목록 조회 (Google RSS 중복 방지)"""
+    res = sb.table('news_feed').select('url,title').execute()
+    urls   = {row['url']   for row in (res.data or []) if row.get('url')}
+    titles = {row['title'] for row in (res.data or []) if row.get('title')}
+    return urls, titles
 
 
 def detect_category(title: str) -> str:
@@ -199,6 +208,80 @@ def parse_date(date_str: str) -> str:
             pass
 
     return ''  # 파싱 실패 — 호출자가 fallback 처리
+
+
+# ═══════════════════════════════════════════════════════
+#  크롤러 — Google News RSS (IP 차단 없음, 전 언론사 커버)
+# ═══════════════════════════════════════════════════════
+
+def crawl_google_news_rss() -> list:
+    """Google News RSS로 키워드 기반 뉴스 수집.
+    - GitHub Actions(미국 IP)에서도 차단 없음
+    - 발행일 100% 포함 (RFC 2822 → KST 자동 변환)
+    - 제목 기반 중복 제거 (save_new_items에서 URL·제목 이중 체크)
+    """
+    try:
+        import feedparser
+        import calendar as _cal
+    except ImportError:
+        print('[Google RSS] feedparser 미설치 — pip install feedparser')
+        return []
+
+    items = []
+    seen_titles: set = set()
+
+    for kw in NEWS_SEARCH_KEYWORDS:
+        rss_url = (
+            'https://news.google.com/rss/search'
+            f'?q={requests.utils.quote(kw)}&hl=ko&gl=KR&ceid=KR:ko'
+        )
+        try:
+            feed = feedparser.parse(rss_url)
+            for entry in (feed.entries or []):
+                # 제목에서 "기사 제목 - 언론사명" 분리
+                raw_title = (entry.get('title') or '').strip()
+                if ' - ' in raw_title:
+                    title  = raw_title.rsplit(' - ', 1)[0].strip()
+                    source = raw_title.rsplit(' - ', 1)[1].strip()
+                else:
+                    title  = raw_title
+                    source = (entry.get('source') or {}).get('title', '알수없음')
+
+                if not title or len(title) < 8:
+                    continue
+                if not any(k in title for k in RADIO_KEYWORDS):
+                    continue
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+
+                link = entry.get('link', '')
+                if not link:
+                    continue
+
+                # 발행일: published_parsed(UTC struct_time) → KST ISO
+                pub_struct = entry.get('published_parsed')
+                if pub_struct:
+                    from datetime import datetime as _dt
+                    pub_utc = _dt.fromtimestamp(_cal.timegm(pub_struct), tz=timezone.utc)
+                    date_str = pub_utc.astimezone(KST).isoformat()
+                else:
+                    date_str = ''
+
+                items.append({
+                    'title':        title,
+                    'source':       source,
+                    'category':     detect_category(title),
+                    'url':          link,
+                    'is_read':      False,
+                    'published_at': date_str,
+                })
+        except Exception as e:
+            print(f'[Google RSS 오류] {kw}: {e}')
+        time.sleep(0.3)
+
+    print(f'[Google RSS] {len(items)}건 수집')
+    return items
 
 
 # ═══════════════════════════════════════════════════════
@@ -773,20 +856,34 @@ def fetch_article_body(url: str, source: str) -> tuple:
 #  Supabase 저장
 # ═══════════════════════════════════════════════════════
 
-def save_new_items(items: list, existing_urls: set) -> list:
-    """규칙1: 72시간 이내 & 날짜 확인된 신규 기사만 저장"""
+def save_new_items(items: list, existing_data: tuple) -> list:
+    """규칙1: 72시간 이내 & 날짜 확인된 신규 기사만 저장
+    existing_data: (existing_urls: set, existing_titles: set)
+    URL + 제목 이중 중복 체크 (Google RSS 리다이렉트 URL 대응)
+    """
+    existing_urls, existing_titles = existing_data
     now_kst = datetime.now(KST)
     cutoff_72h = now_kst - timedelta(hours=72)
-    seen_urls = set(existing_urls)
+    seen_urls   = set(existing_urls)
+    seen_titles = set(existing_titles)
     unique_new = []
     for item in items:
-        url = item.get('url', '')
-        if url and url not in seen_urls:
+        url   = item.get('url', '')
+        title = item.get('title', '')
+        # URL 중복 체크
+        if url and url in seen_urls:
+            continue
+        # 제목 중복 체크 (Google RSS ↔ 직접 크롤링 간 같은 기사 방지)
+        if title and title in seen_titles:
+            continue
+        if url:
             seen_urls.add(url)
-            # # 으로 시작하는 제목(태그/토픽 페이지) 제외
-            if item.get('title', '').startswith('#'):
-                continue
-            unique_new.append(item)
+        if title:
+            seen_titles.add(title)
+        # # 으로 시작하는 제목(태그/토픽 페이지) 제외
+        if title.startswith('#'):
+            continue
+        unique_new.append(item)
 
     if not unique_new:
         print('[저장] 신규 항목 없음')
@@ -1330,92 +1427,58 @@ def check_pc_heartbeat() -> bool:
 # ═══════════════════════════════════════════════════════
 
 def main():
-    GITHUB_MODE = os.environ.get('GITHUB_MODE', '').lower() == 'true'
-    mode_label = '[GitHub 모드]' if GITHUB_MODE else '[PC 모드]'
-
     now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M KST')
     print(f'{"="*50}')
-    print(f'[시작] {now_str} {mode_label}')
+    print(f'[시작] {now_str}')
     print(f'{"="*50}')
 
-    # ── GitHub 모드: PC 하트비트 확인 ──────────────────
-    pc_active = False
-    if GITHUB_MODE:
-        pc_active = check_pc_heartbeat()
-        if pc_active:
-            print('[GitHub 모드] PC 활성 확인 — 크롤링 스킵, 브리핑만 실행')
-        else:
-            print('[GitHub 모드] PC 비활성 — GitHub 크롤링 실행 (한국 IP 차단 일부 있음)')
+    # ── 크롤링 (GitHub Actions 매시간 실행) ────────────
+    existing_urls, existing_titles = get_existing_urls()
+    print(f'[기존] Supabase 저장 항목 {len(existing_urls)}건')
 
-    # ── 크롤링 (PC 모드 또는 GitHub+PC 비활성인 경우) ──
-    new_items = []
-    if not (GITHUB_MODE and pc_active):
-        existing_urls = get_existing_urls()
-        print(f'[기존] Supabase 저장 항목 {len(existing_urls)}건')
+    all_items: list = []
+    all_items += crawl_google_news_rss()   # 전 언론사 — IP 차단 없음 (핵심)
+    all_items += crawl_rra()               # 국립전파연구원 고시·예규
+    all_items += crawl_msit()              # 과기정통부 보도자료
+    all_items += crawl_kcc()               # 방통위
+    all_items += crawl_etri()              # ETRI
+    all_items += crawl_kisdi()             # KISDI
+    all_items += crawl_etnews()            # 전자신문 전용 키워드
+    print(f'[수집] 총 {len(all_items)}건')
 
-        all_items: list = []
-        all_items += crawl_rra()
-        all_items += crawl_msit()
-        all_items += crawl_kcc()
-        all_items += crawl_etri()
-        all_items += crawl_kisdi()
-        all_items += crawl_etnews()
-        for cfg in NEWS_SITE_CONFIGS:
-            all_items += crawl_news_site(cfg)
-        print(f'[수집] 총 {len(all_items)}건')
+    new_items = save_new_items(all_items, (existing_urls, existing_titles))
+    print(f'[신규] {len(new_items)}건')
 
-        new_items = save_new_items(all_items, existing_urls)
-        print(f'[신규] {len(new_items)}건')
+    # ── 긴급 기사 즉시 알림 (발행 24시간 이내만) ────────
+    now_kst = datetime.now(KST)
+    cutoff_24h = now_kst - timedelta(hours=24)
 
-        # 긴급 기사 알림 (텔레그램 + 이메일 즉시 발송)
-        # 발행일이 24시간 이내인 기사만 알림 대상으로 제한
-        now_kst = datetime.now(KST)
-        cutoff_24h = now_kst - timedelta(hours=24)
+    def is_within_24h(item):
+        pub = item.get('published_at', '')
+        if not pub:
+            return False
+        try:
+            from dateutil import parser as _dtp2
+            pub_dt = _dtp2.parse(pub)
+            if pub_dt.tzinfo is None:
+                pub_dt = pub_dt.replace(tzinfo=KST)
+            return pub_dt >= cutoff_24h
+        except Exception:
+            return False
 
-        def is_within_24h(item):
-            """규칙2: 발행일이 24시간 이내인 기사만 긴급 알림"""
-            pub = item.get('published_at', '')
-            if not pub:
-                return False  # 날짜 불명 → 알림 제외
-            try:
-                from dateutil import parser as _dtp2
-                pub_dt = _dtp2.parse(pub)
-                if pub_dt.tzinfo is None:
-                    pub_dt = pub_dt.replace(tzinfo=KST)
-                return pub_dt >= cutoff_24h
-            except Exception:
-                return False
+    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
+    skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
+    if skipped:
+        print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
+    if urgent_items:
+        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
+        send_telegram(urgent_items)
+        send_urgent_email(urgent_items)
+    else:
+        print('[긴급] 해당 없음')
 
-        urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
-        skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
-        if skipped:
-            print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
-        if urgent_items:
-            print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
-            send_telegram(urgent_items)
-            send_urgent_email(urgent_items)
-        else:
-            print('[긴급] 해당 없음')
-
-        # PC 모드: 하트비트 기록 (크롤링 완료 표시 → GitHub가 감지)
-        if not GITHUB_MODE:
-            try:
-                sb.table('system_status').upsert(
-                    {'key': 'last_pc_crawl',
-                     'value': datetime.now(KST).isoformat(),
-                     'updated_at': datetime.now(KST).isoformat()},
-                    on_conflict='key'
-                ).execute()
-                print('[하트비트] PC 실행 완료 기록')
-            except Exception as e:
-                print(f'[하트비트 오류] {e}')
-
-    # ── 모닝 브리핑: morning-telecom-news (Cowork 스케줄)가 단독 담당 ──
-    # crawler.py 브리핑 비활성화 이유:
-    #   1. morning-telecom-news가 WebSearch로 더 넓게 수집 (정부사이트 포함)
-    #   2. Claude Sonnet 브리핑이 Haiku보다 품질 높음
-    #   3. 중복 브리핑/이메일 방지
-    print('[모닝 브리핑] morning-telecom-news 태스크가 담당 — 건너뜀')
+    # ── 모닝 브리핑: Cowork morning-telecom-news 단독 담당 ──
+    print('[모닝 브리핑] morning-telecom-news 태스크 담당 — 건너뜀')
 
     print(f'{"="*50}')
     print('[완료]')
