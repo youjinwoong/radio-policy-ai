@@ -42,7 +42,6 @@ jobs:
   morning-briefing:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # 23:00 UTC (= 08:00 KST) 또는 수동 실행 시에만 동작
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 23 * * *'
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
