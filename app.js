@@ -949,8 +949,10 @@ function _extractKeywords(title) {
     '강화한다','강화하는','나선다','밝혔다','위해서'];
   // 한글 단어 추출 (2글자 이상)
   var words = title.match(/[가-힣]{2,}/g) || [];
-  // 숫자+한글 혼합 추출 (예: 6300개, 5G, 6GHz)
-  var mixed = title.match(/[0-9]+[가-힣]+/g) || [];
+  // 숫자+한글 혼합 추출 후 조사 제거 (예: 6300개로 → 6300개)
+  var mixed = (title.match(/[0-9]+[가-힣]+/g) || []).map(function(w){
+    return w.replace(/(으로|에서|부터|까지|로서|로는|로도|에는|에도|이나|이며|이고|로|을|를|이|가|은|는|의|에|과|와|도|만)$/, '');
+  });
   // 지명 정규화: '제주도' → '제주', '서울시' → '서울'
   var normalized = words.map(function(w){
     return w.replace(/([가-힣]{2,})(도|시|군|구)$/, '$1');
@@ -986,7 +988,7 @@ function _groupNews(items) {
         if (d1 !== d2) continue;
         // 그룹 내 어느 기사와 유사하면 추가
         var matchAny = group.some(function(g) {
-          return _titleSimilarity(g.title, items[j].title) >= 0.28;
+          return _titleSimilarity(g.title, items[j].title) >= 0.15;
         });
         if (matchAny) {
           group.push(items[j]);
