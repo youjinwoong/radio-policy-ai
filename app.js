@@ -966,16 +966,26 @@ function _groupNews(items) {
     if (used[i]) continue;
     var group = [items[i]];
     var d1 = (items[i].published_at || items[i].created_at || '').slice(0, 10);
-    for (var j = i + 1; j < items.length; j++) {
-      if (used[j]) continue;
-      var d2 = (items[j].published_at || items[j].created_at || '').slice(0, 10);
-      if (d1 !== d2) continue;
-      if (_titleSimilarity(items[i].title, items[j].title) >= 0.35) {
-        group.push(items[j]);
-        used[j] = true;
+    used[i] = true;
+    // 그룹 크기가 늘어날 수 있으므로 반복 확인 (전이적 그룹핑)
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (var j = 0; j < items.length; j++) {
+        if (used[j]) continue;
+        var d2 = (items[j].published_at || items[j].created_at || '').slice(0, 10);
+        if (d1 !== d2) continue;
+        // 그룹 내 어느 기사와 유사하면 추가
+        var matchAny = group.some(function(g) {
+          return _titleSimilarity(g.title, items[j].title) >= 0.28;
+        });
+        if (matchAny) {
+          group.push(items[j]);
+          used[j] = true;
+          changed = true;
+        }
       }
     }
-    used[i] = true;
     groups.push(group);
   }
   return groups;
