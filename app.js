@@ -535,6 +535,60 @@ async function fetchRecentNewsContext(query) {
 }
 
 // ════════════════════════════════════════════
+//  원문 수집 — CORS 프록시 경유 기사 본문 추출
+// ════════════════════════════════════════════
+var CORS_PROXIES = [
+  'https://corsproxy.io/?',
+  'https://api.allorigins.win/raw?url=',
+];
+
+async function _fetchArticleBody(url) {
+  for (var pi = 0; pi < CORS_PROXIES.length; pi++) {
+    try {
+      var proxyUrl = CORS_PROXIES[pi] + encodeURIComponent(url);
+      var resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) continue;
+      var html = await resp.text();
+
+      // DOMParser로 본문 추출
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(html, 'text/html');
+
+      // 불필요한 태그 제거
+      ['script','style','nav','header','footer','aside','iframe','noscript'].forEach(function(tag) {
+        doc.querySelectorAll(tag).forEach(function(el) { el.remove(); });
+      });
+
+      // 본문 셀렉터 순서대로 시도
+      var selectors = [
+        'article', '#articleBody', '#article_body', '#article-body',
+        '.article_body', '.article-body', '.article_txt', '.article-txt',
+        '.news_body', '.news-body', '.view_cont', '.view-content',
+        '#articleWrap', '#newsContent', '.content_area', 'main'
+      ];
+      var bodyText = '';
+      for (var si = 0; si < selectors.length; si++) {
+        var el = doc.querySelector(selectors[si]);
+        if (el) {
+          var t = el.innerText || el.textContent || '';
+          t = t.replace(/\s+/g, ' ').trim();
+          if (t.length > 200) { bodyText = t; break; }
+        }
+      }
+      // fallback: body 전체
+      if (!bodyText) {
+        bodyText = (doc.body.innerText || doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+      }
+
+      if (bodyText.length > 100) return bodyText.slice(0, 3000);
+    } catch(e) {
+      console.warn('[원문 수집 실패] 프록시 ' + pi + ':', e.message);
+    }
+  }
+  return '';
+}
+
+// ════════════════════════════════════════════
 //  추가 지식 — custom_knowledge 검색 및 CRUD
 // ════════════════════════════════════════════
 async function searchCustomKnowledge(query) {
@@ -1215,12 +1269,34 @@ async function summarizeNews(newsId) {
     return;
   }
 
-  // ② 본문이 없으면 API 호출하지 않고 안내 메시지 표시
+  // ② 본문 준비 — 없으면 CORS 프록시로 원문 직접 수집
   var bodySnippet = (n.content || '').replace(/\s+/g, ' ').trim().slice(0, 3000);
+
+  if (!bodySnippet && n.url) {
+    box.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary)">' +
+        '<span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>' +
+        '원문 수집 중...' +
+      '</div>';
+    bodySnippet = await _fetchArticleBody(n.url);
+    if (bodySnippet && sb) {
+      // 수집 성공 시 DB에 저장해 다음번엔 바로 사용
+      sb.from('news_feed').update({ content: bodySnippet }).eq('id', n.id).then(function() {});
+      n.content = bodySnippet;
+    }
+  }
+
   if (!bodySnippet) {
-    box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">본문이 수집되지 않은 기사입니다. 원문 보기를 통해 직접 확인해 주세요.</span>';
+    box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">원문을 가져오지 못했습니다. 원문 보기를 통해 직접 확인해 주세요.</span>';
     return;
   }
+
+  // 다시 로딩 스피너로 교체
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary)">' +
+      '<span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>' +
+      '요약 생성 중...' +
+    '</div>';
 
   var { claudeKey } = getConfig();
   if (!claudeKey) {
@@ -1235,7 +1311,7 @@ async function summarizeNews(newsId) {
       '- 각 포인트는 1~2문장, 육하원칙(누가/무엇을/왜/어떻게) 포함.\n' +
       '- 불릿 기호(•, -, * 등)는 붙이지 마세요. 순수 텍스트만.\n\n' +
       '제목: ' + n.title + '\n출처: ' + (n.source || '') + '\n날짜: ' + (n.published_at || '').slice(0, 10) +
-      (bodySnippet ? '\n\n본문:\n' + bodySnippet : '');
+      '\n\n본문:\n' + bodySnippet;
 
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
