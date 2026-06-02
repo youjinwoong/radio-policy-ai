@@ -270,6 +270,16 @@ def crawl_google_news_rss() -> list:
                 else:
                     date_str = ''
 
+                # RSS 요약(summary)을 content로 저장 → 대시보드 즉시 표시
+                import re as _re
+                raw_summary = entry.get('summary', '') or ''
+                # HTML 태그 제거
+                clean_summary = _re.sub(r'<[^>]+>', '', raw_summary).strip()
+                # 출처 표기 제거 (예: " - 전자신문" 등)
+                if ' - ' in clean_summary:
+                    clean_summary = clean_summary.rsplit(' - ', 1)[0].strip()
+                content_text = clean_summary[:500] if clean_summary else None
+
                 items.append({
                     'title':        title,
                     'source':       source,
@@ -277,6 +287,7 @@ def crawl_google_news_rss() -> list:
                     'url':          link,
                     'is_read':      False,
                     'published_at': date_str,
+                    'content':      content_text,
                 })
         except Exception as e:
             print(f'[Google RSS 오류] {kw}: {e}')
