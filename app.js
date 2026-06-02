@@ -1353,6 +1353,13 @@ async function analyzeNewsImpact(newsId) {
     var sysMsg = SKT_IMPACT_SYSTEM_PROMPT;
     // 본문이 있으면 최대 2000자까지 포함 — 제목만 줄 때보다 훨씬 정확한 분석 가능
     var bodySnippet = (n.body || n.content || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+
+    // 본문 없으면 분석 불가 안내
+    if (!bodySnippet) {
+      if (box) box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">원문 본문이 없어 영향도를 분석할 수 없습니다. 원문 보기를 통해 직접 확인해 주세요.</span>';
+      return;
+    }
+
     var userMsg = '제목: ' + n.title +
       '\n출처: ' + (n.source || '') +
       '\n날짜: ' + (n.published_at || '').slice(0, 10) +

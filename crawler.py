@@ -261,6 +261,15 @@ def crawl_google_news_rss() -> list:
                 if not link:
                     continue
 
+                # Google News 리다이렉트 URL → 실제 기사 URL로 변환
+                if 'news.google.com' in link:
+                    try:
+                        r = requests.get(link, headers=HEADERS, timeout=8, allow_redirects=True)
+                        if r.url and 'news.google.com' not in r.url:
+                            link = r.url
+                    except Exception:
+                        pass  # 실패 시 원본 URL 유지
+
                 # 발행일: published_parsed(UTC struct_time) → KST ISO
                 pub_struct = entry.get('published_parsed')
                 if pub_struct:
