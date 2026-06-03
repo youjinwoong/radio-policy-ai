@@ -906,7 +906,7 @@ def save_new_items(items: list, existing_data: tuple) -> list:
     """
     existing_urls, existing_titles = existing_data
     now_kst = datetime.now(KST)
-    cutoff_72h = now_kst - timedelta(hours=72)
+    cutoff_72h = now_kst - timedelta(days=15)   # 저장 기준: 15일 이내
     seen_urls   = set(existing_urls)
     seen_titles = set(existing_titles)
     unique_new = []
@@ -970,7 +970,7 @@ def save_new_items(items: list, existing_data: tuple) -> list:
     if skipped_unknown:
         print(f'[필터] {skipped_unknown}건 발행일 불명 — 제외')
     if skipped_old:
-        print(f'[필터] {skipped_old}건 72시간 초과 — 제외')
+        print(f'[필터] {skipped_old}건 15일 초과 — 제외')
     if not valid:
         print('[저장] 유효한 신규 항목 없음')
         return []
