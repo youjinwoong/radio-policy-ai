@@ -133,7 +133,6 @@ def send_telegram(briefing_text: str):
             json={
                 'chat_id': CHAT_ID,
                 'text': text,
-                'parse_mode': 'Markdown',
                 'disable_web_page_preview': True,
             },
             timeout=15

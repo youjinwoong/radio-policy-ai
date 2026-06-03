@@ -199,7 +199,7 @@ def send_telegram(briefing_text: str):
         resp = requests.post(
             f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage',
             json={'chat_id': TELEGRAM_CHAT_ID, 'text': text,
-                  'parse_mode': 'Markdown', 'disable_web_page_preview': True},
+                  'disable_web_page_preview': True},
             timeout=15
         )
         if resp.status_code == 200:
