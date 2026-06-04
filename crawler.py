@@ -263,12 +263,22 @@ def crawl_google_news_rss() -> list:
 
                 # Google News 리다이렉트 URL → 실제 기사 URL로 변환
                 if 'news.google.com' in link:
+                    decoded = False
                     try:
-                        r = requests.get(link, headers=HEADERS, timeout=8, allow_redirects=True)
-                        if r.url and 'news.google.com' not in r.url:
-                            link = r.url
+                        from googlenewsdecoder import new_decoderv1
+                        result = new_decoderv1(link)
+                        if result.get('status') is True and result.get('decoded_url'):
+                            link = result['decoded_url']
+                            decoded = True
                     except Exception:
-                        pass  # 실패 시 원본 URL 유지
+                        pass
+                    if not decoded:
+                        try:
+                            r = requests.get(link, headers=HEADERS, timeout=8, allow_redirects=True)
+                            if r.url and 'news.google.com' not in r.url:
+                                link = r.url
+                        except Exception:
+                            pass  # 실패 시 원본 URL 유지
 
                 # 발행일: published_parsed(UTC struct_time) → KST ISO
                 pub_struct = entry.get('published_parsed')
@@ -861,6 +871,17 @@ def fetch_article_body(url: str, source: str) -> tuple:
                     break
 
         # ── 본문 추출 ───────────────────────────────────────
+        # 네이버 뉴스 URL 감지 → 전용 셀렉터 우선 적용
+        naver_selectors = []
+        if 'naver.com' in url:
+            naver_selectors = [
+                'div#dic_area',
+                'div.newsct_article',
+                'div#articleBodyContents',
+                'div._article_body_contents',
+                'div.article_body',
+            ]
+
         selectors_map = {
             '전자신문':    ['div.article_body', 'div#articleBody', 'div.news_view', 'div#articleView'],
             '연합뉴스':    ['div.article-txt', 'article.story-news', 'div#articleWrap'],
@@ -881,7 +902,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
             '정보통신신문': ['div#article_body', 'div.article-content', 'div.view_cont'],
             'Telecom Reseller': ['div.entry-content', 'article', 'div.post-content'],
         }
-        candidates = selectors_map.get(source, []) + [
+        candidates = naver_selectors + selectors_map.get(source, []) + [
             'article', 'div.article', 'div.news-content',
             'div.view_cont', 'div.view-content', 'div#content',
             'div.article-body', 'div.news_body', 'div.article_txt'
@@ -942,7 +963,8 @@ def save_new_items(items: list, existing_data: tuple) -> list:
     for item in unique_new:
         if item.get('url'):
             body, article_date = fetch_article_body(item['url'], item.get('source', ''))
-            item['content'] = body if body else None
+            # 본문 수집 성공 시 사용, 실패 시 RSS summary(기존 content) 폴백
+            item['content'] = body if body else item.get('content')
             item['content_fetched_at'] = now_kst.isoformat()
             current_pub = item.get('published_at', '')
             if not current_pub and article_date:
