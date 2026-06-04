@@ -2,8 +2,8 @@ name: 전파정책 일일 자동 크롤링
 
 on:
   schedule:
-    - cron: '0 * * * *'    # 매시간 정각 실행 (크롤링)
-    - cron: '0 23 * * *'   # 매일 23:00 UTC = 08:00 KST (모닝 브리핑)
+    - cron: '0 0-11 * * *'      # 09~20 KST 매시간
+    - cron: '0 13,19,23 * * *'  # 22시, 04시, 08시 KST
   workflow_dispatch:         # GitHub에서 수동 실행 버튼
 
 jobs:
