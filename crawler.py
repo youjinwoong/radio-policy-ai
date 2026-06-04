@@ -29,6 +29,8 @@ import anthropic
 # ── 환경변수 ────────────────────────────────────────────
 SUPABASE_URL       = os.environ['SUPABASE_URL']
 SUPABASE_KEY       = os.environ['SUPABASE_SERVICE_KEY']
+# GitHub Actions 환경 감지 (본문 수집 스킵용)
+IS_GITHUB_ACTIONS  = os.environ.get('GITHUB_ACTIONS', '').lower() == 'true'
 EMAIL_FROM         = os.environ.get('EMAIL_FROM', '')
 EMAIL_PASS         = os.environ.get('EMAIL_PASSWORD', '')
 EMAIL_TO           = os.environ.get('EMAIL_TO', '')
@@ -1053,20 +1055,28 @@ def save_new_items(items: list, existing_data: tuple) -> list:
         return []
 
     # ① 본문 수집 및 발행일 확정
-    print(f'[본문 수집] {len(unique_new)}건 시작...')
-    for item in unique_new:
-        if item.get('url'):
-            body, article_date = fetch_article_body(item['url'], item.get('source', ''))
-            # 본문 수집 성공 시 사용, 실패 시 RSS summary(기존 content) 폴백
-            item['content'] = body if body else item.get('content')
+    # GitHub Actions(미국 IP)에서는 한국 뉴스 사이트 차단 → RSS 요약만 저장
+    # PC에서 실행 시 fetch_article_body로 전체 본문 수집
+    if IS_GITHUB_ACTIONS:
+        print(f'[본문 수집] GitHub Actions 환경 — RSS 요약 저장 후 PC refetch 위임')
+        for item in unique_new:
             item['content_fetched_at'] = now_kst.isoformat()
-            current_pub = item.get('published_at', '')
-            if not current_pub and article_date:
-                item['published_at'] = article_date
-                print(f'  [날짜보정] {item.get("title","")[:30]}... → {article_date}')
-            elif not current_pub:
-                item['published_at'] = ''  # 날짜 불명
-            time.sleep(1)
+            if not item.get('published_at'):
+                item['published_at'] = ''
+    else:
+        print(f'[본문 수집] PC 환경 — {len(unique_new)}건 본문 직접 수집 시작...')
+        for item in unique_new:
+            if item.get('url'):
+                body, article_date = fetch_article_body(item['url'], item.get('source', ''))
+                item['content'] = body if body else item.get('content')
+                item['content_fetched_at'] = now_kst.isoformat()
+                current_pub = item.get('published_at', '')
+                if not current_pub and article_date:
+                    item['published_at'] = article_date
+                    print(f'  [날짜보정] {item.get("title","")[:30]}... → {article_date}')
+                elif not current_pub:
+                    item['published_at'] = ''
+                time.sleep(1)
 
     # ② 72시간 초과 또는 발행일 불명 제외 (규칙1)
     valid, skipped_unknown, skipped_old = [], 0, 0
@@ -1668,21 +1678,3 @@ def main():
 
     urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
     skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
-    if skipped:
-        print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
-    if urgent_items:
-        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
-        send_telegram(urgent_items)
-        send_urgent_email(urgent_items)
-    else:
-        print('[긴급] 해당 없음')
-
-    # ── 모닝 브리핑: Cowork morning-telecom-news 단독 담당 ──
-    print('[모닝 브리핑] morning-telecom-news 태스크 담당 — 건너뜀')
-
-    print(f'{"="*50}')
-    print('[완료]')
-
-
-if __name__ == '__main__':
-    main()
