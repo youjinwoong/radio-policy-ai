@@ -1,1 +1,39 @@
-name: 전파정책 일일 자동 크롤링on:  schedule:    - cron: '0 0-11 * * *'→ Runs every hour, between 00:00 and 11:00       # 09~20 KST 매시간    - cron: '0 13,18,22,23 * * *'→ Runs at 13:00, 18:00, 22:00 and 23:00  # 22시, 03시, 07시, 08시 KST  workflow_dispatch:         # GitHub에서 수동 실행 버튼jobs:  crawl:    runs-on: ubuntu-latest    timeout-minutes: 30    env:      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true    steps:      - name: 저장소 체크아웃        uses: actions/checkout@v4      - name: Python 3.11 설정        uses: actions/setup-python@v5        with:          python-version: '3.11'      - name: 의존성 패키지 설치        run: |          pip install --upgrade pip          pip install requests beautifulsoup4 supabase anthropic feedparser googlenewsdecoder python-dateutil      - name: 크롤러 실행        env:          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}          EMAIL_FROM:           ${{ secrets.EMAIL_FROM }}          EMAIL_PASSWORD:       ${{ secrets.EMAIL_PASSWORD }}          EMAIL_TO:             ${{ secrets.EMAIL_TO }}
+name: 전파정책 일일 자동 크롤링
+
+on:
+  schedule:
+    - cron: '0 0-11 * * *'         # 09~20 KST 매시간
+    - cron: '0 13,18,22,23 * * *'  # 22시, 03시, 07시, 08시 KST
+  workflow_dispatch:                # GitHub에서 수동 실행 버튼
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 의존성 패키지 설치
+        run: |
+          pip install --upgrade pip
+          pip install requests beautifulsoup4 supabase anthropic feedparser googlenewsdecoder python-dateutil
+
+      - name: 크롤러 실행
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          EMAIL_FROM:           ${{ secrets.EMAIL_FROM }}
+          EMAIL_PASSWORD:       ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO:             ${{ secrets.EMAIL_TO }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python crawler.py

@@ -5,9 +5,16 @@
 - 옵션: python refetch_content.py --all   (content 있어도 전부 재수집)
 """
 
-import sys, time
+import os, sys, time
 from datetime import datetime, timezone, timedelta
 from supabase import create_client
+
+# .env 파일 자동 로딩 (로컬 실행 시)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # crawler.py의 fetch_article_body, HEADERS 재사용
 import importlib.util, pathlib
@@ -19,8 +26,8 @@ crawler = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(crawler)
 
 # ── 설정 ──────────────────────────────────────────────────────
-SUPABASE_URL = "https://zwkjedumfuhodckmtxxn.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3a2plZHVtZnVob2Rja210eHhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1MjQ1MjMsImV4cCI6MjA5NTEwMDUyM30.jxMwPgngbSGugU-1GuLNV7EiURONz7JT85F4WdqMisU"
+SUPABASE_URL = os.environ['SUPABASE_URL']
+SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY') or os.environ['SUPABASE_KEY']
 DELAY_BETWEEN = 1.5
 KST = timezone(timedelta(hours=9))
 # ─────────────────────────────────────────────────────────────
