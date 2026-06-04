@@ -211,7 +211,90 @@ def parse_date(date_str: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════
-#  크롤러 — Google News RSS (IP 차단 없음, 전 언론사 커버)
+#  크롤러 — 네이버 뉴스 검색 (1순위)
+# ═══════════════════════════════════════════════════════
+
+def crawl_naver_news() -> tuple:
+    """네이버 뉴스 검색으로 키워드별 기사 수집.
+    n.news.naver.com URL 우선 확보 → 본문 수집률 극대화.
+    반환: (items: list, fail_count: int)
+    """
+    items = []
+    seen_urls: set = set()
+    seen_titles: set = set()
+    fail_count = 0
+
+    for kw in NEWS_SEARCH_KEYWORDS:
+        url = (
+            'https://search.naver.com/search.naver'
+            f'?where=news&query={requests.utils.quote(kw)}&sort=1'
+        )
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=10)
+            res.raise_for_status()
+            soup = BeautifulSoup(res.text, 'html.parser')
+
+            # 네이버 뉴스 검색 결과 파싱
+            articles = soup.select('ul.list_news li.bx')
+            if not articles:
+                articles = soup.select('ul.list_news > li')
+
+            for art in articles[:8]:
+                title_tag = art.select_one('a.news_tit')
+                if not title_tag:
+                    continue
+                title = title_tag.get_text(strip=True)
+                if not title or len(title) < 8:
+                    continue
+                if not any(k in title for k in RADIO_KEYWORDS):
+                    continue
+                if any(k in title for k in EXCLUDE_KEYWORDS):
+                    continue
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+
+                # n.news.naver.com URL 우선, 없으면 원문 URL
+                href = title_tag.get('href', '')
+                naver_link = art.select_one('a.info[href*="n.news.naver.com"]')
+                if naver_link:
+                    href = naver_link.get('href', href)
+                if not href or href in seen_urls:
+                    continue
+                seen_urls.add(href)
+
+                # 언론사명
+                press_tag = art.select_one('a.info.press, a.press')
+                source = press_tag.get_text(strip=True) if press_tag else '네이버뉴스'
+
+                # 날짜 (span.info 중 날짜 형식 포함된 것)
+                date_str = ''
+                for span in art.select('span.info'):
+                    text = span.get_text(strip=True)
+                    if any(c in text for c in ['분 전', '시간 전', '일 전', '어제', '.']):
+                        date_str = text
+                        break
+
+                items.append({
+                    'title':        title,
+                    'source':       source,
+                    'category':     detect_category(title),
+                    'url':          href,
+                    'is_read':      False,
+                    'published_at': parse_date(date_str),
+                    'content':      None,
+                })
+        except Exception as e:
+            print(f'[네이버 뉴스 오류] {kw}: {e}')
+            fail_count += 1
+        time.sleep(0.5)
+
+    print(f'[네이버 뉴스] {len(items)}건 수집 (실패 키워드 {fail_count}개)')
+    return items, fail_count
+
+
+# ═══════════════════════════════════════════════════════
+#  크롤러 — Google News RSS (네이버 차단 시 폴백)
 # ═══════════════════════════════════════════════════════
 
 def crawl_google_news_rss() -> list:
@@ -915,6 +998,17 @@ def fetch_article_body(url: str, source: str) -> tuple:
                 if len(text) > 100:
                     body = text[:1500]
                     break
+
+        # 셀렉터 미매칭 시 trafilatura 폴백
+        if not body:
+            try:
+                import trafilatura
+                extracted = trafilatura.extract(resp.text, include_comments=False, include_tables=False)
+                if extracted and len(extracted.strip()) > 100:
+                    body = extracted.strip()[:1500]
+            except Exception:
+                pass
+
         return body, pub_date
     except Exception as e:
         print(f'  [본문 수집 실패] {url}: {e}')
@@ -1538,13 +1632,18 @@ def main():
     print(f'[기존] Supabase 저장 항목 {len(existing_urls)}건')
 
     all_items: list = []
-    all_items += crawl_google_news_rss()   # 전 언론사 — IP 차단 없음 (핵심)
-    all_items += crawl_rra()               # 국립전파연구원 고시·예규
-    all_items += crawl_msit()              # 과기정통부 보도자료
-    all_items += crawl_kcc()               # 방통위
-    all_items += crawl_etri()              # ETRI
-    all_items += crawl_kisdi()             # KISDI
-    all_items += crawl_etnews()            # 전자신문 전용 키워드
+
+    # 1순위: 네이버 뉴스 검색
+    naver_items, naver_fail = crawl_naver_news()
+    all_items += naver_items
+
+    # 네이버 차단 감지 → Google RSS 폴백
+    # (전체 키워드 50% 이상 실패 또는 수집 5건 미만)
+    if naver_fail > len(NEWS_SEARCH_KEYWORDS) * 0.5 or len(naver_items) < 5:
+        print(f'[폴백] 네이버 부진({len(naver_items)}건, 실패{naver_fail}개) → Google RSS 전환')
+        all_items += crawl_google_news_rss()
+
+    # 정부기관은 PC Cowork gov_notice_crawler.py(매일 17:00)가 담당
     print(f'[수집] 총 {len(all_items)}건')
 
     new_items = save_new_items(all_items, (existing_urls, existing_titles))
