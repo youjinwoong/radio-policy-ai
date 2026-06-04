@@ -982,7 +982,7 @@ async function loadNews() {
   if (!sb) return;
   try {
     var { data } = await sb.from('news_feed').select('*')
-      .order('published_at', { ascending: false, nullsFirst: false }).limit(50);
+      .order('published_at', { ascending: false, nullsFirst: false }).limit(500);
     newsDataCache = data || [];
     // 중요도 분류 (캐시에 저장)
     newsDataCache.forEach(function(n) { n._importance = n.importance || n.urgency || classifyNewsImportance(n); });
