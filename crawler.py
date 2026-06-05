@@ -1678,3 +1678,19 @@ def main():
 
     urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
     skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
+    if skipped:
+        print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
+    if urgent_items:
+        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
+        send_telegram(urgent_items)
+        send_urgent_email(urgent_items)
+    else:
+        print('[긴급] 해당 없음')
+
+    print('[모닝 브리핑] morning_briefing.yml GitHub Actions 담당 — 건너뜀')
+    print(f'{"="*50}')
+    print('[완료]')
+
+
+if __name__ == '__main__':
+    main()
