@@ -37,6 +37,7 @@ EMAIL_TO           = os.environ.get('EMAIL_TO', '')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID   = os.environ.get('TELEGRAM_CHAT_ID', '')
 ANTHROPIC_API_KEY  = os.environ.get('ANTHROPIC_API_KEY', '')
+RESEND_API_KEY     = os.environ.get('RESEND_API_KEY', '')
 
 # ── 초기화 ─────────────────────────────────────────────
 sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -61,17 +62,19 @@ _URGENCY_SYSTEM = """당신은 SK텔레콤 CR센터 기술정책팀의 전파정
 
 아래 기준으로 셋 중 하나만 출력하세요 (다른 말 없이 단어만):
 
-즉시대응:
-- 이동통신 품질·장비·기지국·공공 와이파이 관련 불만/민원/장애/사고 기사
-- 전파·전자파·무선국·주파수 관련 불만·규제강화·위반·처분 기사
-- 과징금·허가취소·영업정지·행정처분 등 통신사에 직접 영향을 주는 기사
+즉시대응 (반드시 부정적·문제적 논조인 기사만):
+- 이동통신 품질·기지국·공공 와이파이 관련 불만/민원/장애/사고/비판 기사
+- 전파·전자파·주파수 관련 불만·규제강화·위반·행정처분 기사
+- 과징금·허가취소·영업정지 등 통신사에 직접 피해를 주는 기사
+⚠️ 주의: 성과 홍보·절감 효과·구축 완료 등 긍정적 내용은 즉시대응 제외
 
 금주검토:
-- 이동통신·전파·무선 관련 정보성·정책 동향·기술 소개 기사
-- 입법예고·개정안·정책 발표 등 간접적으로 영향을 줄 수 있는 기사
+- 이동통신·전파·주파수 관련 정책 동향·기술 소개·통계 기사
+- 입법예고·개정안·정책 발표 등 향후 영향을 줄 수 있는 기사
+- 공공 와이파이 구축·확대·성과 관련 정보성 기사
 
 동향파악:
-- 위 두 기준에 해당하지 않는 해외 동향·업계 일반 트렌드·참고용 기사"""
+- 위 두 기준에 해당하지 않는 해외 동향·업계 트렌드·참고용 기사"""
 
 _AI_PRIORITY_MAP = {'즉시대응': '긴급', '금주검토': '보통', '동향파악': '참고'}
 _FALLBACK_MOBILE = ['이동통신', '기지국', '공공와이파이', '와이파이', '전파', '전자파', '무선국', '주파수']
@@ -1419,10 +1422,7 @@ def send_telegram(urgent_items: list):
 # ═══════════════════════════════════════════════════════
 
 def send_urgent_email(urgent_items: list):
-    """긴급 기사 발생 시 즉시 이메일 발송 (정기 메일과 별개)"""
-    if not all([EMAIL_FROM, EMAIL_PASS, EMAIL_TO]):
-        print('[긴급 이메일] 환경변수 미설정 — 건너뜀')
-        return
+    """긴급 기사 발생 시 즉시 이메일 발송 — Resend API 우선, Gmail SMTP 폴백"""
     if not urgent_items:
         return
 
@@ -1452,23 +1452,45 @@ def send_urgent_email(urgent_items: list):
 </p>
 </body></html>'''
 
-    # 기본 수신자 + 추가 고정 수신자 합산
-    extra_to = 'lampman@sktelecom.com'
-    all_to = list({addr.strip() for addr in (EMAIL_TO + ',' + extra_to).split(',') if addr.strip()})
-
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From']    = f'전파정책 AI <{EMAIL_FROM}>'
-    msg['To']      = ', '.join(all_to)
-    msg.attach(MIMEText(body_html, 'html', 'utf-8'))
-
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as smtp:
-            smtp.login(EMAIL_FROM, EMAIL_PASS)
-            smtp.sendmail(EMAIL_FROM, all_to, msg.as_string())
-        print(f'[긴급 이메일] {", ".join(all_to)}로 발송 완료')
-    except Exception as e:
-        print(f'[긴급 이메일 오류] {e}')
+    # Resend 우선 (GitHub Actions 미국 IP에서도 동작)
+    if RESEND_API_KEY:
+        import json as _json
+        try:
+            resp = requests.post(
+                'https://api.resend.com/emails',
+                headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
+                data=_json.dumps({
+                    'from': '전파정책 AI <onboarding@resend.dev>',
+                    'to': ['you.jinwoong@gmail.com'],
+                    'subject': subject,
+                    'html': body_html,
+                }),
+                timeout=30,
+            )
+            if resp.status_code in (200, 201):
+                print(f'[긴급 이메일/Resend] you.jinwoong@gmail.com 발송 완료')
+            else:
+                print(f'[긴급 이메일/Resend 오류] HTTP {resp.status_code}: {resp.text[:200]}')
+        except Exception as e:
+            print(f'[긴급 이메일/Resend 오류] {e}')
+    elif all([EMAIL_FROM, EMAIL_PASS, EMAIL_TO]):
+        # 폴백: Gmail SMTP (PC 로컬 실행 시)
+        extra_to = 'lampman@sktelecom.com'
+        all_to = list({addr.strip() for addr in (EMAIL_TO + ',' + extra_to).split(',') if addr.strip()})
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = f'전파정책 AI <{EMAIL_FROM}>'
+        msg['To']      = ', '.join(all_to)
+        msg.attach(MIMEText(body_html, 'html', 'utf-8'))
+        try:
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as smtp:
+                smtp.login(EMAIL_FROM, EMAIL_PASS)
+                smtp.sendmail(EMAIL_FROM, all_to, msg.as_string())
+            print(f'[긴급 이메일/Gmail] {", ".join(all_to)} 발송 완료')
+        except Exception as e:
+            print(f'[긴급 이메일/Gmail 오류] {e}')
+    else:
+        print('[긴급 이메일] RESEND_API_KEY 또는 Gmail 환경변수 미설정 — 건너뜀')
 
 
 # ═══════════════════════════════════════════════════════
