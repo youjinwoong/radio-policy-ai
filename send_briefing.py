@@ -98,7 +98,7 @@ def send_email(briefing_text: str):
 {briefing_to_html(briefing_text)}
 <hr style="margin-top:24px">
 <p style="color:#999;font-size:11px">
-이 메일은 자동 발송됩니다. SKT CR센터 기술정책팀<br>
+이 메일은 자동 발송됩니다. SKT Comm센터 기술정책팀<br>
 대시보드: <a href="https://youjinwoong.github.io/radio-policy-ai/">https://youjinwoong.github.io/radio-policy-ai/</a>
 </p>
 </body></html>'''

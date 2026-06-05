@@ -123,32 +123,4 @@ def main():
                     pub_dt = _dtp.parse(actual_date)
                     if pub_dt.tzinfo is None:
                         pub_dt = pub_dt.replace(tzinfo=KST)
-                    age_days = (datetime.now(KST) - pub_dt).days
-                    if age_days > 15:
-                        sb.table("news_feed").delete().eq("id", article["id"]).execute()
-                        print(f"🗑  실제 발행일 {actual_date[:10]} ({age_days}일 전) — 15일 초과 삭제")
-                        ok += 1
-                        continue
-                    else:
-                        update_data["published_at"] = actual_date
-                        print(f"✅ ({len(body)}자, 날짜보정 {actual_date[:10]})", end="")
-                except Exception:
-                    pass
-            else:
-                print(f"✅ ({len(body)}자)", end="")
-
-            sb.table("news_feed").update(update_data).eq("id", article["id"]).execute()
-            print()
-            ok += 1
-
-        except Exception as e:
-            print(f"❌ 실패: {e}")
-            fail += 1
-
-        time.sleep(DELAY_BETWEEN)
-
-    print(f"\n완료! 성공 {ok}건 · 실패 {fail}건 · 미매칭 {skip}건 · 상대경로 {invalid}건")
-
-
-if __name__ == "__main__":
-    main()
+                    age_days = 

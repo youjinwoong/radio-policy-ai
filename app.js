@@ -2,7 +2,7 @@
 //  SKT 전파정책 AI 분석 — 공통 시스템 프롬프트
 // ════════════════════════════════════════════
 const SKT_IMPACT_SYSTEM_PROMPT =
-'당신은 SK텔레콤 CR센터 기술정책팀 소속 전파정책 수석 전문위원이다.\n' +
+'당신은 SK텔레콤 Comm센터 기술정책팀 소속 전파정책 수석 전문위원이다.\n' +
 '뉴스·이슈를 분석할 때 아래 SKT 현황과 관점을 반드시 반영하라.\n\n' +
 '[SKT 주파수 보유 현황]\n' +
 '- 800MHz (Band 5): LTE 전국망 핵심, 재난망 로밍 제공\n' +
@@ -882,7 +882,7 @@ let newsDataCache = [];      // 전체 로드된 뉴스 캐시
 let selectedNewsId = null;   // 현재 선택된 뉴스 id
 
 // ── 중요도 분류 규칙 ──────────────────────────────────────
-// SKT CR센터 기술정책팀 KPI 기준으로 키워드 매핑
+// SKT Comm센터 기술정책팀 KPI 기준으로 키워드 매핑
 var IMPORTANCE_RULES = {
   긴급: {
     color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: '2px solid #ef4444',
@@ -1584,7 +1584,7 @@ async function runDiffAnalysis() {
     var aExcerpt = diffState.after.text.slice(0, 4000);
 
     var sysMsg =
-      'SK텔레콤 CR센터 기술정책팀 전파정책 전문가 수석 위원. ' +
+      'SK텔레콤 Comm센터 기술정책팀 전파정책 전문가 수석 위원. ' +
       '개정 전·후 법령 원문을 비교하여 SKT 사업에 미치는 영향을 구조적으로 분석한다. ' +
       '반드시 아래 XML 형식으로만 답변:\n' +
       '<summary>주요 변경사항 요약 (3~5줄, 조문 번호 포함)</summary>\n' +

@@ -72,12 +72,12 @@ def fetch_items_with_content() -> list:
 #  STEP 2 — 브리핑 생성
 # ═══════════════════════════════════════════════════════
 
-_BRIEFING_SYSTEM = """당신은 SK텔레콤 CR센터 기술정책팀의 전파정책 모닝 브리핑 작성 AI입니다.
+_BRIEFING_SYSTEM = """당신은 SK텔레콤 Comm센터 기술정책팀의 전파정책 모닝 브리핑 작성 AI입니다.
 제공된 뉴스 목록과 각 기사의 본문을 바탕으로 간결하고 실용적인 브리핑을 작성하세요.
 
 작성 규칙:
 - [주요 뉴스]는 제공된 기사에서만 선별 (최대 8건, 긴급·보통 기사 우선)
-- [주목 포인트]는 SKT CR센터 정책·기술 관점에서 핵심 이슈 1~3개 도출
+- [주목 포인트]는 SKT Comm센터 정책·기술 관점에서 핵심 이슈 1~3개 도출
 - 반드시 제공된 본문 내용에 근거해서만 요약 작성 — 추측·외부 지식 금지
 - 각 뉴스에 본문 기반 한 줄 요약 포함
 - [ID:기사id] 태그를 제목 뒤에 반드시 포함 (역저장에 사용)
@@ -261,7 +261,7 @@ def send_email(briefing_text: str, news_count: int):
 {_briefing_to_html(briefing_text)}
 <hr style="margin-top:24px">
 <p style="color:#999;font-size:11px">
-이 메일은 자동 발송됩니다. SKT CR센터 기술정책팀<br>
+이 메일은 자동 발송됩니다. SKT Comm센터 기술정책팀<br>
 대시보드: <a href="https://youjinwoong.github.io/radio-policy-ai/">https://youjinwoong.github.io/radio-policy-ai/</a>
 </p>
 </body></html>'''
