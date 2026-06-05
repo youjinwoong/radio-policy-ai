@@ -64,17 +64,28 @@ def main():
     regen_all = "--all" in sys.argv
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    query = sb.table("news_feed").select("id,title,source,url,content")
-    if not regen_all:
-        query = query.is_("content", None)
-    resp = query.order("published_at", desc=True).limit(200).execute()
-    todo = [a for a in (resp.data or []) if a.get("url")]
+    # content=NULL 또는 100자 미만(제목만 저장된 경우) 기사 재수집
+    resp = sb.table("news_feed").select("id,title,source,url,content") \
+        .order("published_at", desc=True).limit(500).execute()
+    all_articles = resp.data or []
+
+    if regen_all:
+        todo = [a for a in all_articles if a.get("url")]
+        mode = "전체 재수집"
+    else:
+        todo = [
+            a for a in all_articles
+            if a.get("url") and (
+                not a.get("content") or
+                len((a.get("content") or "").strip()) < 100
+            )
+        ]
+        mode = "본문 없거나 100자 미만 기사"
 
     if not todo:
         print("✅ 재수집할 기사가 없습니다.")
         return
 
-    mode = "전체 재수집" if regen_all else "본문 없는 기사"
     print(f"📋 {mode}: {len(todo)}건\n")
 
     ok, fail, skip, invalid = 0, 0, 0, 0
