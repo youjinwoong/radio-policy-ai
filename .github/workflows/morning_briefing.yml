@@ -2,8 +2,8 @@ name: 전파정책 모닝 브리핑 (매일 08:00 KST)
 
 on:
   schedule:
-    - cron: '0 23 * * *'  # 23:00 UTC = 08:00 KST
-  workflow_dispatch:       # GitHub에서 수동 실행 버튼
+    - cron: '0 23 * * *'
+  workflow_dispatch:
 
 jobs:
   briefing:
@@ -26,12 +26,13 @@ jobs:
 
       - name: 모닝 브리핑 실행
         env:
-          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
-          EMAIL_FROM:           ${{ secrets.EMAIL_FROM }}
-          EMAIL_PASSWORD:       ${{ secrets.EMAIL_PASSWORD }}
-          EMAIL_TO:             ${{ secrets.EMAIL_TO }}
-          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
-          RESEND_API_KEY:       ${{ secr
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: python morning_briefing.py
