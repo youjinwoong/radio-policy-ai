@@ -269,8 +269,10 @@ def send_email(briefing_text: str, news_count: int):
     all_to = list({a.strip() for a in (EMAIL_TO + ',' + extra_to).split(',') if a.strip()})
 
     # Resend API 우선 (GitHub Actions 미국 IP에서도 동작)
+    # 도메인 미인증 상태: you.jinwoong@gmail.com으로만 발송 가능
+    resend_to = ['you.jinwoong@gmail.com']
     if RESEND_API_KEY:
-        _send_via_resend(subject, body_html, all_to)
+        _send_via_resend(subject, body_html, resend_to)
     elif all([EMAIL_FROM, EMAIL_PASS, EMAIL_TO]):
         # 폴백: Gmail SMTP (PC 로컬 실행 시)
         _send_via_gmail(subject, body_html, all_to)
