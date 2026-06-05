@@ -103,18 +103,42 @@ def main():
             continue
 
         try:
-            body, _ = crawler.fetch_article_body(resolved, source)
+            body, actual_date = crawler.fetch_article_body(resolved, source)
             if not body:
                 print("⏭  본문 없음 (셀렉터 미매칭 또는 접근 차단)")
                 skip += 1
                 continue
 
-            sb.table("news_feed").update({
+            # 실제 기사 날짜로 published_at 업데이트
+            update_data = {
                 "content": body,
-                "url": resolved,  # v.daum.net이면 원본 URL로 갱신
+                "url": resolved,
                 "content_fetched_at": datetime.now(KST).isoformat()
-            }).eq("id", article["id"]).execute()
-            print(f"✅ ({len(body)}자)")
+            }
+
+            # 실제 날짜 확인 → 15일 초과 시 삭제
+            if actual_date:
+                try:
+                    from dateutil import parser as _dtp
+                    pub_dt = _dtp.parse(actual_date)
+                    if pub_dt.tzinfo is None:
+                        pub_dt = pub_dt.replace(tzinfo=KST)
+                    age_days = (datetime.now(KST) - pub_dt).days
+                    if age_days > 15:
+                        sb.table("news_feed").delete().eq("id", article["id"]).execute()
+                        print(f"🗑  실제 발행일 {actual_date[:10]} ({age_days}일 전) — 15일 초과 삭제")
+                        ok += 1
+                        continue
+                    else:
+                        update_data["published_at"] = actual_date
+                        print(f"✅ ({len(body)}자, 날짜보정 {actual_date[:10]})", end="")
+                except Exception:
+                    pass
+            else:
+                print(f"✅ ({len(body)}자)", end="")
+
+            sb.table("news_feed").update(update_data).eq("id", article["id"]).execute()
+            print()
             ok += 1
 
         except Exception as e:
