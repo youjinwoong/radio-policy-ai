@@ -2526,6 +2526,211 @@ async function onDeleteCustom(id, btn) {
 }
 
 // ════════════════════════════════════════════
+//  PDF 업로드 — 법령·고시 / 보도자료 → document_chunks
+// ════════════════════════════════════════════
+let _pdfUploadCtx = 'law'; // 'law' | 'press'
+
+function openPdfUpload(ctx) {
+  _pdfUploadCtx = ctx;
+  var modal = document.getElementById('pdf-upload-modal');
+  var title = document.getElementById('pdf-modal-title');
+  var catRow = document.getElementById('pdf-cat-row');
+  var dateRow = document.getElementById('pdf-date-row');
+  var prog = document.getElementById('pdf-progress');
+  var btn = document.getElementById('pdf-upload-btn');
+  var label = document.getElementById('pdf-file-label');
+  document.getElementById('pdf-doc-name').value = '';
+  document.getElementById('pdf-file-input').value = '';
+  document.getElementById('pdf-press-date').value = new Date().toISOString().slice(0,10);
+  if (prog) prog.style.display = 'none';
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-upload"></i> 업로드'; }
+  if (label) label.textContent = 'PDF 파일 클릭 선택 또는 드래그';
+
+  if (ctx === 'press') {
+    if (title) title.textContent = '정부 보도자료 PDF 업로드';
+    if (catRow) catRow.style.display = 'none';
+    if (dateRow) dateRow.style.display = 'block';
+  } else {
+    if (title) title.textContent = '법령·고시 PDF 업로드';
+    if (catRow) catRow.style.display = 'block';
+    if (dateRow) dateRow.style.display = 'none';
+  }
+  modal.style.display = 'flex';
+}
+
+function closePdfUpload() {
+  var modal = document.getElementById('pdf-upload-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function handlePdfFileSelect(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  var nameInput = document.getElementById('pdf-doc-name');
+  var label = document.getElementById('pdf-file-label');
+  if (label) label.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
+  if (nameInput && !nameInput.value) {
+    nameInput.value = file.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ');
+  }
+}
+
+function handlePdfDrop(event) {
+  event.preventDefault();
+  var dz = document.getElementById('pdf-drop-zone');
+  if (dz) dz.style.borderColor = 'var(--border-mid)';
+  var file = event.dataTransfer.files[0];
+  if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
+    alert('PDF 파일만 업로드 가능합니다.');
+    return;
+  }
+  var input = document.getElementById('pdf-file-input');
+  // DataTransfer로 file input 설정
+  var dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  handlePdfFileSelect(input);
+}
+
+function _setPdfProgress(pct, text) {
+  var bar = document.getElementById('pdf-progress-bar');
+  var txt = document.getElementById('pdf-progress-text');
+  if (bar) bar.style.width = pct + '%';
+  if (txt) txt.textContent = text;
+}
+
+async function _extractPdfText(file) {
+  var arrayBuffer = await file.arrayBuffer();
+  var loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  var pdf = await loadingTask.promise;
+  var pages = [];
+  for (var i = 1; i <= pdf.numPages; i++) {
+    var page = await pdf.getPage(i);
+    var tc = await page.getTextContent();
+    var pageText = tc.items.map(function(item) { return item.str; }).join(' ');
+    pages.push(pageText.trim());
+  }
+  return pages.join('\n\n');
+}
+
+function _chunkText(text) {
+  var CHUNK_SIZE = 800;
+  var OVERLAP = 100;
+  var chunks = [];
+
+  // 조항 경계 기준으로 우선 분할
+  var blocks = text.split(/(?=제\d+조)/);
+  if (blocks.length < 5) blocks = [text];
+
+  blocks.forEach(function(block) {
+    block = block.trim();
+    if (!block) return;
+    if (block.length <= CHUNK_SIZE) {
+      if (block.length > 50) chunks.push(block);
+    } else {
+      var start = 0;
+      while (start < block.length) {
+        var chunk = block.slice(start, start + CHUNK_SIZE).trim();
+        if (chunk.length > 50) chunks.push(chunk);
+        start += CHUNK_SIZE - OVERLAP;
+      }
+    }
+  });
+  return chunks;
+}
+
+async function doPdfUpload() {
+  if (!sb) { alert('Supabase 연결이 필요합니다.'); return; }
+  var fileInput = document.getElementById('pdf-file-input');
+  var docName = (document.getElementById('pdf-doc-name').value || '').trim();
+  var category = _pdfUploadCtx === 'press'
+    ? '보도자료'
+    : (document.getElementById('pdf-category').value || '고시');
+  var pressDate = (document.getElementById('pdf-press-date').value || '');
+
+  if (!fileInput.files || !fileInput.files[0]) { alert('PDF 파일을 선택해주세요.'); return; }
+  if (!docName) { alert('문서명을 입력해주세요.'); return; }
+  if (_pdfUploadCtx === 'press' && !pressDate) { alert('보도자료 날짜를 입력해주세요.'); return; }
+
+  var btn = document.getElementById('pdf-upload-btn');
+  var prog = document.getElementById('pdf-progress');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> 처리 중...';
+  prog.style.display = 'block';
+
+  try {
+    // 1. PDF 텍스트 추출
+    _setPdfProgress(10, 'PDF 텍스트 추출 중...');
+    var text = await _extractPdfText(fileInput.files[0]);
+    if (text.replace(/\s/g, '').length < 100) {
+      throw new Error('텍스트를 추출할 수 없습니다. 스캔 이미지 PDF이거나 암호화된 파일일 수 있습니다.');
+    }
+
+    // 2. 청킹
+    _setPdfProgress(30, '텍스트 청킹 중...');
+    var chunks = _chunkText(text);
+    if (chunks.length === 0) throw new Error('청킹 결과가 없습니다.');
+
+    // 3. 기존 동일 문서명 청크 삭제
+    _setPdfProgress(40, '기존 데이터 정리 중...');
+    await sb.from('document_chunks').delete().eq('doc_name', docName);
+
+    // 4. 청크 배치 삽입 (50개씩)
+    var rows = chunks.map(function(c, i) {
+      return { doc_name: docName, doc_category: category, chunk_index: i, content: c };
+    });
+    var BATCH = 50;
+    for (var i = 0; i < rows.length; i += BATCH) {
+      await sb.from('document_chunks').insert(rows.slice(i, i + BATCH));
+      _setPdfProgress(
+        40 + Math.round(55 * Math.min(i + BATCH, rows.length) / rows.length),
+        '업로드 중... (' + Math.min(i + BATCH, rows.length) + '/' + rows.length + '개 청크)'
+      );
+    }
+
+    // 5. 보도자료면 메모리 pressData에도 추가 → 목록 즉시 반영
+    if (_pdfUploadCtx === 'press') {
+      if (!pressData) pressData = [];
+      pressData.unshift({
+        id: 'upload_' + Date.now(),
+        title: docName,
+        date: pressDate,
+        content: text.slice(0, 3000)
+      });
+      renderPressList(null);
+    }
+
+    // 6. 법령·고시면 화면 목록에 추가
+    if (_pdfUploadCtx === 'law') {
+      var listEl = document.getElementById('law-upload-list');
+      if (listEl) {
+        var item = document.createElement('div');
+        item.className = 'card';
+        item.style.cssText = 'cursor:default;margin-bottom:10px';
+        item.innerHTML = '<div class="file-item">' +
+          '<div class="file-icon fi-purple"><i class="ti ti-file-upload"></i></div>' +
+          '<div style="flex:1"><div class="file-name">' + docName + '</div>' +
+          '<div class="file-size">' + category + ' · 직접 업로드 · ' + rows.length + '개 청크</div></div>' +
+          '<span class="badge badge-teal">최신</span>' +
+          '</div>';
+        listEl.appendChild(item);
+      }
+    }
+
+    _setPdfProgress(100, '완료!');
+    setTimeout(function() {
+      closePdfUpload();
+      alert('✅ "' + docName + '" 업로드 완료!\n' + rows.length + '개 청크가 AI 자문 지식베이스에 추가되었습니다.');
+    }, 400);
+
+  } catch(e) {
+    alert('업로드 실패: ' + (e.message || e));
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-upload"></i> 업로드';
+    prog.style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════
 //  앱 초기화
 // ════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
