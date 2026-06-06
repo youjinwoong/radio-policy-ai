@@ -2219,7 +2219,7 @@ function closeMobileSubMenu(id) {
 // ════════════════════════════════════════════
 //  보도자료 — Supabase document_chunks 검색
 // ════════════════════════════════════════════
-let pressData = null;  // 보도자료 목록 { title, date, doc_name, excerpt }
+let pressData = null;  // 보도자료 목록 { title, date, doc_name }
 
 async function loadPressJSON() {
   const el = document.getElementById('press-list');
@@ -2228,7 +2228,7 @@ async function loadPressJSON() {
   const sb = getSupabase();
   if (!sb) return;
 
-  // 총 청크 수 카운트 (정확한 값)
+  // 총 청크 수 카운트 (정확한 값, 1000 limit 우회)
   const [rTotal, r2026, r2025] = await Promise.all([
     sb.from('document_chunks').select('*', { count: 'exact', head: true }).eq('doc_category', '보도자료'),
     sb.from('document_chunks').select('*', { count: 'exact', head: true }).eq('doc_category', '보도자료').ilike('doc_name', '%2026%'),
@@ -2238,7 +2238,6 @@ async function loadPressJSON() {
   const cnt2026 = r2026.count || 0;
   const cnt2025 = r2025.count || 0;
 
-  // 통계 표시 (청크 수)
   const statsEl = document.getElementById('press-stats');
   if (statsEl) {
     statsEl.innerHTML =
@@ -2247,8 +2246,7 @@ async function loadPressJSON() {
       ' &nbsp;|&nbsp; 2025년 <b>' + cnt2025 + '</b>청크';
   }
 
-  // 제목 청크만 가져오기: content에 ## YYMMDD 패턴 포함된 것
-  // Supabase JS .filter() with PostgreSQL regex
+  // 제목 청크만 조회: content가 ## YYMMDD 로 시작하는 것
   const { data: titleChunks, error } = await sb
     .from('document_chunks')
     .select('doc_name, content')
@@ -2256,73 +2254,48 @@ async function loadPressJSON() {
     .filter('content', '~', '^## [0-9]')
     .limit(2000);
 
-  if (error) {
-    console.error('보도자료 제목 조회 오류:', error);
-  }
+  if (error) console.error('보도자료 제목 조회 오류:', error);
 
-  // 제목 파싱
-  const titleMap = new Map(); // key: "YYYYMMDD_제목" → 중복 방지
+  const titleMap = new Map();
   const releases = [];
 
   if (titleChunks && titleChunks.length > 0) {
-    titleChunks.forEach(chunk => {
-      // doc_name에서 연도 추출: "과기정통부 2025 보도자료" → 2025
-      const yearMatch = chunk.doc_name.match(/20(\d{2})/);
-      const yearPrefix = yearMatch ? yearMatch[1] : '25'; // 기본 25
-
-      // content에서 ## YYMMDD 제목 라인 추출
-      const lines = chunk.content.split('\n');
-      lines.forEach(line => {
-        const m = line.match(/^##\s+(\d{6})\s*(.+)/);
+    titleChunks.forEach(function(chunk) {
+      var lines = chunk.content.split('\n');
+      lines.forEach(function(line) {
+        var m = line.match(/^##\s+(\d{6})\s*(.+)/);
         if (!m) return;
-        const yymmdd = m[1];
-        let rawTitle = m[2].trim();
-
-        // 석간/조간/(보도)/(수정) 제거
-        rawTitle = rawTitle
+        var yymmdd = m[1];
+        var rawTitle = m[2].trim()
           .replace(/^(석간|조간)\s*/g, '')
           .replace(/^\(보도\)\s*/g, '')
           .replace(/\s*\(수정\)\s*$/g, '')
           .replace(/^\[.*?\]\s*/g, '')
           .trim();
-
         if (!rawTitle || rawTitle.length < 4) return;
 
-        // 날짜 파싱: YYMMDD → YYYY-MM-DD
-        const yy = parseInt(yymmdd.substring(0, 2), 10);
-        const mm = yymmdd.substring(2, 4);
-        const dd = yymmdd.substring(4, 6);
-        const yyyy = yy >= 20 ? '20' + yy : '20' + (yy < 10 ? '0' + yy : yy);
-        const dateStr = yyyy + '-' + mm + '-' + dd;
+        var yy = parseInt(yymmdd.substring(0, 2), 10);
+        var mm = yymmdd.substring(2, 4);
+        var dd = yymmdd.substring(4, 6);
+        var yyyy = '20' + (yy < 10 ? '0' + yy : '' + yy);
+        var dateStr = yyyy + '-' + mm + '-' + dd;
 
-        const key = dateStr + '_' + rawTitle.substring(0, 30);
+        var key = dateStr + '_' + rawTitle.substring(0, 30);
         if (!titleMap.has(key)) {
           titleMap.set(key, true);
-          releases.push({
-            title: rawTitle,
-            date: dateStr,
-            doc_name: chunk.doc_name,
-            yymmdd: yymmdd
-          });
+          releases.push({ title: rawTitle, date: dateStr, doc_name: chunk.doc_name });
         }
       });
     });
-
-    // 날짜 내림차순 정렬
-    releases.sort((a, b) => b.date.localeCompare(a.date));
+    releases.sort(function(a, b) { return b.date.localeCompare(a.date); });
   }
 
   pressData = releases;
-
-  // 보도자료 건수 업데이트
-  const countEl = document.getElementById('press-release-count');
-  if (countEl) countEl.textContent = releases.length + '건';
-
   renderPressList(releases);
 }
 
 function renderPressList(list) {
-  const el = document.getElementById('press-list');
+  var el = document.getElementById('press-list');
   if (!el) return;
 
   if (!list || list.length === 0) {
@@ -2330,31 +2303,36 @@ function renderPressList(list) {
     return;
   }
 
-  // 연도별 그룹화
-  const groups = {};
-  list.forEach(item => {
-    const y = item.date.substring(0, 4);
+  var groups = {};
+  list.forEach(function(item) {
+    var y = item.date.substring(0, 4);
     if (!groups[y]) groups[y] = [];
     groups[y].push(item);
   });
 
-  const years = Object.keys(groups).sort((a, b) => b - a);
-  let html = '';
+  var years = Object.keys(groups).sort(function(a, b) { return b - a; });
+  var html = '';
 
-  years.forEach(year => {
-    const items = groups[year];
+  years.forEach(function(year) {
+    var items = groups[year];
     html += '<div style="margin-bottom:24px">';
-    html += '<div style="font-size:12px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #2a2a3a">'
-          + year + '년 (' + items.length + '건)</div>';
+    html += '<div style="font-size:12px;font-weight:700;color:#888;letter-spacing:1px;' +
+            'margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #2a2a3a">' +
+            year + '년 (' + items.length + '건)</div>';
     html += '<div style="display:flex;flex-direction:column;gap:6px">';
-    items.forEach(item => {
-      const dateLabel = item.date.substring(5); // MM-DD
-      html += '<div class="press-item" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;background:#1a1a2a" '
-            + 'onclick="askAboutPress(' + JSON.stringify(item.title) + ',' + JSON.stringify(item.doc_name) + ')" '
-            + 'onmouseover="this.style.background='#22223a'" onmouseout="this.style.background='#1a1a2a'">'
-            + '<span style="flex-shrink:0;font-size:11px;color:#6c757d;width:36px;margin-top:2px">' + dateLabel + '</span>'
-            + '<span style="font-size:13px;color:#d0d0e0;line-height:1.4">' + item.title + '</span>'
-            + '</div>';
+    items.forEach(function(item) {
+      var dateLabel = item.date.substring(5);
+      var safeTitle = item.title.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      var safeName  = item.doc_name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      html += '<div class="press-item" ' +
+              'style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;' +
+              'border-radius:6px;cursor:pointer;background:#1a1a2a" ' +
+              'onclick="askAboutPress(\'' + safeTitle + '\',\'' + safeName + '\')" ' +
+              'onmouseover="this.style.background=\'#22223a\'" ' +
+              'onmouseout="this.style.background=\'#1a1a2a\'">' +
+              '<span style="flex-shrink:0;font-size:11px;color:#6c757d;width:36px;margin-top:2px">' + dateLabel + '</span>' +
+              '<span style="font-size:13px;color:#d0d0e0;line-height:1.4">' + item.title + '</span>' +
+              '</div>';
     });
     html += '</div></div>';
   });
@@ -2363,10 +2341,9 @@ function renderPressList(list) {
 }
 
 function askAboutPress(title, docName) {
-  // AI 자문 패널로 이동하고 해당 보도자료에 대해 질문
   showPanel('ai');
   setTimeout(function() {
-    const inp = document.getElementById('chat-input');
+    var inp = document.getElementById('chat-input');
     if (inp) {
       inp.value = '"' + title + '" 보도자료의 주요 내용을 요약해 주세요.';
       inp.focus();
@@ -2375,20 +2352,15 @@ function askAboutPress(title, docName) {
 }
 
 async function filterPressList() {
-  const q = (document.getElementById('press-search-input') || {}).value || '';
+  var q = (document.getElementById('press-search-input') || {}).value || '';
   if (!pressData) return;
-
-  if (!q.trim()) {
-    renderPressList(pressData);
-    return;
-  }
-
-  const lower = q.toLowerCase();
-  const filtered = pressData.filter(item =>
-    item.title.toLowerCase().includes(lower) ||
-    item.doc_name.toLowerCase().includes(lower) ||
-    item.date.includes(lower)
-  );
+  if (!q.trim()) { renderPressList(pressData); return; }
+  var lower = q.toLowerCase();
+  var filtered = pressData.filter(function(item) {
+    return item.title.toLowerCase().includes(lower) ||
+           item.doc_name.toLowerCase().includes(lower) ||
+           item.date.includes(lower);
+  });
   renderPressList(filtered);
 }
 
@@ -2541,4 +2513,291 @@ async function renderCustomKnowledgeList(filterText) {
           '</div>' +
           '<div style="font-size:11px;color:var(--text-tertiary)">' + date + (tagsHtml ? ' · ' + tagsHtml : '') + '</div>' +
         '</div>' +
-      
+        '<button onclick="onEditCustom(' + item.id + ')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;padding:2px 4px;margin-right:2px" title="수정"><i class="ti ti-edit"></i></button>' +
+        '<button onclick="onDeleteCustom(' + item.id + ',this)" style="background:none;border:none;color:var(--text-tertiary);cursor:pointer;font-size:13px;padding:2px 4px" title="삭제"><i class="ti ti-trash"></i></button>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="padding:16px;color:#dc2626;font-size:12px">목록 로드 실패: ' + e.message + '</div>';
+  }
+}
+
+async function onEditCustom(id) {
+  // Supabase에서 해당 항목 전체 내용 불러오기
+  try {
+    var { data, error } = await sb.from('custom_knowledge')
+      .select('id, title, content, category, tags')
+      .eq('id', id)
+      .single();
+    if (error || !data) { alert('항목을 불러올 수 없습니다.'); return; }
+    // 입력 탭으로 전환 후 폼에 채워 넣기
+    switchCustomTab('input');
+    document.getElementById('ck-title').value   = data.title || '';
+    document.getElementById('ck-content').value = data.content || '';
+    document.getElementById('ck-category').value = data.category || '일반';
+    document.getElementById('ck-tags').value    = (data.tags || []).join(', ');
+    setCustomEditMode(id);
+    // 화면 상단으로 스크롤
+    document.getElementById('ck-title').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch(e) {
+    alert('항목 로드 실패: ' + e.message);
+  }
+}
+
+async function onSaveCustomKnowledge() {
+  var title    = (document.getElementById('ck-title')   || {}).value || '';
+  var category = (document.getElementById('ck-category')|| {}).value || '일반';
+  var content  = (document.getElementById('ck-content') || {}).value || '';
+  var tags     = (document.getElementById('ck-tags')    || {}).value || '';
+  var btn      = document.getElementById('ck-save-btn');
+  if (!title.trim() || !content.trim()) { alert('제목과 내용을 모두 입력하세요.'); return; }
+  var isEdit = !!_editingCustomId;
+  btn.disabled = true;
+  btn.textContent = isEdit ? '수정 중...' : '저장 중...';
+  try {
+    if (isEdit) {
+      await updateCustomKnowledge(_editingCustomId, title.trim(), content.trim(), category, tags);
+    } else {
+      await saveCustomKnowledge(title.trim(), content.trim(), category, tags);
+    }
+    btn.textContent = isEdit ? '✅ 수정됨' : '✅ 저장됨';
+    btn.style.background = '#22c55e';
+    setCustomEditMode(null); // 수정 모드 해제 + 폼 초기화
+    setTimeout(function() { btn.disabled = false; btn.style.background = ''; }, 2000);
+  } catch(e) {
+    alert((isEdit ? '수정' : '저장') + ' 실패: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = isEdit ? '수정 저장' : '저장하기';
+  }
+}
+
+async function onDeleteCustom(id, btn) {
+  if (!confirm('이 지식을 삭제하시겠습니까?')) return;
+  btn.disabled = true;
+  try {
+    await deleteCustomKnowledge(id);
+    renderCustomKnowledgeList(
+      (document.getElementById('ck-list-search') || {}).value || ''
+    );
+  } catch(e) {
+    alert('삭제 실패: ' + e.message);
+    btn.disabled = false;
+  }
+}
+
+// ════════════════════════════════════════════
+//  PDF 업로드 — 법령·고시 / 보도자료 → document_chunks
+// ════════════════════════════════════════════
+let _pdfUploadCtx = 'law'; // 'law' | 'press'
+
+function openPdfUpload(ctx) {
+  _pdfUploadCtx = ctx;
+  var modal = document.getElementById('pdf-upload-modal');
+  var title = document.getElementById('pdf-modal-title');
+  var catRow = document.getElementById('pdf-cat-row');
+  var dateRow = document.getElementById('pdf-date-row');
+  var prog = document.getElementById('pdf-progress');
+  var btn = document.getElementById('pdf-upload-btn');
+  var label = document.getElementById('pdf-file-label');
+  document.getElementById('pdf-doc-name').value = '';
+  document.getElementById('pdf-file-input').value = '';
+  document.getElementById('pdf-press-date').value = new Date().toISOString().slice(0,10);
+  if (prog) prog.style.display = 'none';
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-upload"></i> 업로드'; }
+  if (label) label.textContent = 'PDF 파일 클릭 선택 또는 드래그';
+
+  if (ctx === 'press') {
+    if (title) title.textContent = '정부 보도자료 PDF 업로드';
+    if (catRow) catRow.style.display = 'none';
+    if (dateRow) dateRow.style.display = 'block';
+  } else {
+    if (title) title.textContent = '법령·고시 PDF 업로드';
+    if (catRow) catRow.style.display = 'block';
+    if (dateRow) dateRow.style.display = 'none';
+  }
+  modal.style.display = 'flex';
+}
+
+function closePdfUpload() {
+  var modal = document.getElementById('pdf-upload-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function handlePdfFileSelect(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  var nameInput = document.getElementById('pdf-doc-name');
+  var label = document.getElementById('pdf-file-label');
+  if (label) label.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
+  if (nameInput && !nameInput.value) {
+    nameInput.value = file.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ');
+  }
+}
+
+function handlePdfDrop(event) {
+  event.preventDefault();
+  var dz = document.getElementById('pdf-drop-zone');
+  if (dz) dz.style.borderColor = 'var(--border-mid)';
+  var file = event.dataTransfer.files[0];
+  if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
+    alert('PDF 파일만 업로드 가능합니다.');
+    return;
+  }
+  var input = document.getElementById('pdf-file-input');
+  // DataTransfer로 file input 설정
+  var dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  handlePdfFileSelect(input);
+}
+
+function _setPdfProgress(pct, text) {
+  var bar = document.getElementById('pdf-progress-bar');
+  var txt = document.getElementById('pdf-progress-text');
+  if (bar) bar.style.width = pct + '%';
+  if (txt) txt.textContent = text;
+}
+
+async function _extractPdfText(file) {
+  var arrayBuffer = await file.arrayBuffer();
+  var loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  var pdf = await loadingTask.promise;
+  var pages = [];
+  for (var i = 1; i <= pdf.numPages; i++) {
+    var page = await pdf.getPage(i);
+    var tc = await page.getTextContent();
+    var pageText = tc.items.map(function(item) { return item.str; }).join(' ');
+    pages.push(pageText.trim());
+  }
+  return pages.join('\n\n');
+}
+
+function _chunkText(text) {
+  var CHUNK_SIZE = 800;
+  var OVERLAP = 100;
+  var chunks = [];
+
+  // 조항 경계 기준으로 우선 분할
+  var blocks = text.split(/(?=제\d+조)/);
+  if (blocks.length < 5) blocks = [text];
+
+  blocks.forEach(function(block) {
+    block = block.trim();
+    if (!block) return;
+    if (block.length <= CHUNK_SIZE) {
+      if (block.length > 50) chunks.push(block);
+    } else {
+      var start = 0;
+      while (start < block.length) {
+        var chunk = block.slice(start, start + CHUNK_SIZE).trim();
+        if (chunk.length > 50) chunks.push(chunk);
+        start += CHUNK_SIZE - OVERLAP;
+      }
+    }
+  });
+  return chunks;
+}
+
+async function doPdfUpload() {
+  if (!sb) { alert('Supabase 연결이 필요합니다.'); return; }
+  var fileInput = document.getElementById('pdf-file-input');
+  var docName = (document.getElementById('pdf-doc-name').value || '').trim();
+  var category = _pdfUploadCtx === 'press'
+    ? '보도자료'
+    : (document.getElementById('pdf-category').value || '고시');
+  var pressDate = (document.getElementById('pdf-press-date').value || '');
+
+  if (!fileInput.files || !fileInput.files[0]) { alert('PDF 파일을 선택해주세요.'); return; }
+  if (!docName) { alert('문서명을 입력해주세요.'); return; }
+  if (_pdfUploadCtx === 'press' && !pressDate) { alert('보도자료 날짜를 입력해주세요.'); return; }
+
+  var btn = document.getElementById('pdf-upload-btn');
+  var prog = document.getElementById('pdf-progress');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> 처리 중...';
+  prog.style.display = 'block';
+
+  try {
+    // 1. PDF 텍스트 추출
+    _setPdfProgress(10, 'PDF 텍스트 추출 중...');
+    var text = await _extractPdfText(fileInput.files[0]);
+    if (text.replace(/\s/g, '').length < 100) {
+      throw new Error('텍스트를 추출할 수 없습니다. 스캔 이미지 PDF이거나 암호화된 파일일 수 있습니다.');
+    }
+
+    // 2. 청킹
+    _setPdfProgress(30, '텍스트 청킹 중...');
+    var chunks = _chunkText(text);
+    if (chunks.length === 0) throw new Error('청킹 결과가 없습니다.');
+
+    // 3. 기존 동일 문서명 청크 삭제
+    _setPdfProgress(40, '기존 데이터 정리 중...');
+    await sb.from('document_chunks').delete().eq('doc_name', docName);
+
+    // 4. 청크 배치 삽입 (50개씩)
+    var rows = chunks.map(function(c, i) {
+      return { doc_name: docName, doc_category: category, chunk_index: i, content: c };
+    });
+    var BATCH = 50;
+    for (var i = 0; i < rows.length; i += BATCH) {
+      await sb.from('document_chunks').insert(rows.slice(i, i + BATCH));
+      _setPdfProgress(
+        40 + Math.round(55 * Math.min(i + BATCH, rows.length) / rows.length),
+        '업로드 중... (' + Math.min(i + BATCH, rows.length) + '/' + rows.length + '개 청크)'
+      );
+    }
+
+    // 5. 보도자료면 메모리 pressData에도 추가 → 목록 즉시 반영
+    if (_pdfUploadCtx === 'press') {
+      if (!pressData) pressData = [];
+      pressData.unshift({
+        id: 'upload_' + Date.now(),
+        title: docName,
+        date: pressDate,
+        content: text.slice(0, 3000)
+      });
+      renderPressList(null);
+    }
+
+    // 6. 법령·고시면 화면 목록에 추가
+    if (_pdfUploadCtx === 'law') {
+      var listEl = document.getElementById('law-upload-list');
+      if (listEl) {
+        var item = document.createElement('div');
+        item.className = 'card';
+        item.style.cssText = 'cursor:default;margin-bottom:10px';
+        item.innerHTML = '<div class="file-item">' +
+          '<div class="file-icon fi-purple"><i class="ti ti-file-upload"></i></div>' +
+          '<div style="flex:1"><div class="file-name">' + docName + '</div>' +
+          '<div class="file-size">' + category + ' · 직접 업로드 · ' + rows.length + '개 청크</div></div>' +
+          '<span class="badge badge-teal">최신</span>' +
+          '</div>';
+        listEl.appendChild(item);
+      }
+    }
+
+    _setPdfProgress(100, '완료!');
+    setTimeout(function() {
+      closePdfUpload();
+      alert('✅ "' + docName + '" 업로드 완료!\n' + rows.length + '개 청크가 AI 자문 지식베이스에 추가되었습니다.');
+    }, 400);
+
+  } catch(e) {
+    alert('업로드 실패: ' + (e.message || e));
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-upload"></i> 업로드';
+    prog.style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════
+//  앱 초기화
+// ════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+  initSupabase();
+  updateStatusDots();
+  loadSettingsUI();
+  loadPressJSON();
+  loadRemoteConfig().then(function() { loadNews(); });
+  setTimeout(autoExtractTermsIfNeeded, 60000);
+});
