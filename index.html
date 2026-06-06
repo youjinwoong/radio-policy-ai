@@ -54,7 +54,7 @@
     <div class="topbar">
       <span class="topbar-title" id="topbar-title">대시보드</span>
       <div class="topbar-actions">
-        <button class="btn" onclick="refreshDashboard()"><i class="ti ti-refresh"></i>새로고침</button>
+        <button class="btn" onclick="smartRefresh()"><i class="ti ti-refresh"></i>새로고침</button>
         <button class="btn btn-primary" onclick="go('chat', document.querySelector('.nav-item[onclick*=\'chat\']'))"><i class="ti ti-message-circle"></i>AI 자문 시작</button>
       </div>
     </div>
@@ -295,7 +295,6 @@
             <b style="color:var(--text-primary)">자동 수집 뉴스</b>
             <span style="opacity:.8"> — SKT 팀 관련성 기준 중요도 자동 분류</span>
           </span>
-          <button class="btn" onclick="loadNews()"><i class="ti ti-refresh"></i>새로고침</button>
         </div>
 
         <!-- 수집 대상 언론·기관 (카테고리별) -->
@@ -360,7 +359,6 @@
           <div>
             <div style="font-size:13px;color:var(--text-secondary)">매일 오전 8시 자동 수집 · 최근 30일 이력</div>
           </div>
-          <button class="btn" style="margin-left:auto" onclick="loadBriefing()"><i class="ti ti-refresh"></i>새로고침</button>
         </div>
         <div id="briefing-list"><div style="color:var(--text-secondary);padding:20px;text-align:center">불러오는 중...</div></div>
       </div>

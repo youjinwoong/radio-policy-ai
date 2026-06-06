@@ -836,6 +836,21 @@ function askQ(q) {
 // ════════════════════════════════════════════
 //  Dashboard
 // ════════════════════════════════════════════
+function smartRefresh() {
+  var active = document.querySelector('.panel[style*="display: block"], .panel[style*="display:block"]');
+  if (!active) active = document.getElementById('panel-home');
+  var id = active ? active.id : 'panel-home';
+  var map = {
+    'panel-home':     function() { refreshDashboard(); },
+    'panel-news':     function() { loadNews(); },
+    'panel-briefing': function() { loadBriefing(); },
+    'panel-terms':    function() { loadTerms && loadTerms(); },
+    'panel-press':    function() { loadPressJSON(); },
+  };
+  var fn = map[id] || function() { refreshDashboard(); };
+  fn();
+}
+
 async function refreshDashboard() {
   if (!sb) return;
   try {
