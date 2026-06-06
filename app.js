@@ -2217,38 +2217,70 @@ function closeMobileSubMenu(id) {
 }
 
 // ════════════════════════════════════════════
-//  보도자료 — 원본 JSON 파일 검색
+//  보도자료 — Supabase document_chunks 검색
 // ════════════════════════════════════════════
-let pressData = null;  // press_releases.json 로드 후 저장
+let pressData = null;  // { doc_name, year, chunks } 배열
 
 async function loadPressJSON() {
-  if (pressData) return;
+  if (pressData) { renderPressList(); return; }
+  if (!sb) return;
   try {
-    const res = await fetch('press_releases.json');
-    pressData = await res.json();
-    console.log('보도자료 로드 완료:', pressData.length + '개');
+    // doc_name별 청크 수 집계
+    var { data } = await sb
+      .from('document_chunks')
+      .select('doc_name, chunk_index, content')
+      .eq('doc_category', '보도자료')
+      .eq('chunk_index', 0)
+      .order('doc_name', { ascending: false });
+
+    if (!data || data.length === 0) {
+      document.getElementById('press-list').innerHTML =
+        '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">보도자료 데이터가 없습니다.</div>';
+      return;
+    }
+
+    // 연도 추출 및 청크 수 별도 조회
+    var chunkCounts = { '2026': 0, '2025': 0, 'old': 0, total: 0 };
+    var { data: countData } = await sb
+      .from('document_chunks')
+      .select('doc_name')
+      .eq('doc_category', '보도자료');
+    if (countData) {
+      countData.forEach(function(r) {
+        var y = (r.doc_name.match(/(\d{4})/) || [])[1] || '';
+        chunkCounts.total++;
+        if (y === '2026') chunkCounts['2026']++;
+        else if (y === '2025') chunkCounts['2025']++;
+        else chunkCounts.old++;
+      });
+    }
+
+    pressData = data.map(function(r) {
+      var year = (r.doc_name.match(/(\d{4})/) || [])[1] || '';
+      var displayName = r.doc_name.replace(/_/g,' ').replace(/\.md$/,'');
+      return { id: r.doc_name, title: displayName, date: year + '-01-01', content: r.content || '', year: year };
+    });
+
+    // 통계 표시
+    var el;
+    el = document.getElementById('ps-total'); if(el) el.textContent = chunkCounts.total + ' 청크';
+    el = document.getElementById('ps-2026');  if(el) el.textContent = chunkCounts['2026'];
+    el = document.getElementById('ps-2025');  if(el) el.textContent = chunkCounts['2025'];
+    el = document.getElementById('ps-old');   if(el) el.textContent = chunkCounts.old;
+
     renderPressList();
-  } catch(e) { console.warn('보도자료 JSON 로드 실패:', e); }
+    console.log('보도자료 로드 완료: Supabase document_chunks ' + chunkCounts.total + '개 청크');
+  } catch(e) { console.warn('보도자료 로드 실패:', e); }
 }
 
 function renderPressList(filtered) {
-  const listEl = document.getElementById('press-list');
-  if (!listEl || !pressData) return;
+  var listEl = document.getElementById('press-list');
+  if (!listEl) return;
+  if (!pressData) { listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px"><i class="ti ti-loader"></i> 로딩 중...</div>'; return; }
 
-  // 통계 업데이트
-  var t2026 = pressData.filter(d => d.date.startsWith('2026')).length;
-  var t2025 = pressData.filter(d => d.date.startsWith('2025')).length;
-  var tOld  = pressData.filter(d => !d.date.startsWith('2025') && !d.date.startsWith('2026')).length;
-  var el;
-  el = document.getElementById('ps-total'); if(el) el.textContent = pressData.length;
-  el = document.getElementById('ps-2026');  if(el) el.textContent = t2026;
-  el = document.getElementById('ps-2025');  if(el) el.textContent = t2025;
-  el = document.getElementById('ps-old');   if(el) el.textContent = tOld;
-
-  // 표시할 데이터
-  var items = filtered || [...pressData].sort((a, b) => b.date.localeCompare(a.date));
+  var items = filtered || [...pressData].sort(function(a,b){ return b.year.localeCompare(a.year); });
   var label = document.getElementById('press-count-label');
-  if (label) label.textContent = filtered ? '검색 결과 ' + items.length + '건' : '전체 보도자료 ' + items.length + '건';
+  if (label) label.textContent = filtered ? '검색 결과 ' + items.length + '건' : '연도별 보도자료 파일 ' + items.length + '건';
 
   if (items.length === 0) {
     listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">검색 결과가 없습니다.</div>';
@@ -2256,33 +2288,61 @@ function renderPressList(filtered) {
   }
 
   listEl.innerHTML = items.map(function(d) {
-    var year = d.date ? d.date.slice(0,4) : '';
+    var year = d.year || '';
     var badgeColor = year === '2026' ? 'badge-purple' : year === '2025' ? 'badge-teal' : 'badge-amber';
-    var safeTitle = d.title.slice(0,30).replace(/['"&<>]/g,'');
-    return '<div class="file-item" style="cursor:pointer" onclick="askQ(&quot;' + safeTitle + ' 보도자료 내용을 알려줘&quot;)">' +
+    var safeYear = year.replace(/['"&<>]/g,'');
+    return '<div class="file-item" style="cursor:pointer" onclick="askQ(&quot;' + safeYear + '년 과기정통부 보도자료 내용을 알려줘&quot;)">' +
       '<div class="file-icon fi-blue"><i class="ti ti-news"></i></div>' +
       '<div style="flex:1">' +
-        '<div class="file-name">' + d.title.slice(0,55) + (d.title.length>55?'…':'') + '</div>' +
-        '<div class="file-size">' + d.date + ' · 과기정통부</div>' +
+        '<div class="file-name">' + d.title + '</div>' +
+        '<div class="file-size">과기정통부 · AI 자문에서 검색 가능</div>' +
       '</div>' +
       '<span class="badge ' + badgeColor + '">' + year + '</span>' +
       '</div>';
   }).join('');
 }
 
-function filterPressList(query) {
+async function filterPressList(query) {
   var input = document.getElementById('press-search-input');
   if (input && query === '') input.value = '';
-  if (!pressData) return;
-  if (!query || query.trim() === '') {
-    renderPressList(null);
+  if (!query || query.trim() === '') { renderPressList(null); return; }
+  if (!sb) return;
+
+  // Supabase에서 키워드 검색
+  var listEl = document.getElementById('press-list');
+  if (listEl) listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px"><i class="ti ti-loader"></i> 검색 중...</div>';
+
+  var { data } = await sb
+    .from('document_chunks')
+    .select('doc_name, content')
+    .eq('doc_category', '보도자료')
+    .ilike('content', '%' + query + '%')
+    .limit(20);
+
+  if (!data || data.length === 0) {
+    if (listEl) listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">검색 결과가 없습니다.</div>';
+    var label = document.getElementById('press-count-label');
+    if (label) label.textContent = '검색 결과 0건';
     return;
   }
-  var q = query.toLowerCase();
-  var filtered = pressData.filter(function(d) {
-    return d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q);
-  }).sort((a, b) => b.date.localeCompare(a.date));
-  renderPressList(filtered);
+
+  var label = document.getElementById('press-count-label');
+  if (label) label.textContent = '검색 결과 ' + data.length + '개 청크';
+
+  if (listEl) listEl.innerHTML = data.map(function(d) {
+    var year = (d.doc_name.match(/(\d{4})/) || [])[1] || '';
+    var badgeColor = year === '2026' ? 'badge-purple' : year === '2025' ? 'badge-teal' : 'badge-amber';
+    var preview = d.content.slice(0, 120).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    var safeQ = (query + ' 과기정통부 보도자료 내용을 알려줘').replace(/"/g,'').slice(0,60);
+    return '<div class="file-item" style="cursor:pointer;align-items:flex-start" onclick="askQ(&quot;' + safeQ + '&quot;)">' +
+      '<div class="file-icon fi-blue" style="margin-top:2px"><i class="ti ti-news"></i></div>' +
+      '<div style="flex:1">' +
+        '<div class="file-name">' + d.doc_name.replace(/_/g,' ').replace(/\.md$/,'') + '</div>' +
+        '<div class="file-size" style="line-height:1.5;margin-top:2px">' + preview + '…</div>' +
+      '</div>' +
+      '<span class="badge ' + badgeColor + '">' + year + '</span>' +
+      '</div>';
+  }).join('');
 }
 
 function isPressQuery(query) {
