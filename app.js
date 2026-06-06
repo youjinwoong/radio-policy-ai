@@ -2219,79 +2219,93 @@ function closeMobileSubMenu(id) {
 // ════════════════════════════════════════════
 //  보도자료 — Supabase document_chunks 검색
 // ════════════════════════════════════════════
-let pressData = null;  // 보도자료 목록 { title, date, doc_name }
+let pressData = null;
 
 async function loadPressJSON() {
-  const el = document.getElementById('press-list');
-  if (el) el.innerHTML = '<div style="padding:20px;text-align:center;color:#aaa">로딩 중...</div>';
+  var listEl = document.getElementById('press-list');
+  if (listEl) listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#aaa">로딩 중...</div>';
 
-  const sb = getSupabase();
-  if (!sb) return;
+  var sb = getSupabase();
+  if (!sb) { if (listEl) listEl.innerHTML = '<div style="padding:20px;color:#f66">Supabase 미연결</div>'; return; }
 
-  // 총 청크 수 카운트 (정확한 값, 1000 limit 우회)
-  const [rTotal, r2026, r2025] = await Promise.all([
-    sb.from('document_chunks').select('*', { count: 'exact', head: true }).eq('doc_category', '보도자료'),
-    sb.from('document_chunks').select('*', { count: 'exact', head: true }).eq('doc_category', '보도자료').ilike('doc_name', '%2026%'),
-    sb.from('document_chunks').select('*', { count: 'exact', head: true }).eq('doc_category', '보도자료').ilike('doc_name', '%2025%'),
-  ]);
-  const totalChunks = rTotal.count || 0;
-  const cnt2026 = r2026.count || 0;
-  const cnt2025 = r2025.count || 0;
+  try {
+    // 1) 제목 청크 조회: content가 ## YYMMDD 로 시작하는 청크
+    var resp = await sb
+      .from('document_chunks')
+      .select('doc_name, content')
+      .eq('doc_category', '보도자료')
+      .filter('content', '~', '^## [0-9]')
+      .limit(2000);
 
-  const statsEl = document.getElementById('press-stats');
-  if (statsEl) {
-    statsEl.innerHTML =
-      '<span style="color:#4dabf7;font-weight:600">' + totalChunks + ' 청크</span>' +
-      ' &nbsp;|&nbsp; 2026년 <b>' + cnt2026 + '</b>청크' +
-      ' &nbsp;|&nbsp; 2025년 <b>' + cnt2025 + '</b>청크';
-  }
+    var titleChunks = resp.data;
+    var queryErr    = resp.error;
 
-  // 제목 청크만 조회: content가 ## YYMMDD 로 시작하는 것
-  const { data: titleChunks, error } = await sb
-    .from('document_chunks')
-    .select('doc_name, content')
-    .eq('doc_category', '보도자료')
-    .filter('content', '~', '^## [0-9]')
-    .limit(2000);
+    // 정규식 필터가 지원되지 않으면 chunk_index=0 으로 폴백
+    if (queryErr || !titleChunks || titleChunks.length === 0) {
+      console.warn('정규식 필터 실패, 폴백:', queryErr);
+      var fb = await sb
+        .from('document_chunks')
+        .select('doc_name, content')
+        .eq('doc_category', '보도자료')
+        .eq('chunk_index', 0)
+        .limit(500);
+      titleChunks = fb.data || [];
+    }
 
-  if (error) console.error('보도자료 제목 조회 오류:', error);
+    // 2) 제목 파싱
+    var titleMap = {};
+    var releases = [];
 
-  const titleMap = new Map();
-  const releases = [];
-
-  if (titleChunks && titleChunks.length > 0) {
     titleChunks.forEach(function(chunk) {
-      var lines = chunk.content.split('\n');
+      var lines = (chunk.content || '').split('\n');
       lines.forEach(function(line) {
         var m = line.match(/^##\s+(\d{6})\s*(.+)/);
         if (!m) return;
-        var yymmdd = m[1];
+        var yymmdd   = m[1];
         var rawTitle = m[2].trim()
           .replace(/^(석간|조간)\s*/g, '')
-          .replace(/^\(보도\)\s*/g, '')
+          .replace(/^\(보도\)\s*/g,   '')
           .replace(/\s*\(수정\)\s*$/g, '')
-          .replace(/^\[.*?\]\s*/g, '')
+          .replace(/^\[.*?\]\s*/g,    '')
           .trim();
         if (!rawTitle || rawTitle.length < 4) return;
 
-        var yy = parseInt(yymmdd.substring(0, 2), 10);
-        var mm = yymmdd.substring(2, 4);
-        var dd = yymmdd.substring(4, 6);
+        var yy   = parseInt(yymmdd.substring(0, 2), 10);
         var yyyy = '20' + (yy < 10 ? '0' + yy : '' + yy);
-        var dateStr = yyyy + '-' + mm + '-' + dd;
-
-        var key = dateStr + '_' + rawTitle.substring(0, 30);
-        if (!titleMap.has(key)) {
-          titleMap.set(key, true);
-          releases.push({ title: rawTitle, date: dateStr, doc_name: chunk.doc_name });
-        }
+        var dateStr = yyyy + '-' + yymmdd.substring(2, 4) + '-' + yymmdd.substring(4, 6);
+        var key  = dateStr + '_' + rawTitle.substring(0, 30);
+        if (titleMap[key]) return;
+        titleMap[key] = true;
+        releases.push({ title: rawTitle, date: dateStr, doc_name: chunk.doc_name });
       });
     });
-    releases.sort(function(a, b) { return b.date.localeCompare(a.date); });
-  }
 
-  pressData = releases;
-  renderPressList(releases);
+    releases.sort(function(a, b) { return b.date.localeCompare(a.date); });
+    pressData = releases;
+
+    // 3) 통계 — 연도별 건수 (청크가 아닌 보도자료 건수)
+    var cnt = { total: releases.length, '2026': 0, '2025': 0, old: 0 };
+    releases.forEach(function(r) {
+      var y = r.date.substring(0, 4);
+      if (y === '2026')      cnt['2026']++;
+      else if (y === '2025') cnt['2025']++;
+      else                   cnt.old++;
+    });
+
+    var e;
+    e = document.getElementById('ps-total'); if (e) e.textContent = cnt.total;
+    e = document.getElementById('ps-2026');  if (e) e.textContent = cnt['2026'];
+    e = document.getElementById('ps-2025');  if (e) e.textContent = cnt['2025'];
+    e = document.getElementById('ps-old');   if (e) e.textContent = cnt.old;
+
+    // stat-sub 텍스트도 "건"으로 (HTML 기본값 유지되므로 생략 가능)
+
+    renderPressList(releases);
+
+  } catch(err) {
+    console.error('보도자료 로드 오류:', err);
+    if (listEl) listEl.innerHTML = '<div style="padding:20px;color:#f66">오류: ' + (err.message || err) + '</div>';
+  }
 }
 
 function renderPressList(list) {
@@ -2315,24 +2329,24 @@ function renderPressList(list) {
 
   years.forEach(function(year) {
     var items = groups[year];
-    html += '<div style="margin-bottom:24px">';
+    html += '<div style="margin-bottom:20px">';
     html += '<div style="font-size:12px;font-weight:700;color:#888;letter-spacing:1px;' +
             'margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #2a2a3a">' +
             year + '년 (' + items.length + '건)</div>';
-    html += '<div style="display:flex;flex-direction:column;gap:6px">';
+    html += '<div style="display:flex;flex-direction:column;gap:4px">';
     items.forEach(function(item) {
       var dateLabel = item.date.substring(5);
-      var safeTitle = item.title.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      var safeName  = item.doc_name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       html += '<div class="press-item" ' +
-              'style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;' +
-              'border-radius:6px;cursor:pointer;background:#1a1a2a" ' +
-              'onclick="askAboutPress(\'' + safeTitle + '\',\'' + safeName + '\')" ' +
-              'onmouseover="this.style.background=\'#22223a\'" ' +
-              'onmouseout="this.style.background=\'#1a1a2a\'">' +
-              '<span style="flex-shrink:0;font-size:11px;color:#6c757d;width:36px;margin-top:2px">' + dateLabel + '</span>' +
-              '<span style="font-size:13px;color:#d0d0e0;line-height:1.4">' + item.title + '</span>' +
-              '</div>';
+        'style="display:flex;align-items:flex-start;gap:8px;padding:5px 8px;' +
+        'border-radius:6px;cursor:pointer;background:#1a1a2a" ' +
+        'onclick="askAboutPress(this)" ' +
+        'data-title="' + item.title.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '" ' +
+        'data-doc="'   + item.doc_name.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '" ' +
+        'onmouseover="this.style.background=\'#22223a\'" ' +
+        'onmouseout="this.style.background=\'#1a1a2a\'">' +
+        '<span style="flex-shrink:0;font-size:11px;color:#6c757d;width:36px;margin-top:2px">' + dateLabel + '</span>' +
+        '<span style="font-size:13px;color:#d0d0e0;line-height:1.4">' + item.title + '</span>' +
+        '</div>';
     });
     html += '</div></div>';
   });
@@ -2340,14 +2354,12 @@ function renderPressList(list) {
   el.innerHTML = html;
 }
 
-function askAboutPress(title, docName) {
+function askAboutPress(el) {
+  var title = el.getAttribute('data-title');
   showPanel('ai');
   setTimeout(function() {
     var inp = document.getElementById('chat-input');
-    if (inp) {
-      inp.value = '"' + title + '" 보도자료의 주요 내용을 요약해 주세요.';
-      inp.focus();
-    }
+    if (inp) { inp.value = '"' + title + '" 보도자료의 주요 내용을 요약해 주세요.'; inp.focus(); }
   }, 300);
 }
 
