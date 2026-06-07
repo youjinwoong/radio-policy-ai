@@ -38,3 +38,27 @@ jobs:
           ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
           RESEND_API_KEY:       ${{ secrets.RESEND_API_KEY }}
         run: python crawler.py
+
+      - name: 모닝 브리핑 실행 (23시 UTC = 08시 KST)
+        # daily_crawl이 이미 23:05 UTC에 실행되므로 여기서 브리핑도 함께 처리
+        # morning_briefing.yml cron보다 훨씬 안정적으로 동작
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          EMAIL_FROM:           ${{ secrets.EMAIL_FROM }}
+          EMAIL_PASSWORD:       ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO:             ${{ secrets.EMAIL_TO }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          RESEND_API_KEY:       ${{ secrets.RESEND_API_KEY }}
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "$HOUR" = "23" ]; then
+            echo "=== 08:00 KST 브리핑 실행 ==="
+            pip install python-dateutil -q
+            python morning_briefing.py
+          else
+            echo "브리핑 시간 아님 (현재 UTC ${HOUR}시) — 건너뜀"
+          fi

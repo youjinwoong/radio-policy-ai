@@ -170,21 +170,28 @@ def save_briefing(briefing_text: str, news_count: int, terms_count: int):
 # ═══════════════════════════════════════════════════════
 
 def backfill_summaries(briefing_text: str):
-    """브리핑의 [ID:xxx] → 요약 패턴으로 news_feed.summary 역저장"""
+    """브리핑의 [ID:xxx] → 요약 패턴으로 news_feed.summary 역저장 (병렬)"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     pattern = r'\[ID:([^\]]+)\].*?\n\s*→\s*(.+)'
     matches = re.findall(pattern, briefing_text)
-    count = 0
-    for article_id, summary_line in matches:
-        article_id = article_id.strip()
-        summary_line = summary_line.strip()
-        if not article_id or not summary_line:
-            continue
+    pairs = [(aid.strip(), sl.strip()) for aid, sl in matches if aid.strip() and sl.strip()]
+    if not pairs:
+        print('[역저장] 업데이트할 항목 없음')
+        return
+    def _update(aid, summary):
         try:
-            sb.table('news_feed').update({'summary': summary_line}).eq('id', article_id).execute()
-            count += 1
+            sb.table('news_feed').update({'summary': summary}).eq('id', aid).execute()
+            return True
         except Exception as e:
-            print(f'  [역저장 오류] id={article_id}: {e}')
-    print(f'[역저장] news_feed.summary {count}건 업데이트')
+            print(f'  [역저장 오류] id={aid}: {e}')
+            return False
+    count = 0
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(_update, aid, sl): aid for aid, sl in pairs}
+        for fut in as_completed(futs):
+            if fut.result():
+                count += 1
+    print(f'[역저장] news_feed.summary {count}/{len(pairs)}건 업데이트')
 
 
 # ═══════════════════════════════════════════════════════
@@ -209,7 +216,7 @@ def send_telegram(briefing_text: str):
         if resp.status_code == 200:
             print('[텔레그램] 발송 완료')
         else:
-            print(f'[텔레그램 오류] HTTP {resp.status_code}')
+            print(f'[텔레그램 오류] HTTP {resp.status_code}: {resp.text[:200]}')
     except Exception as e:
         print(f'[텔레그램 오류] {e}')
 
@@ -327,11 +334,29 @@ def _send_via_gmail(subject: str, body_html: str, all_to: list):
 #  메인
 # ═══════════════════════════════════════════════════════
 
+def already_sent_today() -> bool:
+    """오늘 브리핑이 이미 발송됐으면 True — 중복 발송 방지"""
+    today_date = datetime.now(KST).strftime('%Y-%m-%d')
+    try:
+        resp = sb.table('daily_briefings').select('briefing_date') \
+            .eq('briefing_date', today_date).execute()
+        if resp.data:
+            print(f'[중복 방지] 오늘({today_date}) 브리핑이 이미 생성·발송됨 — 건너뜀')
+            return True
+    except Exception as e:
+        print(f'[중복 체크 오류] {e}')
+    return False
+
+
 def main():
     now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M KST')
     print(f'{"="*50}')
     print(f'[모닝 브리핑 시작] {now_str}')
     print(f'{"="*50}')
+
+    # 중복 발송 방지 (daily_crawl과 morning_briefing.yml이 동시에 실행될 경우)
+    if already_sent_today():
+        return
 
     # 본문 확인된 기사 조회
     items = fetch_items_with_content()

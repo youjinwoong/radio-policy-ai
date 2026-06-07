@@ -2,7 +2,7 @@ name: 전파정책 모닝 브리핑 (매일 08:00 KST)
 
 on:
   schedule:
-    - cron: '3 23 * * *'
+    - cron: '3 23 * * *'   # 매일 08:03 KST (daily_crawl 백업 겸용)
   workflow_dispatch:
 
 jobs:
