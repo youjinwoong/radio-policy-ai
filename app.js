@@ -2228,26 +2228,25 @@ async function loadPressJSON() {
   if (!sb) { if (listEl) listEl.innerHTML = '<div style="padding:20px;color:#f66">Supabase 미연결</div>'; return; }
 
   try {
-    // 1) 제목 청크 조회: content가 ## YYMMDD 로 시작하는 청크
+    // 1) 보도자료 전체 청크 조회 — ## YYMMDD 패턴이 청크 내부 어디든 있을 수 있음
     var resp = await sb
       .from('document_chunks')
       .select('doc_name, content')
       .eq('doc_category', '보도자료')
-      .filter('content', '~', '^## [0-9]')
+      .filter('content', '~', '## [0-9]{6}')
       .limit(2000);
 
     var titleChunks = resp.data;
     var queryErr    = resp.error;
 
-    // 정규식 필터가 지원되지 않으면 chunk_index=0 으로 폴백
+    // 정규식 필터가 지원되지 않으면 전체 청크 조회로 폴백
     if (queryErr || !titleChunks || titleChunks.length === 0) {
       console.warn('정규식 필터 실패, 폴백:', queryErr);
       var fb = await sb
         .from('document_chunks')
         .select('doc_name, content')
         .eq('doc_category', '보도자료')
-        .eq('chunk_index', 0)
-        .limit(500);
+        .limit(2000);
       titleChunks = fb.data || [];
     }
 
