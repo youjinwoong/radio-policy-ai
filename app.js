@@ -2241,15 +2241,29 @@ async function loadPressJSON() {
 
     console.log('[보도자료] 쿼리 결과:', titleChunks ? titleChunks.length + '개 청크' : '없음', queryErr || '');
 
-    // 정규식 필터가 지원되지 않으면 전체 청크 조회로 폴백
+    // 정규식 필터가 지원되지 않으면 doc별 chunk_index=0만 조회 (각 파일 첫 청크에 목차 포함)
     if (queryErr || !titleChunks || titleChunks.length === 0) {
-      console.warn('[보도자료] 정규식 필터 실패, 전체 조회 폴백:', queryErr);
-      var fb = await sb
+      console.warn('[보도자료] 정규식 필터 실패, chunk_index=0 폴백:', queryErr);
+      // 각 doc의 모든 청크를 doc_name 순 정렬로 가져와 2026 포함 보장
+      var results = [];
+      var docResp = await sb
         .from('document_chunks')
-        .select('doc_name, content')
+        .select('doc_name')
         .eq('doc_category', '보도자료')
-        .limit(2000);
-      titleChunks = fb.data || [];
+        .order('doc_name');
+      var docNames = [...new Set((docResp.data || []).map(function(r){ return r.doc_name; }))];
+      for (var di = 0; di < docNames.length; di++) {
+        var cr = await sb
+          .from('document_chunks')
+          .select('doc_name, content')
+          .eq('doc_category', '보도자료')
+          .eq('doc_name', docNames[di])
+          .order('chunk_index')
+          .limit(500);
+        results = results.concat(cr.data || []);
+      }
+      titleChunks = results;
+      console.log('[보도자료] doc별 폴백 결과:', titleChunks.length + '개 청크');
     }
 
     // 2) 제목 파싱
