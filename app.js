@@ -2246,12 +2246,14 @@ async function loadPressJSON() {
       console.warn('[보도자료] 정규식 필터 실패, chunk_index=0 폴백:', queryErr);
       // 각 doc의 모든 청크를 doc_name 순 정렬로 가져와 2026 포함 보장
       var results = [];
+      // chunk_index=0 행만 조회하면 doc당 1행 → 수십 행으로 limit 초과 없음
       var docResp = await sb
         .from('document_chunks')
         .select('doc_name')
         .eq('doc_category', '보도자료')
+        .eq('chunk_index', 0)
         .order('doc_name');
-      var docNames = [...new Set((docResp.data || []).map(function(r){ return r.doc_name; }))];
+      var docNames = (docResp.data || []).map(function(r){ return r.doc_name; });
       for (var di = 0; di < docNames.length; di++) {
         var cr = await sb
           .from('document_chunks')
@@ -2372,7 +2374,7 @@ function renderPressList(list) {
 
 function askAboutPress(el) {
   var title = el.getAttribute('data-title');
-  showPanel('ai');
+  go('chat');
   setTimeout(function() {
     var inp = document.getElementById('chat-input');
     if (inp) { inp.value = '"' + title + '" 보도자료의 주요 내용을 요약해 주세요.'; inp.focus(); }
