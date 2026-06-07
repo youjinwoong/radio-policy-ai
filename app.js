@@ -2228,20 +2228,22 @@ async function loadPressJSON() {
   if (!sb) { if (listEl) listEl.innerHTML = '<div style="padding:20px;color:#f66">Supabase 미연결</div>'; return; }
 
   try {
-    // 1) 보도자료 전체 청크 조회 — ## YYMMDD 패턴이 청크 내부 어디든 있을 수 있음
+    // 1) 보도자료 전체 청크 조회 — ## YYMMDD 패턴 포함 청크만 ({n} 대신 명시적 반복)
     var resp = await sb
       .from('document_chunks')
       .select('doc_name, content')
       .eq('doc_category', '보도자료')
-      .filter('content', '~', '## [0-9]{6}')
+      .filter('content', '~', '## [0-9][0-9][0-9][0-9][0-9][0-9]')
       .limit(2000);
 
     var titleChunks = resp.data;
     var queryErr    = resp.error;
 
+    console.log('[보도자료] 쿼리 결과:', titleChunks ? titleChunks.length + '개 청크' : '없음', queryErr || '');
+
     // 정규식 필터가 지원되지 않으면 전체 청크 조회로 폴백
     if (queryErr || !titleChunks || titleChunks.length === 0) {
-      console.warn('정규식 필터 실패, 폴백:', queryErr);
+      console.warn('[보도자료] 정규식 필터 실패, 전체 조회 폴백:', queryErr);
       var fb = await sb
         .from('document_chunks')
         .select('doc_name, content')
@@ -2289,6 +2291,8 @@ async function loadPressJSON() {
       else if (y === '2025') cnt['2025']++;
       else                   cnt.old++;
     });
+
+    console.log('[보도자료] 파싱 결과:', cnt);
 
     var e;
     e = document.getElementById('ps-total'); if (e) e.textContent = cnt.total;
