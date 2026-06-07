@@ -2354,12 +2354,12 @@ function renderPressList(list) {
     html += '<div style="display:flex;flex-direction:column;gap:4px">';
     items.forEach(function(item) {
       var dateLabel = item.date.substring(5);
+      var safeTitle = item.title.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      var safeDoc   = item.doc_name.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
       html += '<div class="press-item" ' +
         'style="display:flex;align-items:flex-start;gap:8px;padding:5px 8px;' +
         'border-radius:6px;cursor:pointer;background:#1a1a2a" ' +
-        'onclick="askAboutPress(this)" ' +
-        'data-title="' + item.title.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '" ' +
-        'data-doc="'   + item.doc_name.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '" ' +
+        'onclick="openPressDetail(\'' + safeTitle.replace(/'/g,"\\'") + '\',\'' + item.date + '\',\'' + safeDoc.replace(/'/g,"\\'") + '\')" ' +
         'onmouseover="this.style.background=\'#22223a\'" ' +
         'onmouseout="this.style.background=\'#1a1a2a\'">' +
         '<span style="flex-shrink:0;font-size:11px;color:#6c757d;width:36px;margin-top:2px">' + dateLabel + '</span>' +
@@ -2379,6 +2379,89 @@ function askAboutPress(el) {
     var inp = document.getElementById('chat-input');
     if (inp) { inp.value = '"' + title + '" 보도자료의 주요 내용을 요약해 주세요.'; inp.focus(); }
   }, 300);
+}
+
+async function openPressDetail(title, date, docName) {
+  var modal  = document.getElementById('press-detail-modal');
+  var titleEl = document.getElementById('press-detail-title');
+  var dateEl  = document.getElementById('press-detail-date');
+  var bodyEl  = document.getElementById('press-detail-body');
+  if (!modal) return;
+
+  titleEl.textContent = title;
+  dateEl.textContent  = date;
+  bodyEl.innerHTML = '<div style="text-align:center;padding:30px;color:#aaa">불러오는 중...</div>';
+  modal.style.display = 'flex';
+
+  // '2026-01-15' → '260115'
+  var yymmdd = date.replace(/-/g, '').substring(2);
+
+  try {
+    var cr = await sb.from('document_chunks')
+      .select('chunk_index, content')
+      .eq('doc_name', docName)
+      .order('chunk_index')
+      .limit(500);
+
+    if (!cr.data || cr.data.length === 0) {
+      bodyEl.innerHTML = '<div style="color:#f66;padding:20px">내용을 찾을 수 없습니다.</div>';
+      return;
+    }
+
+    // 전체 텍스트 합치기
+    var fullText = cr.data.map(function(c) { return c.content; }).join('\n');
+
+    // ## YYMMDD 경계로 섹션 분리
+    var sections = fullText.split(/(?=^## \d{6})/m);
+
+    // 해당 날짜 섹션 찾기
+    var targetSection = null;
+    for (var i = 0; i < sections.length; i++) {
+      if (new RegExp('^## ' + yymmdd).test(sections[i])) {
+        targetSection = sections[i];
+        break;
+      }
+    }
+
+    if (!targetSection) {
+      // 제목으로 검색 폴백
+      targetSection = sections.find(function(s) {
+        return s.toLowerCase().indexOf(title.toLowerCase().substring(0, 10)) !== -1;
+      }) || null;
+    }
+
+    if (!targetSection) {
+      bodyEl.innerHTML = '<div style="color:#f66;padding:20px">해당 보도자료 내용을 찾을 수 없습니다.</div>';
+      return;
+    }
+
+    // 불필요한 이미지 설명, 중복 제목 라인 정리
+    var cleaned = targetSection
+      .replace(/그림입니다\.\n원본 그림의 이름:[^\n]+\n원본 그림의 크기:[^\n]+/g, '')
+      .replace(/^# \d{6}[^\n]*\n/m, '')  // # YYMMDD 중복 제목 제거
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    // 간단한 마크다운 → HTML 변환
+    var html = cleaned
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/^## (.+)$/gm, '<h3 style="color:var(--accent-purple);font-size:14px;margin:16px 0 6px">$1</h3>')
+      .replace(/^### (.+)$/gm, '<h4 style="color:var(--text-primary);font-size:13px;margin:12px 0 4px;font-weight:600">$1</h4>')
+      .replace(/^- (.+)$/gm, '<li style="margin:2px 0">$1</li>')
+      .replace(/(<li[^>]*>.*<\/li>\n?)+/g, function(m){ return '<ul style="padding-left:20px;margin:6px 0">' + m + '</ul>'; })
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>');
+
+    bodyEl.innerHTML = html;
+
+  } catch(e) {
+    bodyEl.innerHTML = '<div style="color:#f66;padding:20px">오류: ' + (e.message || e) + '</div>';
+  }
+}
+
+function closePressDetail() {
+  var modal = document.getElementById('press-detail-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 async function filterPressList() {
