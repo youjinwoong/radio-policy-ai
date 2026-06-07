@@ -2225,7 +2225,6 @@ async function loadPressJSON() {
   var listEl = document.getElementById('press-list');
   if (listEl) listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#aaa">로딩 중...</div>';
 
-  var sb = getSupabase();
   if (!sb) { if (listEl) listEl.innerHTML = '<div style="padding:20px;color:#f66">Supabase 미연결</div>'; return; }
 
   try {
