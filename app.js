@@ -1832,7 +1832,7 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
   for (var i = 0; i < lines.length; i++) {
     var l = lines[i];
     if (/^• /.test(l)) {
-      titleLine = l.replace(/^• /, '');
+      titleLine = l.replace(/^• /, '').replace(/\s*\[ID:[^\]]+\]/g, '');
     } else if (/^  🔗 /.test(l)) {
       linkUrl = l.replace(/^  🔗 /, '').trim();
     } else if (/^  → /.test(l)) {
