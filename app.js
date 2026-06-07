@@ -2635,15 +2635,15 @@ function openPdfUpload(ctx) {
   if (label) label.textContent = 'PDF 파일 클릭 선택 또는 드래그';
 
   if (ctx === 'press') {
-    if (title) title.textContent = '정부 보도자료 PDF 업로드';
+    if (title) title.textContent = '정부 보도자료 업로드 (PDF · MD · PPTX)';
     if (catRow) catRow.style.display = 'none';
-    if (dateRow) dateRow.style.display = 'block';
+    if (dateRow) dateRow.style.display = 'none';
   } else if (ctx === 'itu') {
-    if (title) title.textContent = 'ITU-R 문서 PDF 업로드';
+    if (title) title.textContent = 'ITU-R 문서 업로드 (PDF · MD · PPTX)';
     if (catRow) catRow.style.display = 'none';
     if (dateRow) dateRow.style.display = 'none';
   } else {
-    if (title) title.textContent = '법령·고시 PDF 업로드';
+    if (title) title.textContent = '법령·고시 업로드 (PDF · MD · PPTX)';
     if (catRow) catRow.style.display = 'block';
     if (dateRow) dateRow.style.display = 'none';
   }
@@ -2657,13 +2657,49 @@ function closePdfUpload() {
 
 function handlePdfFileSelect(input) {
   if (!input.files || !input.files[0]) return;
-  var file = input.files[0];
+  var files = Array.from(input.files);
   var nameInput = document.getElementById('pdf-doc-name');
   var label = document.getElementById('pdf-file-label');
-  if (label) label.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
-  if (nameInput && !nameInput.value) {
-    nameInput.value = file.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ');
+  if (files.length === 1) {
+    var file = files[0];
+    if (label) label.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
+    if (nameInput && !nameInput.value) {
+      nameInput.value = file.name.replace(/\.(pdf|md|pptx)$/i, '').replace(/[_-]/g, ' ');
+    }
+  } else {
+    if (label) label.textContent = files.length + '개 파일 선택됨';
+    if (nameInput && !nameInput.value) nameInput.value = '(파일명 자동)';
   }
+}
+
+async function _extractMdText(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function(e) { resolve(e.target.result); };
+    reader.onerror = reject;
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+async function _extractPptxText(file) {
+  if (typeof JSZip === 'undefined') throw new Error('JSZip 라이브러리 미로드');
+  var arrayBuffer = await file.arrayBuffer();
+  var zip = await JSZip.loadAsync(arrayBuffer);
+  var slideTexts = [];
+  var slideFiles = Object.keys(zip.files)
+    .filter(function(name) { return /^ppt\/slides\/slide[0-9]+\.xml$/.test(name); })
+    .sort();
+  for (var i = 0; i < slideFiles.length; i++) {
+    var xml = await zip.files[slideFiles[i]].async('string');
+    var text = xml
+      .replace(/<a:t>/g, ' ')
+      .replace(/<\/a:t>/g, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/\s+/g, ' ').trim();
+    if (text.length > 10) slideTexts.push('--- 슬라이드 ' + (i + 1) + ' ---\n' + text);
+  }
+  return slideTexts.join('\n\n');
 }
 
 function handlePdfDrop(event) {
@@ -2741,8 +2777,8 @@ async function doPdfUpload() {
     : (document.getElementById('pdf-category').value || '고시');
   var pressDate = (document.getElementById('pdf-press-date').value || '');
 
-  if (!fileInput.files || !fileInput.files[0]) { alert('PDF 파일을 선택해주세요.'); return; }
-  if (!docName) { alert('문서명을 입력해주세요.'); return; }
+  if (!fileInput.files || !fileInput.files[0]) { alert('파일을 선택해주세요.'); return; }
+  if (!docName && fileInput.files.length === 1) { alert('문서명을 입력해주세요.'); return; }
   if (_pdfUploadCtx === 'press' && !pressDate) { alert('보도자료 날짜를 입력해주세요.'); return; }
 
   var btn = document.getElementById('pdf-upload-btn');
@@ -2751,69 +2787,137 @@ async function doPdfUpload() {
   btn.innerHTML = '<i class="ti ti-loader"></i> 처리 중...';
   prog.style.display = 'block';
 
+  var files = Array.from(fileInput.files);
+  var totalFiles = files.length;
+  var totalChunks = 0;
+
   try {
-    // 1. PDF 텍스트 추출
-    _setPdfProgress(10, 'PDF 텍스트 추출 중...');
-    var text = await _extractPdfText(fileInput.files[0]);
-    if (text.replace(/\s/g, '').length < 100) {
-      throw new Error('텍스트를 추출할 수 없습니다. 스캔 이미지 PDF이거나 암호화된 파일일 수 있습니다.');
-    }
+    for (var fi = 0; fi < files.length; fi++) {
+      var file = files[fi];
+      var ext = file.name.split('.').pop().toLowerCase();
+      // 다중 파일일 때 doc_name은 파일명(확장자 제거), 단일 파일이면 입력값
+      var thisDocName = (totalFiles > 1)
+        ? file.name.replace(/\.[^.]+$/, '')
+        : (docName || file.name.replace(/\.[^.]+$/, ''));
 
-    // 2. 청킹
-    _setPdfProgress(30, '텍스트 청킹 중...');
-    var chunks = _chunkText(text);
-    if (chunks.length === 0) throw new Error('청킹 결과가 없습니다.');
+      var fileProgress = fi / totalFiles;
+      var fileProgressEnd = (fi + 1) / totalFiles;
 
-    // 3. 기존 동일 문서명 청크 삭제
-    _setPdfProgress(40, '기존 데이터 정리 중...');
-    await sb.from('document_chunks').delete().eq('doc_name', docName);
-
-    // 4. 청크 배치 삽입 (50개씩)
-    var rows = chunks.map(function(c, i) {
-      return { doc_name: docName, doc_category: category, chunk_index: i, content: c };
-    });
-    var BATCH = 50;
-    for (var i = 0; i < rows.length; i += BATCH) {
-      await sb.from('document_chunks').insert(rows.slice(i, i + BATCH));
+      // 1. 텍스트 추출
       _setPdfProgress(
-        40 + Math.round(55 * Math.min(i + BATCH, rows.length) / rows.length),
-        '업로드 중... (' + Math.min(i + BATCH, rows.length) + '/' + rows.length + '개 청크)'
+        Math.round(fileProgress * 80 + 5),
+        '(' + (fi+1) + '/' + totalFiles + ') ' + file.name + ' 텍스트 추출 중...'
       );
-    }
-
-    // 5. 보도자료면 메모리 pressData에도 추가 → 목록 즉시 반영
-    if (_pdfUploadCtx === 'press') {
-      if (!pressData) pressData = [];
-      pressData.unshift({
-        id: 'upload_' + Date.now(),
-        title: docName,
-        date: pressDate,
-        content: text.slice(0, 3000)
-      });
-      renderPressList(null);
-    }
-
-    // 6. 법령·고시 또는 ITU-R면 화면 목록에 추가
-    if (_pdfUploadCtx === 'law' || _pdfUploadCtx === 'itu') {
-      var listEl = document.getElementById(_pdfUploadCtx === 'itu' ? 'itu-upload-list' : 'law-upload-list');
-      if (listEl) {
-        var item = document.createElement('div');
-        item.className = 'card';
-        item.style.cssText = 'cursor:default;margin-bottom:10px';
-        item.innerHTML = '<div class="file-item">' +
-          '<div class="file-icon fi-purple"><i class="ti ti-file-upload"></i></div>' +
-          '<div style="flex:1"><div class="file-name">' + docName + '</div>' +
-          '<div class="file-size">' + category + ' · 직접 업로드 · ' + rows.length + '개 청크</div></div>' +
-          '<span class="badge badge-teal">최신</span>' +
-          '</div>';
-        listEl.appendChild(item);
+      var text;
+      if (ext === 'pdf') {
+        text = await _extractPdfText(file);
+        if (text.replace(/\s/g, '').length < 100) {
+          throw new Error(file.name + ': 텍스트를 추출할 수 없습니다. 스캔 이미지 PDF이거나 암호화된 파일일 수 있습니다.');
+        }
+      } else if (ext === 'md') {
+        text = await _extractMdText(file);
+        if (text.replace(/\s/g, '').length < 10) {
+          throw new Error(file.name + ': 내용이 없거나 읽을 수 없는 파일입니다.');
+        }
+      } else if (ext === 'pptx') {
+        text = await _extractPptxText(file);
+        if (text.replace(/\s/g, '').length < 10) {
+          throw new Error(file.name + ': 텍스트를 추출할 수 없습니다.');
+        }
+      } else {
+        throw new Error(file.name + ': 지원하지 않는 형식입니다. PDF, MD, PPTX만 가능합니다.');
       }
+
+      // 2. 보도자료 MD 파일: ## YYMMDD 기준으로 보도자료별 청킹
+      var allRows = [];
+      if (_pdfUploadCtx === 'press' && ext === 'md') {
+        // ## 로 시작하는 섹션 분리
+        var sections = text.split(/(?=^## )/m).filter(function(s){ return s.trim().length > 0; });
+        if (sections.length === 0) sections = [text];
+        for (var si = 0; si < sections.length; si++) {
+          var sec = sections[si].trim();
+          var secChunks = _chunkText(sec);
+          for (var ci = 0; ci < secChunks.length; ci++) {
+            allRows.push({
+              doc_name: thisDocName,
+              doc_category: category,
+              chunk_index: allRows.length,
+              content: secChunks[ci]
+            });
+          }
+        }
+      } else {
+        // 3. 일반 청킹
+        _setPdfProgress(
+          Math.round(fileProgress * 80 + 15),
+          '(' + (fi+1) + '/' + totalFiles + ') 텍스트 청킹 중...'
+        );
+        var chunks = _chunkText(text);
+        if (chunks.length === 0) throw new Error(file.name + ': 청킹 결과가 없습니다.');
+        allRows = chunks.map(function(c, i) {
+          return { doc_name: thisDocName, doc_category: category, chunk_index: i, content: c };
+        });
+      }
+
+      // 4. 기존 동일 문서명 청크 삭제
+      _setPdfProgress(
+        Math.round(fileProgress * 80 + 20),
+        '(' + (fi+1) + '/' + totalFiles + ') 기존 데이터 정리 중...'
+      );
+      await sb.from('document_chunks').delete().eq('doc_name', thisDocName);
+
+      // 5. 청크 배치 삽입 (50개씩)
+      var BATCH = 50;
+      for (var i = 0; i < allRows.length; i += BATCH) {
+        await sb.from('document_chunks').insert(allRows.slice(i, i + BATCH));
+        _setPdfProgress(
+          Math.round((fileProgress + (i + BATCH) / allRows.length / totalFiles) * 80 + 10),
+          '(' + (fi+1) + '/' + totalFiles + ') 업로드 중... (' + Math.min(i + BATCH, allRows.length) + '/' + allRows.length + '개 청크)'
+        );
+      }
+      totalChunks += allRows.length;
+
+      // 6. 보도자료면 메모리 pressData에도 추가 → 목록 즉시 반영
+      if (_pdfUploadCtx === 'press') {
+        if (!pressData) pressData = [];
+        pressData.unshift({
+          id: 'upload_' + Date.now() + '_' + fi,
+          title: thisDocName,
+          date: pressDate,
+          content: text.slice(0, 3000)
+        });
+      }
+
+      // 7. 법령·고시 또는 ITU-R면 화면 목록에 추가
+      if (_pdfUploadCtx === 'law' || _pdfUploadCtx === 'itu') {
+        var listEl = document.getElementById(_pdfUploadCtx === 'itu' ? 'itu-upload-list' : 'law-upload-list');
+        if (listEl) {
+          var item = document.createElement('div');
+          item.className = 'card';
+          item.style.cssText = 'cursor:default;margin-bottom:10px';
+          item.innerHTML = '<div class="file-item">' +
+            '<div class="file-icon fi-purple"><i class="ti ti-file-upload"></i></div>' +
+            '<div style="flex:1"><div class="file-name">' + thisDocName + '</div>' +
+            '<div class="file-size">' + category + ' · 직접 업로드 · ' + allRows.length + '개 청크</div></div>' +
+            '<span class="badge badge-teal">최신</span>' +
+            '</div>';
+          listEl.appendChild(item);
+        }
+      }
+    } // end for files
+
+    // 보도자료 목록 갱신
+    if (_pdfUploadCtx === 'press') {
+      renderPressList(null);
     }
 
     _setPdfProgress(100, '완료!');
     setTimeout(function() {
       closePdfUpload();
-      alert('✅ "' + docName + '" 업로드 완료!\n' + rows.length + '개 청크가 AI 자문 지식베이스에 추가되었습니다.');
+      var msg = totalFiles === 1
+        ? '✅ "' + (docName || files[0].name.replace(/\.[^.]+$/, '')) + '" 업로드 완료!\n' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.'
+        : '✅ ' + totalFiles + '개 파일 업로드 완료!\n총 ' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.';
+      alert(msg);
     }, 400);
 
   } catch(e) {
