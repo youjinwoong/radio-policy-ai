@@ -2622,6 +2622,10 @@ function openPdfUpload(ctx) {
     if (title) title.textContent = '정부 보도자료 PDF 업로드';
     if (catRow) catRow.style.display = 'none';
     if (dateRow) dateRow.style.display = 'block';
+  } else if (ctx === 'itu') {
+    if (title) title.textContent = 'ITU-R 문서 PDF 업로드';
+    if (catRow) catRow.style.display = 'none';
+    if (dateRow) dateRow.style.display = 'none';
   } else {
     if (title) title.textContent = '법령·고시 PDF 업로드';
     if (catRow) catRow.style.display = 'block';
@@ -2716,6 +2720,8 @@ async function doPdfUpload() {
   var docName = (document.getElementById('pdf-doc-name').value || '').trim();
   var category = _pdfUploadCtx === 'press'
     ? '보도자료'
+    : _pdfUploadCtx === 'itu'
+    ? 'ITU-R'
     : (document.getElementById('pdf-category').value || '고시');
   var pressDate = (document.getElementById('pdf-press-date').value || '');
 
@@ -2771,9 +2777,9 @@ async function doPdfUpload() {
       renderPressList(null);
     }
 
-    // 6. 법령·고시면 화면 목록에 추가
-    if (_pdfUploadCtx === 'law') {
-      var listEl = document.getElementById('law-upload-list');
+    // 6. 법령·고시 또는 ITU-R면 화면 목록에 추가
+    if (_pdfUploadCtx === 'law' || _pdfUploadCtx === 'itu') {
+      var listEl = document.getElementById(_pdfUploadCtx === 'itu' ? 'itu-upload-list' : 'law-upload-list');
       if (listEl) {
         var item = document.createElement('div');
         item.className = 'card';
