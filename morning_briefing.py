@@ -244,18 +244,14 @@ def _briefing_to_html(text: str) -> str:
         elif e.startswith('•') or '🟡' in line or '🟢' in line:
             out.append(f'<p style="margin:4px 0 4px 12px">{e}</p>')
         elif e.startswith('  →'):
-            # [ID:xxx] 태그 제거 후 표시
-            clean = re.sub(r'\s*\[ID:[^\]]+\]', '', e)
-            out.append(f'<p style="margin:2px 0 2px 24px;color:#555;font-size:13px">{clean}</p>')
+            out.append(f'<p style="margin:2px 0 2px 24px;color:#555;font-size:13px">{e}</p>')
         elif e.startswith('  🔗'):
             url = line.strip()[2:].strip()
             out.append(f'<p style="margin:2px 0 8px 24px;font-size:12px"><a href="{url}" style="color:#534AB7">{url}</a></p>')
         elif e == '':
             out.append('<br>')
         else:
-            # 제목 줄의 [ID:xxx] 태그 제거
-            clean = re.sub(r'\s*\[ID:[^\]]+\]', '', e)
-            out.append(f'<p style="margin:4px 0">{clean}</p>')
+            out.append(f'<p style="margin:4px 0">{e}</p>')
     if in_box:
         out.append('</div>')
     return '\n'.join(out)
@@ -388,9 +384,12 @@ def main():
     # news_feed.summary 역저장
     backfill_summaries(briefing_text)
 
+    # 발송용 텍스트 — [ID:...] 태그 제거
+    display_text = re.sub(r'\s*\[ID:[^\]]+\]', '', briefing_text)
+
     # 발송
-    send_telegram(briefing_text)
-    send_email(briefing_text, len(items))
+    send_telegram(display_text)
+    send_email(display_text, len(items))
 
     print(f'{"="*50}')
     print('[모닝 브리핑 완료]')
@@ -398,3 +397,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+                                                                                                   
