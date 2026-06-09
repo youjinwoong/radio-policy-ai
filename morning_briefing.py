@@ -134,7 +134,7 @@ def generate_briefing(items: list, new_terms: list) -> str:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         resp = client.messages.create(
-            model='claude-haiku-4-5',
+            model='claude-haiku-4-5-20251001',
             max_tokens=2500,
             system=_BRIEFING_SYSTEM,
             messages=[{'role': 'user', 'content': user_msg}],
@@ -397,4 +397,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-                                                                                                   

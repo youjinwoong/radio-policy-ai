@@ -97,7 +97,7 @@ def classify_urgency(title: str, content: str = '') -> str:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         resp = client.messages.create(
-            model='claude-haiku-4-5',
+            model='claude-haiku-4-5-20251001',
             max_tokens=10,
             system=_URGENCY_SYSTEM,
             messages=[{'role': 'user', 'content': user_msg}],
@@ -1115,7 +1115,11 @@ def save_new_items(items: list, existing_data: tuple) -> list:
         item['urgency'] = val
         item['importance'] = val
 
-    sb.table('news_feed').insert(valid).execute()
+    try:
+        sb.table('news_feed').insert(valid).execute()
+    except Exception as e:
+        print(f'[저장 오류] Supabase insert 실패: {e}')
+        return []
     urgent_count = sum(1 for i in valid if i.get('urgency') == '긴급')
     print(f'[저장] {len(valid)}건 저장 완료 (긴급 {urgent_count}건)')
     return valid
@@ -1166,7 +1170,7 @@ def extract_tech_terms(items: list) -> list:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         resp = client.messages.create(
-            model='claude-haiku-4-5',
+            model='claude-haiku-4-5-20251001',
             max_tokens=1000,
             system=_TERM_SYSTEM,
             messages=[{'role': 'user', 'content': user_msg}],
@@ -1282,7 +1286,7 @@ def generate_daily_briefing(items: list, new_terms: list) -> str:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         resp = client.messages.create(
-            model='claude-haiku-4-5',
+            model='claude-haiku-4-5-20251001',
             max_tokens=2500,
             system=_BRIEFING_SYSTEM,
             messages=[{'role': 'user', 'content': user_msg}],

@@ -57,8 +57,8 @@ jobs:
           HOUR=$(date -u +%H)
           if [ "$HOUR" = "23" ]; then
             echo "=== 08:00 KST 브리핑 실행 ==="
-            pip install python-dateutil -q
-            python morning_briefing.py
+            pip install python-dateutil -q || true
+            python morning_briefing.py || echo "[경고] morning_briefing.py 실패 — 크롤링 job은 정상 완료"
           else
             echo "브리핑 시간 아님 (현재 UTC ${HOUR}시) — 건너뜀"
           fi
