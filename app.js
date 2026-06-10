@@ -680,6 +680,40 @@ async function deleteCustomKnowledge(id) {
   if (error) throw new Error(error.message);
 }
 
+// ── 보도자료 질의 판별·검색 (0313a8f에서 복원 — 08d29f1에서 유실) ──
+function isPressQuery(query) {
+  return /보도자료|보도|발표|공지|공고|과기정통부|국립전파연구원|전파연구원/.test(query);
+}
+function searchPressReleases(query) {
+  if (!pressData) return [];
+  var keywords = extractKeywords(query);
+  if (keywords.length === 0) return [];
+  var results = [];
+  for (var i = 0; i < pressData.length; i++) {
+    var item = pressData[i];
+    var combined = (item.title + ' ' + item.content).toLowerCase();
+    var score = 0;
+    for (var k = 0; k < keywords.length; k++) {
+      var kw = keywords[k].toLowerCase();
+      if (combined.includes(kw)) score++;
+      if (item.title.toLowerCase().includes(kw)) score++;  // 제목 가중치
+    }
+    if (score > 0) results.push({ item: item, score: score });
+  }
+  results.sort((a, b) => b.score - a.score);
+  return results.slice(0, 4).map(function(r) {
+    var item = r.item;
+    // 관련 본문 발췌 (최대 800자)
+    var excerpt = item.content.slice(0, 800).trim();
+    return {
+      id: 'press_' + item.id,
+      doc_name: item.title,
+      doc_category: '과기정통부 보도자료',
+      content: '[날짜: ' + item.date + ']\n' + excerpt
+    };
+  });
+}
+
 async function callClaude(userText) {
   const { claudeKey } = getConfig();
   if (!claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다. 설정 탭에서 입력해주세요.');
