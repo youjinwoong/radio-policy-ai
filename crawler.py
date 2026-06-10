@@ -1204,10 +1204,72 @@ def extract_tech_terms(items: list) -> list:
             } for t in new_terms]
             sb.table('tech_terms').insert(rows).execute()
             print(f'[용어] 신규 {len(new_terms)}건 저장: {[t["term"] for t in new_terms]}')
+            # 저장 즉시 상세 설명·다이어그램 자동 생성 (대시보드 첫 클릭 대기 제거)
+            generate_term_descriptions(new_terms)
         return new_terms
     except Exception as e:
         print(f'[용어 추출 오류] {e}')
         return []
+
+
+def generate_term_descriptions(new_terms: list):
+    """신규 기술 용어의 상세 설명·SVG 다이어그램·관련 용어를 Claude로 생성 후 DB 저장."""
+    if not new_terms or not ANTHROPIC_API_KEY:
+        return
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    for t in new_terms:
+        term      = t.get('term', '')
+        term_en   = t.get('term_en', '')
+        category  = t.get('category', '기타')
+        definition = t.get('definition', '')
+        if not term:
+            continue
+        term_label = term + (f' ({term_en})' if term_en else '')
+        system_msg = '당신은 이동통신·전파 정책 전문가입니다. 반드시 지정된 XML 태그 형식으로만 답변하세요.'
+        user_msg = (
+            f'기술 용어 [{term_label}] 에 대해 아래 형식으로 정확히 답변하세요.\n'
+            f'분야: {category}. 현재 정의: {definition or "없음"}.\n\n'
+            '<description>\n'
+            '3~5문단 상세 설명. **굵은글씨**로 핵심 개념 강조. 단락 구분은 빈 줄로.\n'
+            '내용: 개념 배경/기술 원리/국내외 현황/관련 표준 순서로 서술.\n'
+            '</description>\n\n'
+            '<diagram>\n'
+            '아래 조건을 모두 지킨 SVG를 생성하라:\n'
+            '- viewBox="0 0 680 320" xmlns="http://www.w3.org/2000/svg"\n'
+            '- 배경: rect fill="#f8fafc" 전체 채움\n'
+            '- 한국어 레이블 사용, font-family="sans-serif"\n'
+            '- 주요 구성요소를 박스/원/화살표로 시각화 (최소 4개 요소)\n'
+            '- 색상: 주요 박스 #6366f1(보라), 보조 #10b981(초록), 강조 #f59e0b(노랑), 배경박스 #e0e7ff\n'
+            '- 화살표는 marker-end 사용하여 방향 표시\n'
+            '- 개념 흐름이나 계층 구조를 한눈에 파악할 수 있게\n'
+            '</diagram>\n\n'
+            '<related>관련용어1,관련용어2,관련용어3</related>'
+        )
+        try:
+            resp = client.messages.create(
+                model='claude-haiku-4-5-20251001',
+                max_tokens=4000,
+                system=system_msg,
+                messages=[{'role': 'user', 'content': user_msg}]
+            )
+            text = resp.content[0].text if resp.content else ''
+            desc_match  = re.search(r'<description>([\s\S]*?)</description>', text)
+            diag_match  = re.search(r'<diagram>([\s\S]*?)</diagram>', text)
+            rel_match   = re.search(r'<related>([\s\S]*?)</related>', text)
+            update_data: dict = {}
+            if desc_match:
+                update_data['description'] = desc_match.group(1).strip()
+            if diag_match:
+                update_data['diagram_html'] = diag_match.group(1).strip()
+            if rel_match:
+                update_data['related_terms'] = [
+                    s.strip() for s in rel_match.group(1).split(',') if s.strip()
+                ]
+            if update_data:
+                sb.table('tech_terms').update(update_data).eq('term', term).execute()
+                print(f'[용어 설명] {term} 자동 생성 완료')
+        except Exception as e:
+            print(f'[용어 설명 오류] {term}: {e}')
 
 
 # ═══════════════════════════════════════════════════════
@@ -1639,86 +1701,4 @@ def send_email(new_items: list, briefing_text: str = ''):
 def check_pc_heartbeat() -> bool:
     """PC가 최근 2시간 이내 실행됐는지 확인. True=PC 활성(크롤링 스킵)"""
     try:
-        resp = sb.table('system_status').select('value').eq('key', 'last_pc_crawl').execute()
-        if not resp.data:
-            return False
-        from dateutil import parser as _dtp
-        last_dt = _dtp.parse(resp.data[0]['value'])
-        if last_dt.tzinfo is None:
-            last_dt = last_dt.replace(tzinfo=KST)
-        elapsed = (datetime.now(KST) - last_dt).total_seconds()
-        active = elapsed < 7200  # 2시간 기준
-        print(f'[하트비트] 마지막 PC 실행: {str(resp.data[0]["value"])[:16]} ({int(elapsed//60)}분 전) — {"활성" if active else "비활성"}')
-        return active
-    except Exception as e:
-        print(f'[하트비트 확인 오류] {e}')
-        return False  # 확인 실패 시 크롤링 진행 (안전 기본값)
-
-
-# ═══════════════════════════════════════════════════════
-#  메인
-# ═══════════════════════════════════════════════════════
-
-def main():
-    now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M KST')
-    print(f'{"="*50}')
-    print(f'[시작] {now_str}')
-    print(f'{"="*50}')
-
-    # ── 크롤링 (GitHub Actions 매시간 실행) ────────────
-    existing_urls, existing_titles = get_existing_urls()
-    print(f'[기존] Supabase 저장 항목 {len(existing_urls)}건')
-
-    all_items: list = []
-
-    # 1순위: 네이버 뉴스 검색
-    naver_items, naver_fail = crawl_naver_news()
-    all_items += naver_items
-
-    # 네이버 차단 감지 → Google RSS 폴백
-    # (전체 키워드 50% 이상 실패 또는 수집 5건 미만)
-    if naver_fail > len(NEWS_SEARCH_KEYWORDS) * 0.5 or len(naver_items) < 5:
-        print(f'[폴백] 네이버 부진({len(naver_items)}건, 실패{naver_fail}개) → Google RSS 전환')
-        all_items += crawl_google_news_rss()
-
-    # 정부기관은 PC Cowork gov_notice_crawler.py(매일 17:00)가 담당
-    print(f'[수집] 총 {len(all_items)}건')
-
-    new_items = save_new_items(all_items, (existing_urls, existing_titles))
-    print(f'[신규] {len(new_items)}건')
-
-    # ── 긴급 기사 즉시 알림 (발행 24시간 이내만) ────────
-    now_kst = datetime.now(KST)
-    cutoff_24h = now_kst - timedelta(hours=24)
-
-    def is_within_24h(item):
-        pub = item.get('published_at', '')
-        if not pub:
-            return False
-        try:
-            from dateutil import parser as _dtp2
-            pub_dt = _dtp2.parse(pub)
-            if pub_dt.tzinfo is None:
-                pub_dt = pub_dt.replace(tzinfo=KST)
-            return pub_dt >= cutoff_24h
-        except Exception:
-            return False
-
-    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
-    skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
-    if skipped:
-        print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
-    if urgent_items:
-        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
-        send_telegram(urgent_items)
-        send_urgent_email(urgent_items)
-    else:
-        print('[긴급] 해당 없음')
-
-    print('[모닝 브리핑] morning_briefing.yml GitHub Actions 담당 — 건너뜀')
-    print(f'{"="*50}')
-    print('[완료]')
-
-
-if __name__ == '__main__':
-    main()
+        resp = sb.table('system_status').select('value').eq('key', 'last_pc_crawl').execut
