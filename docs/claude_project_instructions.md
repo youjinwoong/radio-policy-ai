@@ -51,10 +51,17 @@ C:\Users\SKTelecom\Desktop\frequence\radio-policy-ai\
 
 ### ① GitHub Actions 크롤러 (매시간, 자동 · PC 불필요)
 ```
-cron: '5 0-11 * * *'       → 09:05~20:05 KST 매시간
-      '5 13,18,22,23 * * *' → 22:05 / 03:05 / 07:05 / 08:05 KST
+cron: '5 0-11 * * *'    → 09:05~20:05 KST 매시간
+      '5 13,18,22 * * *' → 22:05 / 03:05 / 07:05 KST
+      '5 23 * * *'       → 08:05 KST (크롤링 + 모닝 브리핑 백업 실행)
 워크플로우: daily_crawl.yml
 실행: crawler.py
+
+모닝 브리핑 백업 (08:05 KST cron 전용):
+  - github.event.schedule == '5 23 * * *' 조건으로 판단
+    (이전의 date -u 시각 체크는 GitHub 스케줄 지연 시 브리핑이 조용히
+     스킵되는 버그가 있어 2026-06-10 수정)
+  - morning_briefing.py 실패 시 텔레그램 경고 발송
 
 흐름:
   네이버/Google RSS/20개 언론사 → 기사 수집
@@ -93,15 +100,23 @@ RadioPolicy-RefetchContent (매시간):
 
 ### ③ GitHub Actions 모닝 브리핑 (매일 08:03 KST, 자동 · PC 불필요)
 ```
-cron: '3 23 * * *'
+cron: '3 23 * * *'  → 08:03 KST (1차)
+      '33 23 * * *' → 08:33 KST (2차 — 1차 skip/지연 대비)
+      '3 0 * * *'   → 09:03 KST (3차 — PC refetch 후 본문 확보 가능성↑)
 워크플로우: morning_briefing.yml
 실행: morning_briefing.py
+※ 중복 발송은 already_sent_today()가 차단 (daily_briefings에 당일 행 존재 시 종료)
+※ 워크플로우 실패 시 텔레그램 경고 발송
 
 흐름:
   최근 24h 본문 확인된 기사 조회 (content > 50자)
+  → 기사 0건이면 종료 (09시 KST 이후 시도였다면 텔레그램으로 생략 알림)
   → Claude Haiku: 브리핑 생성 (중복 주제 1건만, 본문 근거 요약)
   → daily_briefings 저장 + news_feed.summary 역저장
   → 텔레그램 발송 (4000자 제한) + Resend API 이메일
+
+⚠️ GitHub Actions 스케줄은 이 repo에서 상시 1~2시간(최대 반나절) 지연되거나
+   누락됨이 확인됨 (2026-06-10 조사). 위 3중 cron + daily_crawl 백업이 보완책.
 
 긴급 표시(🔴) 규칙:
   - SKT 또는 국내 사업에 직접적인 영향이 있는 기사에만 사용
@@ -211,26 +226,4 @@ python upload_law_pdf.py 파일.pdf "문서명" 고시
 | Supabase | DB | 무료 500MB/프로젝트, 최대 2개 |
 | Resend | 이메일 발송 | 100통/일, 3,000통/월 |
 | Telegram Bot | 알림 | 무제한 |
-| Anthropic API | Claude Haiku(크롤링·브리핑·요약·용어설명) / Sonnet(대시보드 AI자문) | 종량제 ~$2~3/월 |
-
-## GitHub Secrets (Actions에서 사용)
-
-`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY`,
-`EMAIL_FROM`, `EMAIL_PASSWORD`, `EMAIL_TO`,
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `RESEND_API_KEY`
-
-## 프로젝트 지침 업데이트 규칙
-
-**다음 작업 완료 시 이 파일(docs/claude_project_instructions.md)을 반드시 업데이트하고,
-Claude Project Settings → Project Instructions에도 동일 내용을 붙여넣을 것:**
-
-- 새 기능 추가 (새 함수, 새 자동화 흐름)
-- 파일 구조 변경 (파일 추가·삭제·역할 변경)
-- 시스템 흐름 변경 (실행 순서, 트리거 조건)
-- "하지 말아야 할 것" 또는 "제약사항"에 해당하는 새 사실 발견
-- 외부 서비스 변경 (모델명, API 엔드포인트 등)
-
-단순 버그 수정(동작 방식 변화 없음)은 업데이트 불필요.
-
----
-*최종 업데이트: 2026-06-10*
+| 
