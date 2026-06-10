@@ -1219,6 +1219,32 @@ def extract_tech_terms(items: list) -> list:
         return []
 
 
+def generate_summary(title: str, source: str, published_at: str, content: str) -> str:
+    """기사 본문을 Claude Haiku로 요약해 반환. 실패 시 빈 문자열."""
+    if not ANTHROPIC_API_KEY or not content:
+        return ''
+    body_snippet = content.replace('\n', ' ').strip()[:3000]
+    user_msg = (
+        '다음 뉴스를 핵심 포인트 3~5개로 요약하세요.\n'
+        '- 각 포인트를 줄바꿈으로 구분하세요.\n'
+        '- 각 포인트는 1~2문장, 육하원칙(누가/무엇을/왜/어떻게) 포함.\n'
+        '- 불릿 기호(•, -, * 등)는 붙이지 마세요. 순수 텍스트만.\n\n'
+        f'제목: {title}\n출처: {source}\n날짜: {str(published_at)[:10]}\n\n본문:\n{body_snippet}'
+    )
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=500,
+            system='당신은 전파·통신 정책 뉴스를 간결하게 요약하는 전문가입니다. 사실만 기반으로 핵심 포인트를 줄바꿈으로 구분하여 작성하세요. 불릿 기호 없이 텍스트만 출력하세요.',
+            messages=[{'role': 'user', 'content': user_msg}]
+        )
+        return (resp.content[0].text or '').strip() if resp.content else ''
+    except Exception as e:
+        print(f'[요약 오류] {title[:30]}: {e}')
+        return ''
+
+
 def generate_term_descriptions(new_terms: list):
     """신규 기술 용어의 상세 설명·SVG 다이어그램·관련 용어를 Claude로 생성 후 DB 저장."""
     if not new_terms or not ANTHROPIC_API_KEY:
