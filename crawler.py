@@ -1799,4 +1799,44 @@ def main():
         print(f'[폴백] 네이버 부진({len(naver_items)}건, 실패{naver_fail}개) → Google RSS 전환')
         all_items += crawl_google_news_rss()
 
-    # 정부기관은 PC Cowork gov_not
+    # 정부기관은 PC Cowork gov_notice_crawler.py(매일 17:00)가 담당
+    print(f'[수집] 총 {len(all_items)}건')
+
+    new_items = save_new_items(all_items, (existing_urls, existing_titles))
+    print(f'[신규] {len(new_items)}건')
+
+    # ── 긴급 기사 즉시 알림 (발행 24시간 이내만) ────────
+    now_kst = datetime.now(KST)
+    cutoff_24h = now_kst - timedelta(hours=24)
+
+    def is_within_24h(item):
+        pub = item.get('published_at', '')
+        if not pub:
+            return False
+        try:
+            from dateutil import parser as _dtp2
+            pub_dt = _dtp2.parse(pub)
+            if pub_dt.tzinfo is None:
+                pub_dt = pub_dt.replace(tzinfo=KST)
+            return pub_dt >= cutoff_24h
+        except Exception:
+            return False
+
+    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
+    skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
+    if skipped:
+        print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
+    if urgent_items:
+        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
+        send_telegram(urgent_items)
+        send_urgent_email(urgent_items)
+    else:
+        print('[긴급] 해당 없음')
+
+    print('[모닝 브리핑] morning_briefing.yml GitHub Actions 담당 — 건너뜀')
+    print(f'{"="*50}')
+    print('[완료]')
+
+
+if __name__ == '__main__':
+    main()
