@@ -215,19 +215,29 @@ async function extractTermsFromNews() {
 
     // Supabase에 저장
     var saved = 0, skipped = 0;
+    var newIds = [];
     for (var i = 0; i < terms.length; i++) {
       var t = terms[i];
       if (!t.term || existingTerms.includes(t.term.toLowerCase())) { skipped++; continue; }
       var r = await sb.from('tech_terms').insert({
         term: t.term, term_en: t.term_en||'', category: t.category||'기타',
         definition: t.definition||'', source: t.source||'뉴스 자동 추출', is_reviewed: false
-      });
-      if (!r.error) { saved++; existingTerms.push(t.term.toLowerCase()); }
-      else skipped++;
+      }).select('id');
+      if (!r.error && r.data && r.data[0]) {
+        saved++;
+        existingTerms.push(t.term.toLowerCase());
+        newIds.push(r.data[0].id);
+      } else skipped++;
     }
 
-    alert('완료! 신규 용어 ' + saved + '건 저장, ' + skipped + '건 중복/스킵');
-    if (saved > 0) loadTerms(); // 목록 새로고침
+    if (saved > 0) {
+      alert('신규 용어 ' + saved + '건 저장됨. 설명·다이어그램을 백그라운드에서 자동 생성합니다.');
+      await loadTerms(); // 목록 새로고침 후 설명 생성 시작
+      // 새로 저장된 용어 설명을 백그라운드에서 자동 생성 (클릭 전 미리 채움)
+      newIds.forEach(function(id) { generateTermDetail(id); });
+    } else {
+      alert('완료! 신규 용어 0건 저장, ' + skipped + '건 중복/스킵');
+    }
   } catch(e) {
     alert('오류: ' + e.message);
   } finally {
