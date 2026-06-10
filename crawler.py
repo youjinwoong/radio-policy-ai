@@ -488,8 +488,9 @@ EXCLUDE_KEYWORDS = [
     '나성범', '김하성', '이정후', '플레이오프', '시리즈전', '연속 침묵',
     '무실점', '연속 무실점', '선발 등판', '완투', '병살', '도루', '번트',
     '1승', '2승', '3승', '연승', '연패', '경기 결과', '프로야구', '프로축구',
+    '원정팀', '홈팀', '원정 승리', '연속 원정',
     # 선거 (LTE·3G 오인 방지)
-    '선거', '투표소', '지방선거', '국회의원', '대통령', '후보', '당선',
+    '선거', '선관위', '투표소', '투표용지', '지방선거', '국회의원', '대통령', '후보', '당선',
     '개표', '사전투표', '선거구', '선거운동', '출마', '지방선거일',
     # 연예·방송
     '아이돌', '드라마', '영화', '콘서트', '팬미팅', '데뷔', '컴백',
@@ -1701,4 +1702,86 @@ def send_email(new_items: list, briefing_text: str = ''):
 def check_pc_heartbeat() -> bool:
     """PC가 최근 2시간 이내 실행됐는지 확인. True=PC 활성(크롤링 스킵)"""
     try:
-        resp = sb.table('system_status').select('value').eq('key', 'last_pc_crawl').execut
+        resp = sb.table('system_status').select('value').eq('key', 'last_pc_crawl').execute()
+        if not resp.data:
+            return False
+        from dateutil import parser as _dtp
+        last_dt = _dtp.parse(resp.data[0]['value'])
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=KST)
+        elapsed = (datetime.now(KST) - last_dt).total_seconds()
+        active = elapsed < 7200  # 2시간 기준
+        print(f'[하트비트] 마지막 PC 실행: {str(resp.data[0]["value"])[:16]} ({int(elapsed//60)}분 전) — {"활성" if active else "비활성"}')
+        return active
+    except Exception as e:
+        print(f'[하트비트 확인 오류] {e}')
+        return False  # 확인 실패 시 크롤링 진행 (안전 기본값)
+
+
+# ═══════════════════════════════════════════════════════
+#  메인
+# ═══════════════════════════════════════════════════════
+
+def main():
+    now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M KST')
+    print(f'{"="*50}')
+    print(f'[시작] {now_str}')
+    print(f'{"="*50}')
+
+    # ── 크롤링 (GitHub Actions 매시간 실행) ────────────
+    existing_urls, existing_titles = get_existing_urls()
+    print(f'[기존] Supabase 저장 항목 {len(existing_urls)}건')
+
+    all_items: list = []
+
+    # 1순위: 네이버 뉴스 검색
+    naver_items, naver_fail = crawl_naver_news()
+    all_items += naver_items
+
+    # 네이버 차단 감지 → Google RSS 폴백
+    # (전체 키워드 50% 이상 실패 또는 수집 5건 미만)
+    if naver_fail > len(NEWS_SEARCH_KEYWORDS) * 0.5 or len(naver_items) < 5:
+        print(f'[폴백] 네이버 부진({len(naver_items)}건, 실패{naver_fail}개) → Google RSS 전환')
+        all_items += crawl_google_news_rss()
+
+    # 정부기관은 PC Cowork gov_notice_crawler.py(매일 17:00)가 담당
+    print(f'[수집] 총 {len(all_items)}건')
+
+    new_items = save_new_items(all_items, (existing_urls, existing_titles))
+    print(f'[신규] {len(new_items)}건')
+
+    # ── 긴급 기사 즉시 알림 (발행 24시간 이내만) ────────
+    now_kst = datetime.now(KST)
+    cutoff_24h = now_kst - timedelta(hours=24)
+
+    def is_within_24h(item):
+        pub = item.get('published_at', '')
+        if not pub:
+            return False
+        try:
+            from dateutil import parser as _dtp2
+            pub_dt = _dtp2.parse(pub)
+            if pub_dt.tzinfo is None:
+                pub_dt = pub_dt.replace(tzinfo=KST)
+            return pub_dt >= cutoff_24h
+        except Exception:
+            return False
+
+    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
+    skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
+    if skipped:
+        print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
+    if urgent_items:
+        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
+        send_telegram(urgent_items)
+        send_urgent_email(urgent_items)
+    else:
+        print('[긴급] 해당 없음')
+
+    print('[모닝 브리핑] morning_briefing.yml GitHub Actions 담당 — 건너뜀')
+    print(f'{"="*50}')
+    print('[완료]')
+
+
+if __name__ == '__main__':
+    main()
