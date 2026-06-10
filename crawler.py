@@ -1152,10 +1152,13 @@ def extract_tech_terms(items: list) -> list:
     if not ANTHROPIC_API_KEY or not items:
         return []
 
-    # 기존 용어 목록 조회 (중복 방지)
+    # 기존 용어 목록 조회 (정규화 중복 방지: 공백 제거 + 소문자)
+    def _norm(s: str) -> str:
+        return re.sub(r'\s+', '', s).lower()
+
     try:
         existing = sb.table('tech_terms').select('term').execute()
-        existing_terms = {r['term'].lower() for r in (existing.data or [])}
+        existing_terms = {_norm(r['term']) for r in (existing.data or [])}
     except Exception as e:
         print(f'[용어] 기존 목록 조회 실패: {e}')
         existing_terms = set()
@@ -1188,11 +1191,11 @@ def extract_tech_terms(items: list) -> list:
             print('[용어] 신규 용어 없음')
             return []
 
-        # 중복 제거 후 저장
+        # 중복 제거 후 저장 (정규화 비교: 공백 제거 + 소문자)
         new_terms = [
             t for t in terms
             if isinstance(t, dict) and t.get('term')
-            and t['term'].lower() not in existing_terms
+            and _norm(t['term']) not in existing_terms
         ]
         if new_terms:
             rows = [{

@@ -171,6 +171,9 @@ let isSending = false;
 // ════════════════════════════════════════════
 //  기술 용어 — 뉴스에서 자동 추출 (수동 실행)
 // ════════════════════════════════════════════
+// 용어 정규화: 공백 제거 + 소문자 변환 (2.6 GHz == 2.6ghz 중복 방지)
+function normalizeTerm(s) { return (s||'').toLowerCase().replace(/\s+/g, ''); }
+
 async function extractTermsFromNews() {
   var btn = document.getElementById('extract-terms-btn');
   if (!sb) { alert('Supabase 연결이 필요합니다.'); return; }
@@ -187,9 +190,9 @@ async function extractTermsFromNews() {
     var newsList = (newsResp.data || []).map(function(n) { return '[' + (n.published_at||'').slice(0,10) + '] ' + n.title + ' (' + (n.source||'') + ')'; }).join('\n');
     if (!newsList) { alert('최근 7일 뉴스가 없습니다. 먼저 뉴스 브리핑을 실행하세요.'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-bulb"></i>뉴스에서 용어 추출';} return; }
 
-    // 기존 용어 목록
+    // 기존 용어 목록 (정규화 비교: 공백 제거 + 소문자)
     var existingResp = await sb.from('tech_terms').select('term').limit(500);
-    var existingTerms = (existingResp.data || []).map(function(t) { return t.term.toLowerCase(); });
+    var existingTerms = (existingResp.data || []).map(function(t) { return normalizeTerm(t.term); });
 
     // Claude에 용어 추출 요청
     var systemMsg = '당신은 이동통신·전파 전문가입니다. 반드시 순수 JSON 배열만 출력하세요. 마크다운 코드블록 없이.';
@@ -218,14 +221,14 @@ async function extractTermsFromNews() {
     var newIds = [];
     for (var i = 0; i < terms.length; i++) {
       var t = terms[i];
-      if (!t.term || existingTerms.includes(t.term.toLowerCase())) { skipped++; continue; }
+      if (!t.term || existingTerms.includes(normalizeTerm(t.term))) { skipped++; continue; }
       var r = await sb.from('tech_terms').insert({
         term: t.term, term_en: t.term_en||'', category: t.category||'기타',
         definition: t.definition||'', source: t.source||'뉴스 자동 추출', is_reviewed: false
       }).select('id');
       if (!r.error && r.data && r.data[0]) {
         saved++;
-        existingTerms.push(t.term.toLowerCase());
+        existingTerms.push(normalizeTerm(t.term));
         newIds.push(r.data[0].id);
       } else skipped++;
     }
