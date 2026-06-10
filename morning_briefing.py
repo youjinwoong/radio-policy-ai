@@ -360,6 +360,11 @@ def main():
     items = fetch_items_with_content()
     if not items:
         print('[종료] 본문 확인된 기사 없음')
+        # 마지막 시도(09시 KST 이후)에도 기사가 없으면 조용히 끝내지 않고 텔레그램으로 알림
+        # (이전: 무알림 종료 → 브리핑이 왜 안 왔는지 알 수 없었음)
+        if datetime.now(KST).hour >= 9:
+            send_telegram('⚠️ 오늘 모닝 브리핑 생략 — 최근 24시간 내 본문 확보된 기사가 없습니다.\n'
+                          '(PC가 꺼져 있어 refetch_content.py가 실행되지 않았을 가능성)')
         return
 
     # 신규 기술 용어 조회 (오늘 추가된 것)

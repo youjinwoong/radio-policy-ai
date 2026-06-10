@@ -2,8 +2,11 @@ name: 전파정책 모닝 브리핑 (매일 08:00 KST)
 
 on:
   schedule:
-    - cron: '3 23 * * *'   # 매일 08:03 KST (daily_crawl 백업 겸용)
+    - cron: '3 23 * * *'    # 매일 08:03 KST (1차)
+    - cron: '33 23 * * *'   # 매일 08:33 KST (2차 — 1차 skip/지연 대비)
+    - cron: '3 0 * * *'     # 매일 09:03 KST (3차 — PC refetch 후 본문 확보 가능성↑)
   workflow_dispatch:
+# ※ 중복 발송은 morning_briefing.py의 already_sent_today()가 차단함
 
 jobs:
   briefing:
@@ -36,3 +39,13 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: python morning_briefing.py
+
+      - name: 실패 시 텔레그램 경고
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="⚠️ 모닝 브리핑 워크플로우 실패 — Actions 로그 확인 필요" > /dev/null || true
