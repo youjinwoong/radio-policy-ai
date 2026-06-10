@@ -251,9 +251,10 @@ def crawl_naver_news() -> tuple:
                 title = title_tag.get_text(strip=True)
                 if not title or len(title) < 8:
                     continue
-                if not any(k in title for k in RADIO_KEYWORDS):
+                is_personnel = is_ministry_personnel_news(title)
+                if not is_personnel and not any(k in title for k in RADIO_KEYWORDS):
                     continue
-                if any(k in title for k in EXCLUDE_KEYWORDS):
+                if not is_personnel and any(k in title for k in EXCLUDE_KEYWORDS):
                     continue
                 if title in seen_titles:
                     continue
@@ -337,9 +338,10 @@ def crawl_google_news_rss() -> list:
 
                 if not title or len(title) < 8:
                     continue
-                if not any(k in title for k in RADIO_KEYWORDS):
+                is_personnel = is_ministry_personnel_news(title)
+                if not is_personnel and not any(k in title for k in RADIO_KEYWORDS):
                     continue
-                if any(k in title for k in EXCLUDE_KEYWORDS):
+                if not is_personnel and any(k in title for k in EXCLUDE_KEYWORDS):
                     continue
                 if title in seen_titles:
                     continue
@@ -506,6 +508,24 @@ EXCLUDE_KEYWORDS = [
     '레시피', '맛집', '여행', '날씨',
 ]
 
+# ───────────────────────────────────────────────────────
+# 과기정통부·방통위 등 소관 부처 인사이동 뉴스 — 항상 포함
+# (RADIO_KEYWORDS 미포함이어도 수집, EXCLUDE_KEYWORDS보다 우선)
+# ───────────────────────────────────────────────────────
+MINISTRY_NAMES = [
+    '과기정통부', '과학기술정보통신부', '과기부',
+    '방통위', '방송통신위원회', '국립전파연구원', '중앙전파관리소',
+]
+PERSONNEL_WORDS = [
+    '인사', '임명', '취임', '내정', '발탁', '승진', '경질', '교체',
+    '인사이동', '인사발령', '차관', '장관', '실장', '국장',
+]
+
+def is_ministry_personnel_news(title: str) -> bool:
+    """소관 부처 인사 관련 기사 여부 (부처명 + 인사 용어 동시 포함)"""
+    return (any(m in title for m in MINISTRY_NAMES)
+            and any(p in title for p in PERSONNEL_WORDS))
+
 def crawl_msit() -> list:
     items = []
     targets = [
@@ -527,7 +547,7 @@ def crawl_msit() -> list:
                 title = title_tag.get_text(strip=True)
                 if not title:
                     continue
-                if not any(kw in title for kw in RADIO_KEYWORDS):
+                if not any(kw in title for kw in RADIO_KEYWORDS) and not is_ministry_personnel_news(title):
                     continue
                 href = title_tag.get('href', '')
                 if href.startswith('/'):
@@ -725,7 +745,7 @@ def crawl_kisdi() -> list:
 #  크롤러 — 범용 키워드 검색 (IT전문지·경제지·종합일간지)
 # ═══════════════════════════════════════════════════════
 
-NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '5G 주파수', '6G주파수', '6G 주파수', '전자파', '무선국', '이동통신', 'WRC-27', '6GHz', '공공와이파이', '공공 와이파이', '지하철 와이파이', '기지국', 'LTE', '3G', '이동통신 품질', '5G 기지국', 'LTE 기지국', '기지국 장애', '이동통신 장비']
+NEWS_SEARCH_KEYWORDS = ['전파정책', '주파수', '5G주파수', '5G 주파수', '6G주파수', '6G 주파수', '전자파', '무선국', '이동통신', 'WRC-27', '6GHz', '공공와이파이', '공공 와이파이', '지하철 와이파이', '기지국', 'LTE', '3G', '이동통신 품질', '5G 기지국', 'LTE 기지국', '기지국 장애', '이동통신 장비', '과기정통부 인사', '방통위 인사']
 
 # 언론사별 검색 설정 ─ (source, search_url, article_sel, date_sel, base_url)
 NEWS_SITE_CONFIGS = [
@@ -884,7 +904,7 @@ def crawl_news_site(cfg: dict) -> list:
                 title = link.get_text(strip=True)
                 if not title or len(title) < 8:
                     continue
-                if not any(k in title for k in RADIO_KEYWORDS):
+                if not any(k in title for k in RADIO_KEYWORDS) and not is_ministry_personnel_news(title):
                     continue
                 href = link.get('href', '')
                 if not href:
@@ -1779,44 +1799,4 @@ def main():
         print(f'[폴백] 네이버 부진({len(naver_items)}건, 실패{naver_fail}개) → Google RSS 전환')
         all_items += crawl_google_news_rss()
 
-    # 정부기관은 PC Cowork gov_notice_crawler.py(매일 17:00)가 담당
-    print(f'[수집] 총 {len(all_items)}건')
-
-    new_items = save_new_items(all_items, (existing_urls, existing_titles))
-    print(f'[신규] {len(new_items)}건')
-
-    # ── 긴급 기사 즉시 알림 (발행 24시간 이내만) ────────
-    now_kst = datetime.now(KST)
-    cutoff_24h = now_kst - timedelta(hours=24)
-
-    def is_within_24h(item):
-        pub = item.get('published_at', '')
-        if not pub:
-            return False
-        try:
-            from dateutil import parser as _dtp2
-            pub_dt = _dtp2.parse(pub)
-            if pub_dt.tzinfo is None:
-                pub_dt = pub_dt.replace(tzinfo=KST)
-            return pub_dt >= cutoff_24h
-        except Exception:
-            return False
-
-    urgent_items = [i for i in new_items if i.get('urgency') == '긴급' and is_within_24h(i)]
-    skipped = [i for i in new_items if i.get('urgency') == '긴급' and not is_within_24h(i)]
-    if skipped:
-        print(f'[긴급] {len(skipped)}건 발행 24시간 초과 — 알림 제외')
-    if urgent_items:
-        print(f'[긴급] {len(urgent_items)}건 — 알림 발송')
-        send_telegram(urgent_items)
-        send_urgent_email(urgent_items)
-    else:
-        print('[긴급] 해당 없음')
-
-    print('[모닝 브리핑] morning_briefing.yml GitHub Actions 담당 — 건너뜀')
-    print(f'{"="*50}')
-    print('[완료]')
-
-
-if __name__ == '__main__':
-    main()
+    # 정부기관은 PC Cowork gov_not
