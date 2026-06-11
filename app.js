@@ -1087,7 +1087,7 @@ async function openChatHistory() {
       return;
     }
     body.innerHTML = data.map(function(item) {
-      return '<div class="card" style="cursor:pointer;margin-bottom:8px;padding:12px 14px" onclick="viewChatHistoryItem(' + item.id + ')">' +
+      return '<div class="card" style="cursor:pointer;margin-bottom:8px;padding:12px 14px" onclick="viewChatHistoryItem(\'' + item.id + '\')">' +
         '<div style="font-size:13px;font-weight:500;color:var(--text-primary);line-height:1.5">' + chEsc(item.question) + '</div>' +
         '<div style="font-size:11px;color:var(--text-tertiary);margin-top:5px;display:flex;align-items:center;gap:8px">' +
           '<span class="rag-tag">' + chEsc(item.category || '일반') + '</span>' + chDate(item.created_at) +
@@ -1109,9 +1109,14 @@ async function viewChatHistoryItem(id) {
     if (resp.error) throw resp.error;
     var row = resp.data;
     var srcHtml = '';
-    if (row.sources && row.sources.length > 0) {
+    var srcs = row.sources;
+    if (typeof srcs === 'string') {
+      try { srcs = JSON.parse(srcs); } catch(e) { srcs = srcs ? [srcs] : []; }
+    }
+    if (Array.isArray(srcs) && srcs.length > 0) {
+      var uniqueSrcs = srcs.filter(function(v, i, a) { return a.indexOf(v) === i; });
       srcHtml = '<div class="rag-sources" style="margin-top:12px"><i class="ti ti-book"></i> 참조: ' +
-        row.sources.slice(0, 6).map(function(s) { return '<span class="rag-tag">' + chEsc(s) + '</span>'; }).join(' ') + '</div>';
+        uniqueSrcs.slice(0, 6).map(function(s) { return '<span class="rag-tag">' + chEsc(s) + '</span>'; }).join(' ') + '</div>';
     }
     body.innerHTML =
       '<button class="btn" onclick="openChatHistory()" style="margin-bottom:12px"><i class="ti ti-arrow-left"></i>목록으로</button>' +
