@@ -3162,4 +3162,4 @@ document.addEventListener('DOMContentLoaded', function() {
   loadPressJSON();
   loadRemoteConfig().then(function() { loadNews(); });
   setTimeout(autoExtractTermsIfNeeded, 60000);
-})
+});
