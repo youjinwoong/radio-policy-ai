@@ -145,6 +145,16 @@ async function expandQueryKeywords(query) {
   } catch(e) { console.warn('쿼리 확장 실패 (기본 키워드로 진행):', e); return []; }
 }
 
+async function getQueryEmbedding(query) {
+  // Supabase Edge Function(voyage-embed)으로 질의 임베딩 생성 (키 노출 없음)
+  try {
+    if (!sb) return null;
+    var result = await sb.functions.invoke('voyage-embed', { body: { query: query } });
+    if (result.error) { console.warn('voyage-embed 오류:', result.error); return null; }
+    return (result.data && result.data.embedding) ? result.data.embedding : null;
+  } catch(e) { console.warn('시맨틱 임베딩 실패 (폴백):', e); return null; }
+}
+
 async function searchKeywords(query, lawOnly) {
   if (!sb) return [];
   if (lawOnly === undefined) lawOnly = false;
@@ -162,8 +172,9 @@ async function searchKeywords(query, lawOnly) {
   var seen = new Set();
   var results = [];
 
-  // trgm 유사도 검색 병렬 실행 (키워드 루프와 동시 진행)
+  // trgm + 시맨틱 검색 병렬 실행 (키워드 루프와 동시 진행)
   var trgmPromise = null;
+  var semanticPromise = null;
   if (query && query.length >= 3) {
     trgmPromise = sb.rpc('search_chunks_trgm', {
       query_text: query,
@@ -171,6 +182,17 @@ async function searchKeywords(query, lawOnly) {
       match_count: 8
     }).then(function(r) { return r.data || []; }).catch(function(e) {
       console.warn('trgm 검색 오류:', e); return [];
+    });
+    // 시맨틱: Edge Function으로 임베딩 → pgvector 코사인 유사도
+    semanticPromise = getQueryEmbedding(query).then(function(emb) {
+      if (!emb) return [];
+      return sb.rpc('match_chunks_semantic', {
+        query_embedding: emb,
+        match_threshold: 0.45,
+        match_count: 8
+      }).then(function(r) { return r.data || []; }).catch(function(e) {
+        console.warn('시맨틱 검색 오류:', e); return [];
+      });
     });
   }
 
@@ -219,7 +241,30 @@ async function searchKeywords(query, lawOnly) {
     console.log('trgm 검색:', trgmRows.length + '개 청크');
   }
 
-  // 하이브리드 점수: 키워드 매칭(기본 키워드 가중치 2배) + trgm 유사도 보너스
+  // 시맨틱 결과 병합
+  if (semanticPromise) {
+    var semanticRows = await semanticPromise;
+    semanticRows.forEach(function(row) {
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        row._semantic_score = row.similarity || 0;
+        results.push(row);
+      } else {
+        for (var ri = 0; ri < results.length; ri++) {
+          if (results[ri].id === row.id) {
+            results[ri]._semantic_score = row.similarity || 0;
+            if (!results[ri].article_no && row.article_no) results[ri].article_no = row.article_no;
+            if (!results[ri].notice_no && row.notice_no) results[ri].notice_no = row.notice_no;
+            if (!results[ri].effective_date && row.effective_date) results[ri].effective_date = row.effective_date;
+            break;
+          }
+        }
+      }
+    });
+    console.log('시맨틱 검색:', semanticRows.length + '개 청크');
+  }
+
+  // 하이브리드 점수: 키워드(기본 가중치 2배) + trgm×5 + 시맨틱×10
   results.forEach(function(r) {
     var score = 0;
     for (var ki = 0; ki < Math.min(keywords.length, 10); ki++) {
@@ -229,12 +274,14 @@ async function searchKeywords(query, lawOnly) {
       if ((r.doc_name || '').toLowerCase().includes(kw)) score += w;
     }
     r._score = score;
-    r._hybrid_score = score + (r._trgm_score ? r._trgm_score * 5 : 0);
+    r._hybrid_score = score
+      + (r._trgm_score     ? r._trgm_score     * 5  : 0)
+      + (r._semantic_score ? r._semantic_score  * 10 : 0);
   });
   results.sort(function(a, b) { return b._hybrid_score - a._hybrid_score; });
 
-  console.log('하이브리드 검색 (키워드 확장 ' + expanded.length + '개 + trgm):', keywords.slice(0,10).join(', '), '->', results.length + '개 청크 (상위 10개 사용)');
-  return results.slice(0, 10);
+  console.log('3중 하이브리드 (키워드확장 ' + expanded.length + '개 + trgm + 시맨틱):', keywords.slice(0,10).join(', '), '->', results.length + '개 청크 (상위 12개 사용)');
+  return results.slice(0, 12);
 }
 
 function buildRagContext(chunks) {
@@ -245,7 +292,7 @@ function buildRagContext(chunks) {
     if (c.notice_no) meta.push('고시번호: ' + c.notice_no);
     if (c.effective_date) meta.push('시행일: ' + c.effective_date);
     var metaStr = meta.length ? ' [' + meta.join(' | ') + ']' : '';
-    var sim = c._trgm_score ? ' (trgm: ' + (c._trgm_score * 100).toFixed(0) + '%)' : '';
+    var sim = c._semantic_score ? ' (시맨틱: ' + (c._semantic_score * 100).toFixed(0) + '%)' : (c._trgm_score ? ' (trgm: ' + (c._trgm_score * 100).toFixed(0) + '%)' : '');
     return '[참조 ' + (i+1) + '] 출처: ' + c.doc_name + ' (' + c.doc_category + ')' + metaStr + sim + '\n' + c.content;
   });
   return '\n\n---\n\n[RAG 검색 결과 — 질문과 관련된 실제 법령·고시 원문]\n아래 내용은 질문과 의미적으로 유사한 문서 청크를 검색한 결과입니다. 반드시 아래 원문을 최우선으로 인용하고, 조항 번호와 내용이 일치하는지 확인하여 답변하세요:\n\n' + items.join('\n\n---\n\n');
