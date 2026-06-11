@@ -16,13 +16,19 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
-VOYAGE_API_KEY = "pa-H5qAIUjzNlPjlJaYHRg9j3BnFnQ6jMDgdKB1of9s6Qf"
+VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY")  # .env에 보관 (공개 repo에 하드코딩 금지!)
 
 VOYAGE_MODEL    = "voyage-4-lite"
 EMBED_DIM       = 1024
+
+# ── 결제수단 등록 여부에 따라 한도가 완전히 다름 ──
+#   Tier 1 (Voyage 대시보드에 카드 등록, 무료 2억 토큰은 그대로 유지):
+#     voyage-4-lite = 2000 RPM / 16M TPM → 아래 기본값으로 ~5분 내 완료
+#   카드 미등록 (약 3 RPM / 10K TPM):
+#     VOYAGE_BATCH=4, SLEEP_SEC=21 로 변경 필요 → 전체 ~22시간 소요
 VOYAGE_BATCH    = 100   # Voyage API 배치 크기
 FETCH_BATCH     = 500   # Supabase에서 한 번에 가져올 청크 수
-SLEEP_SEC       = 0.3   # 배치 간 대기 (rate-limit 여유)
+SLEEP_SEC       = 0.5   # 배치 간 대기
 
 
 # ── Supabase REST helpers ─────────────────────────────────
@@ -124,6 +130,9 @@ def main():
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         print("오류: .env에 SUPABASE_URL, SUPABASE_SERVICE_KEY가 없습니다.")
         return
+    if not VOYAGE_API_KEY:
+        print("오류: .env에 VOYAGE_API_KEY가 없습니다. (VOYAGE_API_KEY=pa-... 형식으로 추가)")
+        return
 
     total = count_null_embeddings()
     print(f"임베딩 없는 청크: {total:,}개 (모델: {VOYAGE_MODEL}, {EMBED_DIM}차원)")
@@ -132,11 +141,13 @@ def main():
         return
 
     processed = 0
-    offset = 0
     errors = 0
+    perm_failed = 0  # 재시도 소진으로 건너뛴 청크 수
+    # 주의: is.null 필터라서 성공한 행은 다음 조회에서 빠짐
+    #       → offset은 '영구 실패 수'만큼만 줘야 행 누락이 없음 (기존 offset 페이징은 버그)
 
     while True:
-        chunks = fetch_chunks(offset, FETCH_BATCH)
+        chunks = fetch_chunks(perm_failed, FETCH_BATCH)
         if not chunks:
             break
 
@@ -146,7 +157,8 @@ def main():
             ids   = [c["id"]      for c in batch]
 
             retry = 0
-            while retry < 3:
+            ok = False
+            while retry < 5:
                 try:
                     embeddings = get_voyage_embeddings(texts)
                     batch_update_rpc(ids, embeddings)
@@ -154,24 +166,33 @@ def main():
                     pct = processed / total * 100
                     print(f"  {processed:>6,}/{total:,} ({pct:5.1f}%)  "
                           f"id {ids[0]}~{ids[-1]}      ", end="\r")
+                    ok = True
                     break
                 except requests.HTTPError as e:
                     retry += 1
                     errors += 1
-                    wait = 5 * retry
-                    print(f"\n  HTTP 오류 (재시도 {retry}/3, {wait}s 대기): {e}")
+                    # 429: Retry-After 헤더 우선, 없으면 지수 대기
+                    if e.response is not None and e.response.status_code == 429:
+                        ra = e.response.headers.get("Retry-After")
+                        wait = int(ra) + 1 if ra else min(30 * retry, 120)
+                    else:
+                        wait = 5 * retry
+                    print(f"\n  HTTP 오류 (재시도 {retry}/5, {wait}s 대기): {e}")
                     time.sleep(wait)
                 except Exception as e:
                     retry += 1
                     errors += 1
-                    print(f"\n  오류 (재시도 {retry}/3): {e}")
+                    print(f"\n  오류 (재시도 {retry}/5): {e}")
                     time.sleep(3)
+
+            if not ok:
+                perm_failed += len(batch)
+                print(f"\n  ⚠️ {len(batch)}개 청크 건너뜀 (id {ids[0]}~{ids[-1]})")
 
             time.sleep(SLEEP_SEC)
 
-        offset += len(chunks)
-        if len(chunks) < FETCH_BATCH:
-            break
+    if perm_failed:
+        print(f"\n⚠️ 영구 실패 {perm_failed}개 — 스크립트를 다시 실행하면 재시도됩니다.")
 
     print(f"\n\n✅ 완료! {processed:,}개 임베딩 저장 (오류: {errors}개)")
     create_hnsw_index()
