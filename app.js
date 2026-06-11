@@ -1897,7 +1897,6 @@ function _computeDiff(beforeText, afterText) {
   var bChunks = toChunks(beforeText);
   var aChunks = toChunks(afterText);
 
-  // 첫 50자를 키로 사용해 추가/삭제 분류
   function key(s) { return s.replace(/\s+/g,' ').slice(0,60); }
   var bKeys = new Set(bChunks.map(key));
   var aKeys = new Set(aChunks.map(key));
@@ -1905,22 +1904,83 @@ function _computeDiff(beforeText, afterText) {
   var removed  = bChunks.filter(function(c) { return !aKeys.has(key(c)); });
   var added    = aChunks.filter(function(c) { return !bKeys.has(key(c)); });
 
-  return { removed: removed, added: added };
+  // 같은 조문 번호(제n조/제n조의m)끼리 짝지어 '변경'으로 분류
+  function artKey(s) {
+    var m = s.match(/^제\s*(\d+)\s*조(?:\s*의\s*(\d+))?/);
+    return m ? m[1] + (m[2] ? '의' + m[2] : '') : null;
+  }
+  var changed = [];
+  var addedByArt = {};
+  added.forEach(function(c) {
+    var k = artKey(c);
+    if (k && !addedByArt[k]) addedByArt[k] = c;
+  });
+  var stillRemoved = [];
+  removed.forEach(function(c) {
+    var k = artKey(c);
+    if (k && addedByArt[k]) {
+      changed.push({ art: k, before: c, after: addedByArt[k] });
+      delete addedByArt[k];
+    } else {
+      stillRemoved.push(c);
+    }
+  });
+  var changedAfters = new Set(changed.map(function(p){ return p.after; }));
+  var stillAdded = added.filter(function(c) { return !changedAfters.has(c); });
+
+  return { changed: changed, removed: stillRemoved, added: stillAdded };
+}
+
+// 단어 단위 LCS diff → 변경 부분 하이라이트 HTML 쌍 반환 (너무 길면 null)
+function _tokenDiff(a, b) {
+  function esc(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  var at = a.split(/(\s+)/), bt = b.split(/(\s+)/);
+  var n = at.length, m = bt.length;
+  if (n * m > 250000) return null;
+  var dp = new Array(n + 1);
+  for (var i = n; i >= 0; i--) dp[i] = new Array(m + 1).fill(0);
+  for (var i = n - 1; i >= 0; i--)
+    for (var j = m - 1; j >= 0; j--)
+      dp[i][j] = at[i] === bt[j] ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
+  var DEL = '<mark style="background:rgba(239,68,68,.22);color:#991b1b;text-decoration:line-through;border-radius:2px">';
+  var ADD = '<mark style="background:rgba(34,197,94,.22);color:#14532d;border-radius:2px">';
+  var outB = '', outA = '', i = 0, j = 0;
+  while (i < n && j < m) {
+    if (at[i] === bt[j]) { outB += esc(at[i]); outA += esc(bt[j]); i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) { outB += at[i].trim() ? DEL + esc(at[i]) + '</mark>' : esc(at[i]); i++; }
+    else { outA += bt[j].trim() ? ADD + esc(bt[j]) + '</mark>' : esc(bt[j]); j++; }
+  }
+  while (i < n) { outB += at[i].trim() ? DEL + esc(at[i]) + '</mark>' : esc(at[i]); i++; }
+  while (j < m) { outA += bt[j].trim() ? ADD + esc(bt[j]) + '</mark>' : esc(bt[j]); j++; }
+  return { beforeHtml: outB, afterHtml: outA };
 }
 
 function _renderDiffView(diffResult) {
   var el = document.getElementById('diff-view');
   if (!el) return;
+  var changed = diffResult.changed || [];
   var removed = diffResult.removed;
   var added   = diffResult.added;
 
-  if (removed.length === 0 && added.length === 0) {
+  if (changed.length === 0 && removed.length === 0 && added.length === 0) {
     el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:8px">변경된 조문이 자동 감지되지 않았습니다.<br>조문 형식이 다른 경우 아래 AI 분석 결과를 참고하세요.</div>';
     return;
   }
 
   function esc(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   var html = '';
+
+  // 변경된 조문: 같은 조문 번호 짝 → 단어 단위 하이라이트
+  changed.forEach(function(p) {
+    var td = _tokenDiff(p.before.slice(0, 1500), p.after.slice(0, 1500));
+    var bHtml = td ? td.beforeHtml : esc(p.before.slice(0, 400)) + (p.before.length > 400 ? '…' : '');
+    var aHtml = td ? td.afterHtml  : esc(p.after.slice(0, 400))  + (p.after.length > 400 ? '…' : '');
+    html += '<div style="background:rgba(245,158,11,.06);border-left:3px solid #f59e0b;padding:6px 10px;margin-bottom:4px;border-radius:0 4px 4px 0">' +
+      '<div style="font-size:10px;font-weight:700;color:#d97706;margin-bottom:4px">✎ 변경 — 제' + esc(p.art) + '조</div>' +
+      '<div style="font-size:11px;color:var(--text-secondary);white-space:pre-wrap;line-height:1.6;margin-bottom:6px"><span style="font-size:10px;font-weight:700;color:#ef4444">변경 전</span><br>' + bHtml + '</div>' +
+      '<div style="font-size:11px;color:var(--text-primary);white-space:pre-wrap;line-height:1.6"><span style="font-size:10px;font-weight:700;color:#16a34a">변경 후</span><br>' + aHtml + '</div>' +
+    '</div>';
+  });
 
   removed.forEach(function(c) {
     html += '<div style="background:rgba(239,68,68,.07);border-left:3px solid #ef4444;padding:6px 10px;margin-bottom:4px;border-radius:0 4px 4px 0">' +
@@ -1958,9 +2018,14 @@ async function runDiffAnalysis() {
     var diffResult = _computeDiff(diffState.before.text, diffState.after.text);
     _renderDiffView(diffResult);
 
-    // Claude 호출 (앞 4000자씩 — 실무 법령 기준 충분한 분량)
-    var bExcerpt = diffState.before.text.slice(0, 4000);
-    var aExcerpt = diffState.after.text.slice(0, 4000);
+    // Claude 호출 — 자동 추출된 변경 조문 전체를 전달 (문서 전체 커버, 4000자 절단 문제 해결)
+    var diffParts = [];
+    (diffResult.changed || []).forEach(function(p) {
+      diffParts.push('[변경 — 제' + p.art + '조]\n(변경 전)\n' + p.before + '\n(변경 후)\n' + p.after);
+    });
+    diffResult.removed.forEach(function(c) { diffParts.push('[삭제된 조문]\n' + c); });
+    diffResult.added.forEach(function(c) { diffParts.push('[신설된 조문]\n' + c); });
+    var diffText = diffParts.join('\n\n').slice(0, 24000);
 
     var sysMsg =
       'SK텔레콤 Comm센터 기술정책팀 전파정책 전문가 수석 위원. ' +
@@ -1972,16 +2037,29 @@ async function runDiffAnalysis() {
       '<actions>팀 대응 액션 아이템 (각 항목을 || 로 구분)</actions>\n' +
       '<urgency>즉시대응/금주검토/중장기검토 중 하나</urgency>';
 
-    var userMsg =
-      '[파일명: ' + diffState.before.name + ' → ' + diffState.after.name + ']\n\n' +
-      '[개정 전]\n' + bExcerpt + '\n\n' +
-      '[개정 후]\n' + aExcerpt;
+    var userMsg;
+    if (diffText) {
+      userMsg =
+        '[파일명: ' + diffState.before.name + ' → ' + diffState.after.name + ']\n\n' +
+        '아래는 두 문서 전체를 조문 단위로 비교해 자동 추출한 변경 사항이다:\n\n' + diffText;
+    } else {
+      // 자동 diff 미감지 시 원문 발췌 비교로 폴백
+      userMsg =
+        '[파일명: ' + diffState.before.name + ' → ' + diffState.after.name + ']\n\n' +
+        '(조문 단위 자동 비교가 감지되지 않아 원문 발췌를 비교한다)\n\n' +
+        '[개정 전]\n' + diffState.before.text.slice(0, 8000) + '\n\n' +
+        '[개정 후]\n' + diffState.after.text.slice(0, 8000);
+    }
 
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2500, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
     });
+    if (!res.ok) {
+      var errBody = await res.json().catch(function() { return {}; });
+      throw new Error((errBody.error && errBody.error.message) || ('Claude API 오류 (HTTP ' + res.status + ')'));
+    }
     var data = await res.json();
     var txt = (data.content && data.content[0] && data.content[0].text) || '';
 
