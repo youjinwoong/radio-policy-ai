@@ -783,10 +783,82 @@ async function callClaude(userText) {
 //  Chat UI
 // ════════════════════════════════════════════
 function renderMd(text) {
-  return text
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = s => esc(s)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .split('\n\n').map(p => p ? `<p>${p.replace(/\n/g,'<br>')}</p>` : '').join('');
+    .replace(/`(.+?)`/g, '<code>$1</code>');
+  const splitRow = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+
+  const lines = text.split('\n');
+  let html = '', para = [], i = 0;
+  const flush = () => {
+    if (para.length) { html += '<p>' + para.map(inline).join('<br>') + '</p>'; para = []; }
+  };
+
+  while (i < lines.length) {
+    const t = lines[i].trim();
+
+    // 표: |헤더| 다음 줄이 |---|---| 구분선
+    if (t.startsWith('|') && i + 1 < lines.length && /^\|?[\s:|-]+\|?$/.test(lines[i + 1].trim()) && lines[i + 1].includes('-')) {
+      flush();
+      const head = splitRow(t);
+      i += 2;
+      let body = '';
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        const cells = splitRow(lines[i]);
+        body += '<tr>' + head.map((_, c) => '<td>' + inline(cells[c] || '') + '</td>').join('') + '</tr>';
+        i++;
+      }
+      html += '<div class="md-table-wrap"><table><thead><tr>' +
+        head.map(h => '<th>' + inline(h) + '</th>').join('') +
+        '</tr></thead><tbody>' + body + '</tbody></table></div>';
+      continue;
+    }
+
+    // 제목 (# ~ ####)
+    const h = t.match(/^(#{1,4})\s+(.*)/);
+    if (h) {
+      flush();
+      const lv = Math.min(h[1].length + 2, 6);
+      html += `<h${lv}>${inline(h[2])}</h${lv}>`;
+      i++; continue;
+    }
+
+    // 구분선
+    if (/^(-{3,}|\*{3,})$/.test(t)) { flush(); html += '<hr>'; i++; continue; }
+
+    // 글머리 목록
+    if (/^[-*]\s+/.test(t)) {
+      flush();
+      let items = '';
+      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+        items += '<li>' + inline(lines[i].trim().replace(/^[-*]\s+/, '')) + '</li>';
+        i++;
+      }
+      html += '<ul>' + items + '</ul>';
+      continue;
+    }
+
+    // 번호 목록
+    if (/^\d+[.)]\s+/.test(t)) {
+      flush();
+      const start = parseInt(t, 10);
+      let items = '';
+      while (i < lines.length && /^\d+[.)]\s+/.test(lines[i].trim())) {
+        items += '<li>' + inline(lines[i].trim().replace(/^\d+[.)]\s+/, '')) + '</li>';
+        i++;
+      }
+      html += `<ol start="${start}">` + items + '</ol>';
+      continue;
+    }
+
+    if (t === '') { flush(); i++; continue; }
+
+    para.push(lines[i]);
+    i++;
+  }
+  flush();
+  return html;
 }
 
 function appendMsg(role, text) {
@@ -3020,54 +3092,4 @@ async function doPdfUpload() {
         });
       }
 
-      // 7. 법령·고시 또는 ITU-R면 화면 목록에 추가
-      if (_pdfUploadCtx === 'law' || _pdfUploadCtx === 'itu') {
-        var listEl = document.getElementById(_pdfUploadCtx === 'itu' ? 'itu-upload-list' : 'law-upload-list');
-        if (listEl) {
-          var item = document.createElement('div');
-          item.className = 'card';
-          item.style.cssText = 'cursor:default;margin-bottom:10px';
-          item.innerHTML = '<div class="file-item">' +
-            '<div class="file-icon fi-purple"><i class="ti ti-file-upload"></i></div>' +
-            '<div style="flex:1"><div class="file-name">' + thisDocName + '</div>' +
-            '<div class="file-size">' + category + ' · 직접 업로드 · ' + allRows.length + '개 청크</div></div>' +
-            '<span class="badge badge-teal">최신</span>' +
-            '</div>';
-          listEl.appendChild(item);
-        }
-      }
-    } // end for files
-
-    // 보도자료 목록 갱신
-    if (_pdfUploadCtx === 'press') {
-      renderPressList(null);
-    }
-
-    _setPdfProgress(100, '완료!');
-    setTimeout(function() {
-      closePdfUpload();
-      var msg = totalFiles === 1
-        ? '✅ "' + (docName || files[0].name.replace(/\.[^.]+$/, '')) + '" 업로드 완료!\n' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.'
-        : '✅ ' + totalFiles + '개 파일 업로드 완료!\n총 ' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.';
-      alert(msg);
-    }, 400);
-
-  } catch(e) {
-    alert('업로드 실패: ' + (e.message || e));
-    btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-upload"></i> 업로드';
-    prog.style.display = 'none';
-  }
-}
-
-// ════════════════════════════════════════════
-//  앱 초기화
-// ════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', function() {
-  initSupabase();
-  updateStatusDots();
-  loadSettingsUI();
-  loadPressJSON();
-  loadRemoteConfig().then(function() { loadNews(); });
-  setTimeout(autoExtractTermsIfNeeded, 60000);
-});
+      // 7. 법령·고시
