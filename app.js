@@ -650,9 +650,9 @@ async function searchCustomKnowledge(query) {
     if (results.length === 0) return '';
     var lines = ['\n\n[팀 내부 추가 지식 — 검증 완료]'];
     results.slice(0, 3).forEach(function(r, i) {
-      var excerpt = (r.content || '').slice(0, 800);
+      var excerpt = (r.content || '').slice(0, 2500);
       lines.push('■ [' + (r.category || '일반') + '] ' + r.title);
-      lines.push('  ' + excerpt + (r.content.length > 800 ? '...' : ''));
+      lines.push('  ' + excerpt + (r.content.length > 2500 ? '...' : ''));
     });
     lines.push('(위 내부 지식을 우선 참고하여 답변하세요.)');
     return lines.join('\n');
@@ -3162,4 +3162,4 @@ document.addEventListener('DOMContentLoaded', function() {
   loadPressJSON();
   loadRemoteConfig().then(function() { loadNews(); });
   setTimeout(autoExtractTermsIfNeeded, 60000);
-});
+})
