@@ -1133,6 +1133,12 @@ function closeChatHistory() {
   document.getElementById('chat-history-modal').style.display = 'none';
 }
 
+// 홈 대시보드 최근 자문 카드 → 이력 모달 열고 바로 상세 표시
+function openChatHistoryDetail(id) {
+  document.getElementById('chat-history-modal').style.display = 'flex';
+  viewChatHistoryItem(id);
+}
+
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const btn = document.getElementById('send-btn');
@@ -1229,7 +1235,7 @@ async function refreshDashboard() {
     document.getElementById('stat-news-sub').textContent = '미확인 뉴스';
 
     const { data: logs } = await sb.from('chat_logs')
-      .select('question, category, created_at')
+      .select('id, question, category, created_at')
       .order('created_at', { ascending: false })
       .limit(3);
 
@@ -1238,7 +1244,7 @@ async function refreshDashboard() {
       container.innerHTML = logs.map(l => {
         const date = new Date(l.created_at).toLocaleDateString('ko-KR', {month:'2-digit',day:'2-digit'});
         const catColor = { '주파수':'badge-purple','전자파':'badge-blue','ITU-R':'badge-blue','적합성평가':'badge-teal','기술기준':'badge-teal','일반':'badge-amber' };
-        return `<div class="card" style="cursor:default;margin-bottom:8px">
+        return `<div class="card" style="cursor:pointer;margin-bottom:8px" onclick="openChatHistoryDetail('${l.id}')">
           <div class="card-header"><span class="card-title" style="font-size:12px">${l.question.slice(0,40)}${l.question.length>40?'…':''}</span><span class="badge ${catColor[l.category]||'badge-amber'}">${l.category||'일반'}</span></div>
           <div class="card-meta"><i class="ti ti-calendar"></i>${date}</div>
         </div>`;
