@@ -937,6 +937,75 @@ function detectCategory(t) {
   return '일반';
 }
 
+// ════════════════════════════════════════════
+//  자문 이력 (chat_logs 열람)
+// ════════════════════════════════════════════
+function chEsc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function chDate(iso) {
+  var d = new Date(iso);
+  var p = function(n) { return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+async function openChatHistory() {
+  var modal = document.getElementById('chat-history-modal');
+  var body = document.getElementById('chat-history-body');
+  modal.style.display = 'flex';
+  body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">불러오는 중...</div>';
+  if (!sb) { body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">Supabase 연결 없음</div>'; return; }
+  try {
+    var resp = await sb.from('chat_logs')
+      .select('id, question, category, created_at')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (resp.error) throw resp.error;
+    var data = resp.data || [];
+    if (data.length === 0) {
+      body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">저장된 자문 이력이 없습니다.</div>';
+      return;
+    }
+    body.innerHTML = data.map(function(item) {
+      return '<div class="card" style="cursor:pointer;margin-bottom:8px;padding:12px 14px" onclick="viewChatHistoryItem(' + item.id + ')">' +
+        '<div style="font-size:13px;font-weight:500;color:var(--text-primary);line-height:1.5">' + chEsc(item.question) + '</div>' +
+        '<div style="font-size:11px;color:var(--text-tertiary);margin-top:5px;display:flex;align-items:center;gap:8px">' +
+          '<span class="rag-tag">' + chEsc(item.category || '일반') + '</span>' + chDate(item.created_at) +
+        '</div></div>';
+    }).join('');
+    body.scrollTop = 0;
+  } catch(e) {
+    body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">이력 조회 실패: ' + chEsc(e.message) + '</div>';
+  }
+}
+
+async function viewChatHistoryItem(id) {
+  var body = document.getElementById('chat-history-body');
+  body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">불러오는 중...</div>';
+  try {
+    var resp = await sb.from('chat_logs')
+      .select('question, answer, category, created_at, sources')
+      .eq('id', id).single();
+    if (resp.error) throw resp.error;
+    var row = resp.data;
+    var srcHtml = '';
+    if (row.sources && row.sources.length > 0) {
+      srcHtml = '<div class="rag-sources" style="margin-top:12px"><i class="ti ti-book"></i> 참조: ' +
+        row.sources.slice(0, 6).map(function(s) { return '<span class="rag-tag">' + chEsc(s) + '</span>'; }).join(' ') + '</div>';
+    }
+    body.innerHTML =
+      '<button class="btn" onclick="openChatHistory()" style="margin-bottom:12px"><i class="ti ti-arrow-left"></i>목록으로</button>' +
+      '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.5">' + chEsc(row.question) + '</div>' +
+      '<div style="font-size:11px;color:var(--text-tertiary);margin:5px 0 12px"><span class="rag-tag">' + chEsc(row.category || '일반') + '</span> ' + chDate(row.created_at) + '</div>' +
+      '<div class="msg msg-ai" style="max-width:100%">' + renderMd(row.answer || '') + '</div>' + srcHtml;
+    body.scrollTop = 0;
+  } catch(e) {
+    body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">조회 실패: ' + chEsc(e.message) + '</div>';
+  }
+}
+
+function closeChatHistory() {
+  document.getElementById('chat-history-modal').style.display = 'none';
+}
+
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const btn = document.getElementById('send-btn');
