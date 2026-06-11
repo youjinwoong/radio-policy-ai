@@ -162,6 +162,18 @@ async function searchKeywords(query, lawOnly) {
   var seen = new Set();
   var results = [];
 
+  // trgm 유사도 검색 병렬 실행 (키워드 루프와 동시 진행)
+  var trgmPromise = null;
+  if (query && query.length >= 3) {
+    trgmPromise = sb.rpc('search_chunks_trgm', {
+      query_text: query,
+      match_threshold: 0.12,
+      match_count: 8
+    }).then(function(r) { return r.data || []; }).catch(function(e) {
+      console.warn('trgm 검색 오류:', e); return [];
+    });
+  }
+
   // 키워드별로 검색 (최대 10개 키워드, 키워드당 4청크)
   for (var ki = 0; ki < Math.min(keywords.length, 10); ki++) {
     var kw = keywords[ki];
@@ -169,7 +181,7 @@ async function searchKeywords(query, lawOnly) {
     try {
       var resp = await sb
         .from('document_chunks')
-        .select('id, doc_name, doc_category, content')
+        .select('id, doc_name, doc_category, chunk_index, content, notice_no, article_no, effective_date')
         .ilike('content', '%' + kw + '%')
         .limit(4);
       if (resp.data) {
@@ -184,7 +196,30 @@ async function searchKeywords(query, lawOnly) {
     } catch(e) { console.warn('키워드 검색 오류:', kw, e); }
   }
 
-  // 여러 키워드를 동시에 포함한 청크 우선 (관련도 점수, 기본 키워드 가중치 2배)
+  // trgm 결과 병합
+  if (trgmPromise) {
+    var trgmRows = await trgmPromise;
+    trgmRows.forEach(function(row) {
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        row._trgm_score = row.trgm_score || 0;
+        results.push(row);
+      } else {
+        for (var ri = 0; ri < results.length; ri++) {
+          if (results[ri].id === row.id) {
+            results[ri]._trgm_score = row.trgm_score || 0;
+            if (!results[ri].article_no && row.article_no) results[ri].article_no = row.article_no;
+            if (!results[ri].notice_no && row.notice_no) results[ri].notice_no = row.notice_no;
+            if (!results[ri].effective_date && row.effective_date) results[ri].effective_date = row.effective_date;
+            break;
+          }
+        }
+      }
+    });
+    console.log('trgm 검색:', trgmRows.length + '개 청크');
+  }
+
+  // 하이브리드 점수: 키워드 매칭(기본 키워드 가중치 2배) + trgm 유사도 보너스
   results.forEach(function(r) {
     var score = 0;
     for (var ki = 0; ki < Math.min(keywords.length, 10); ki++) {
@@ -194,18 +229,24 @@ async function searchKeywords(query, lawOnly) {
       if ((r.doc_name || '').toLowerCase().includes(kw)) score += w;
     }
     r._score = score;
+    r._hybrid_score = score + (r._trgm_score ? r._trgm_score * 5 : 0);
   });
-  results.sort(function(a, b) { return b._score - a._score; });
+  results.sort(function(a, b) { return b._hybrid_score - a._hybrid_score; });
 
-  console.log('키워드 검색 (확장 ' + expanded.length + '개 포함):', keywords.slice(0,10).join(', '), '->', results.length + '개 청크 (상위 8개 사용)');
-  return results.slice(0, 8);
+  console.log('하이브리드 검색 (키워드 확장 ' + expanded.length + '개 + trgm):', keywords.slice(0,10).join(', '), '->', results.length + '개 청크 (상위 10개 사용)');
+  return results.slice(0, 10);
 }
 
 function buildRagContext(chunks) {
   if (!chunks || chunks.length === 0) return '';
   const items = chunks.map(function(c, i) {
-    var sim = c.similarity ? ' (유사도: ' + (c.similarity * 100).toFixed(0) + '%)' : '';
-    return '[참조 ' + (i+1) + '] 출처: ' + c.doc_name + ' (' + c.doc_category + ')' + sim + '\n' + c.content;
+    var meta = [];
+    if (c.article_no) meta.push('조항: ' + c.article_no);
+    if (c.notice_no) meta.push('고시번호: ' + c.notice_no);
+    if (c.effective_date) meta.push('시행일: ' + c.effective_date);
+    var metaStr = meta.length ? ' [' + meta.join(' | ') + ']' : '';
+    var sim = c._trgm_score ? ' (trgm: ' + (c._trgm_score * 100).toFixed(0) + '%)' : '';
+    return '[참조 ' + (i+1) + '] 출처: ' + c.doc_name + ' (' + c.doc_category + ')' + metaStr + sim + '\n' + c.content;
   });
   return '\n\n---\n\n[RAG 검색 결과 — 질문과 관련된 실제 법령·고시 원문]\n아래 내용은 질문과 의미적으로 유사한 문서 청크를 검색한 결과입니다. 반드시 아래 원문을 최우선으로 인용하고, 조항 번호와 내용이 일치하는지 확인하여 답변하세요:\n\n' + items.join('\n\n---\n\n');
 }
