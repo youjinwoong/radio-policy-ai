@@ -93,7 +93,7 @@ function initSupabase() {
 }
 
 // ════════════════════════════════════════════
-//  RAG — 키워드 기반 Supabase 검색 (Voyage AI 불필요)
+//  RAG — 키워드 검색 + Haiku 쿼리 확장 (동의어·법령 용어)
 // ════════════════════════════════════════════
 let lastRagSources = [];
 
@@ -120,17 +120,50 @@ function extractKeywords(text) {
   return all.filter(function(v, i, a) { return a.indexOf(v) === i; }).slice(0, 5);
 }
 
+// 쿼리 확장 — Haiku로 동의어·법령 공식 용어 키워드 생성 (실패 시 빈 배열 → 기존 키워드만 사용)
+async function expandQueryKeywords(query) {
+  try {
+    var { claudeKey } = getConfig();
+    if (!claudeKey) return [];
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        system: '당신은 한국 전파·통신 법령 검색 전문가입니다. 사용자 질문을 법령·고시 원문에서 실제 쓰이는 공식 용어로 확장합니다.',
+        messages: [{ role: 'user', content: '다음 질문을 법령·고시 문서 검색용 키워드로 확장해줘. 질문 표현과 다른 동의어, 법령 공식 용어, 관련 조문 주제어 위주로 6~8개. 쉼표로만 구분해 한 줄로 출력하고 설명은 금지:\n\n' + query }]
+      })
+    });
+    if (!res.ok) return [];
+    var data = await res.json();
+    var text = (data.content && data.content[0] && data.content[0].text) || '';
+    return text.split(',')
+      .map(function(w) { return w.trim().replace(/^["'\d\.\)\s]+|["'\s]+$/g, ''); })
+      .filter(function(w) { return w.length >= 2 && w.length <= 25; })
+      .slice(0, 8);
+  } catch(e) { console.warn('쿼리 확장 실패 (기본 키워드로 진행):', e); return []; }
+}
+
 async function searchKeywords(query, lawOnly) {
   if (!sb) return [];
   if (lawOnly === undefined) lawOnly = false;
-  var keywords = extractKeywords(query);
+  var baseKeywords = extractKeywords(query);
+  var expanded = await expandQueryKeywords(query);
+  // 기본 키워드 우선 + 확장 키워드 보강 (공백 제거·소문자 정규화로 중복 제거)
+  var keywords = [];
+  var seenKw = new Set();
+  baseKeywords.concat(expanded).forEach(function(w) {
+    var norm = w.replace(/\s+/g, '').toLowerCase();
+    if (norm.length >= 2 && !seenKw.has(norm)) { seenKw.add(norm); keywords.push(w); }
+  });
   if (keywords.length === 0) return [];
 
   var seen = new Set();
   var results = [];
 
-  // 키워드별로 검색 (최대 5개 키워드, 키워드당 4청크)
-  for (var ki = 0; ki < Math.min(keywords.length, 5); ki++) {
+  // 키워드별로 검색 (최대 10개 키워드, 키워드당 4청크)
+  for (var ki = 0; ki < Math.min(keywords.length, 10); ki++) {
     var kw = keywords[ki];
     if (kw.length < 2) continue;
     try {
@@ -151,20 +184,21 @@ async function searchKeywords(query, lawOnly) {
     } catch(e) { console.warn('키워드 검색 오류:', kw, e); }
   }
 
-  // 여러 키워드를 동시에 포함한 청크 우선 (관련도 점수)
+  // 여러 키워드를 동시에 포함한 청크 우선 (관련도 점수, 기본 키워드 가중치 2배)
   results.forEach(function(r) {
     var score = 0;
-    for (var ki = 0; ki < Math.min(keywords.length, 5); ki++) {
+    for (var ki = 0; ki < Math.min(keywords.length, 10); ki++) {
       var kw = keywords[ki].toLowerCase();
-      if ((r.content || '').toLowerCase().includes(kw)) score += 1;
-      if ((r.doc_name || '').toLowerCase().includes(kw)) score += 1;
+      var w = baseKeywords.includes(keywords[ki]) ? 2 : 1;
+      if ((r.content || '').toLowerCase().includes(kw)) score += w;
+      if ((r.doc_name || '').toLowerCase().includes(kw)) score += w;
     }
     r._score = score;
   });
   results.sort(function(a, b) { return b._score - a._score; });
 
-  console.log('키워드 검색:', keywords.slice(0,5).join(', '), '->', results.length + '개 청크 (상위 6개 사용)');
-  return results.slice(0, 6);
+  console.log('키워드 검색 (확장 ' + expanded.length + '개 포함):', keywords.slice(0,10).join(', '), '->', results.length + '개 청크 (상위 8개 사용)');
+  return results.slice(0, 8);
 }
 
 function buildRagContext(chunks) {
