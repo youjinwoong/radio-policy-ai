@@ -3136,4 +3136,26 @@ async function doPdfUpload() {
       closePdfUpload();
       var msg = totalFiles === 1
         ? '✅ "' + (docName || files[0].name.replace(/\.[^.]+$/, '')) + '" 업로드 완료!\n' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.'
-   
+        : '✅ ' + totalFiles + '개 파일 업로드 완료!\n총 ' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.';
+      alert(msg);
+    }, 400);
+
+  } catch(e) {
+    alert('업로드 실패: ' + (e.message || e));
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-upload"></i> 업로드';
+    prog.style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════
+//  앱 초기화
+// ════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+  initSupabase();
+  updateStatusDots();
+  loadSettingsUI();
+  loadPressJSON();
+  loadRemoteConfig().then(function() { loadNews(); });
+  setTimeout(autoExtractTermsIfNeeded, 60000);
+});
