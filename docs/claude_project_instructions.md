@@ -1,5 +1,9 @@
 # 전파정책 AI 프로젝트 — Claude Project 지침
 
+## 지침 관리 규칙
+
+- **지침을 변경해야 할 때는 변경분 요약이 아니라, 변경이 반영된 전체 지침 텍스트를 제공할 것** (사용자가 그대로 복사해 Project 설정에 붙여넣을 수 있도록)
+
 ## 프로젝트 개요
 
 SKT Comm센터 기술정책팀의 전파·통신 정책 모니터링 자동화 시스템입니다.
@@ -19,7 +23,9 @@ C:\Users\SKTelecom\Desktop\frequence\radio-policy-ai\
 ├── resend_briefing.py      # 특정 날짜 브리핑 즉시 재발송 (수동 실행용)
 ├── send_briefing.py        # 브리핑 발송 단독 스크립트
 ├── run_gov_crawler.bat     # gov_notice_crawler.py 배치 실행 파일
+├── run_briefing_backup.bat # 모닝 브리핑 로컬 백업 배치 실행 파일
 ├── setup_scheduler.ps1     # Windows 작업 스케줄러 등록 스크립트
+├── setup_briefing_backup.ps1 # 브리핑 로컬 백업 작업 스케줄러 등록 스크립트
 ├── system_prompt.js        # 대시보드 AI 자문 시스템 프롬프트 관리
 ├── index.html / app.js     # 대시보드 프론트엔드 (GitHub Pages)
 └── .github/workflows/
@@ -94,6 +100,15 @@ RadioPolicy-RefetchContent (매시간):
   역할: 국립전파연구원·과기정통부·방통위 고시·예규·입법예고 수집
   특이사항: curl_cffi TLS 지문 위장으로 정부 사이트 봇 차단 우회 (한국 IP 필수)
 
+RadioPolicy-BriefingBackup (매일 09:40):
+  run_briefing_backup.bat → python morning_briefing.py
+  역할: GitHub Actions 스케줄 전체 누락 대비 로컬 백업
+    (2026-06-11 브리핑 3중 cron + daily_crawl 백업까지 전부 skip된 사례 확인)
+  already_sent_today()가 중복 발송 차단 → GitHub 정상 발송 시 아무것도 안 함
+  09:40에 PC 꺼져 있었으면 부팅 직후 실행 (StartWhenAvailable)
+  로그: briefing_backup_log.txt
+  재등록: setup_briefing_backup.ps1 실행 (관리자 PowerShell)
+
 ⚠️ Cowork 예약 태스크(radio-policy-crawler, gov-notice-crawler)는
    모두 비활성화 → Windows 작업 스케줄러로 전환 완료
 ```
@@ -116,7 +131,8 @@ cron: '3 23 * * *'  → 08:03 KST (1차)
   → 텔레그램 발송 (4000자 제한) + Resend API 이메일
 
 ⚠️ GitHub Actions 스케줄은 이 repo에서 상시 1~2시간(최대 반나절) 지연되거나
-   누락됨이 확인됨 (2026-06-10 조사). 위 3중 cron + daily_crawl 백업이 보완책.
+   누락됨이 확인됨 (2026-06-10 조사). 2026-06-11에는 3중 cron + daily_crawl
+   백업까지 하루 전체가 skip된 사례도 확인 → 로컬 백업(09:40)이 최종 안전망.
 
 긴급 표시(🔴) 규칙:
   - SKT 또는 국내 사업에 직접적인 영향이 있는 기사에만 사용
@@ -169,6 +185,9 @@ git push origin main
 # git lock 오류 발생 시
 del .git\HEAD.lock && git commit -m "..." && git push origin main
 
+# 샌드박스에서 Edit 변경이 git에 "변경 없음"으로 보일 때 (mtime 미갱신)
+touch [파일명] 후 git add/commit
+
 # 브리핑 수동 재발송 (오늘)
 python resend_briefing.py
 
@@ -192,6 +211,7 @@ python upload_law_pdf.py 파일.pdf "문서명" 고시
 2. 실패 시 → "Run workflow" 수동 실행 (Actions가 가끔 cron skip함)
 3. Actions 로그에서 `[텔레그램]`, `[Resend]` 라인 확인
 4. 성공했는데 못 받았다면 → `python resend_briefing.py` 로컬 실행
+5. 09:40 이후에도 미수신 → `briefing_backup_log.txt` 확인 (로컬 백업 실행 여부)
 
 ## 하지 말아야 할 것
 
@@ -226,4 +246,3 @@ python upload_law_pdf.py 파일.pdf "문서명" 고시
 | Supabase | DB | 무료 500MB/프로젝트, 최대 2개 |
 | Resend | 이메일 발송 | 100통/일, 3,000통/월 |
 | Telegram Bot | 알림 | 무제한 |
-| 
