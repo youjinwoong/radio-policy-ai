@@ -104,8 +104,11 @@ function extractKeywords(text) {
     '무엇','언제','어디','왜','누가','대해','관해','통해','위해','따라','대한','관한',
     '통한','위한','있는','없는','하는','되는','인','이란','이라는','라는','라고',
     '이고','이며','하고','이나','이나','또는','그리고','하지만','그러나','따라서'];
+  // 조사 어미 제거 (예: "면허세에" → "면허세") — 잘린 어간도 ilike 부분일치로 검색됨
+  var josa = /(에서는|으로는|에서의|이라는|에서도|에서|에는|으로|로는|보다|부터|까지|처럼|마다|조차|밖에|은|는|이|가|을|를|의|에|와|과|도|만)$/;
   var words = text.split(/[\s,\.·\·\(\)\[\]\「\」\『\』\<\>\:;\!\?]+/)
     .map(function(w) { return w.replace(/[^가-힣a-zA-Z0-9\.]/g, '').trim(); })
+    .map(function(w) { var s = w.replace(josa, ''); return s.length >= 2 ? s : w; })
     .filter(function(w) { return w.length >= 2 && !stopwords.includes(w); });
   // 법령 키워드 우선 (조문번호, 주제어)
   var priority = words.filter(function(w) {
@@ -126,8 +129,8 @@ async function searchKeywords(query, lawOnly) {
   var seen = new Set();
   var results = [];
 
-  // 키워드별로 검색 (최대 3개 키워드)
-  for (var ki = 0; ki < Math.min(keywords.length, 3); ki++) {
+  // 키워드별로 검색 (최대 5개 키워드, 키워드당 4청크)
+  for (var ki = 0; ki < Math.min(keywords.length, 5); ki++) {
     var kw = keywords[ki];
     if (kw.length < 2) continue;
     try {
@@ -135,7 +138,7 @@ async function searchKeywords(query, lawOnly) {
         .from('document_chunks')
         .select('id, doc_name, doc_category, content')
         .ilike('content', '%' + kw + '%')
-        .limit(3);
+        .limit(4);
       if (resp.data) {
         for (var ri = 0; ri < resp.data.length; ri++) {
           var row = resp.data[ri];
@@ -147,8 +150,21 @@ async function searchKeywords(query, lawOnly) {
       }
     } catch(e) { console.warn('키워드 검색 오류:', kw, e); }
   }
-  console.log('키워드 검색:', keywords.slice(0,3).join(', '), '->', results.length + '개 청크');
-  return results.slice(0, 5);
+
+  // 여러 키워드를 동시에 포함한 청크 우선 (관련도 점수)
+  results.forEach(function(r) {
+    var score = 0;
+    for (var ki = 0; ki < Math.min(keywords.length, 5); ki++) {
+      var kw = keywords[ki].toLowerCase();
+      if ((r.content || '').toLowerCase().includes(kw)) score += 1;
+      if ((r.doc_name || '').toLowerCase().includes(kw)) score += 1;
+    }
+    r._score = score;
+  });
+  results.sort(function(a, b) { return b._score - a._score; });
+
+  console.log('키워드 검색:', keywords.slice(0,5).join(', '), '->', results.length + '개 청크 (상위 6개 사용)');
+  return results.slice(0, 6);
 }
 
 function buildRagContext(chunks) {
@@ -3120,26 +3136,4 @@ async function doPdfUpload() {
       closePdfUpload();
       var msg = totalFiles === 1
         ? '✅ "' + (docName || files[0].name.replace(/\.[^.]+$/, '')) + '" 업로드 완료!\n' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.'
-        : '✅ ' + totalFiles + '개 파일 업로드 완료!\n총 ' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.';
-      alert(msg);
-    }, 400);
-
-  } catch(e) {
-    alert('업로드 실패: ' + (e.message || e));
-    btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-upload"></i> 업로드';
-    prog.style.display = 'none';
-  }
-}
-
-// ════════════════════════════════════════════
-//  앱 초기화
-// ════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', function() {
-  initSupabase();
-  updateStatusDots();
-  loadSettingsUI();
-  loadPressJSON();
-  loadRemoteConfig().then(function() { loadNews(); });
-  setTimeout(autoExtractTermsIfNeeded, 60000);
-});
+   
