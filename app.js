@@ -777,7 +777,7 @@ async function callClaude(userText) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 16384,
       system: systemWithRag,
       messages: chatHistory
     })
@@ -792,6 +792,10 @@ async function callClaude(userText) {
   const data = await res.json();
   const aiText = data.content[0].text;
   chatHistory.push({ role: 'assistant', content: aiText });
+  // 길이 제한으로 잘린 경우 안내 (히스토리에는 원문만 저장 → "계속" 입력 시 이어서 생성)
+  if (data.stop_reason === 'max_tokens') {
+    return aiText + '\n\n---\n\n> ⚠️ 답변이 길이 제한으로 잘렸습니다. **"계속"**이라고 입력하면 이어서 답변합니다.';
+  }
   return aiText;
 }
 
@@ -3150,12 +3154,4 @@ async function doPdfUpload() {
 
 // ════════════════════════════════════════════
 //  앱 초기화
-// ════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', function() {
-  initSupabase();
-  updateStatusDots();
-  loadSettingsUI();
-  loadPressJSON();
-  loadRemoteConfig().then(function() { loadNews(); });
-  setTimeout(autoExtractTermsIfNeeded, 60000);
-});
+// ═════════════════�
