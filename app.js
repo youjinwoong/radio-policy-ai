@@ -763,7 +763,8 @@ async function callClaude(userText) {
   const ragContext    = buildRagContext(ragChunks);
   const customContext = await searchCustomKnowledge(userText);   // 팀 내부 추가 지식
   const newsContext   = await fetchRecentNewsContext(userText);  // 뉴스 본문+제목
-  const systemWithRag = SYSTEM_PROMPT + ragContext + customContext + newsContext;
+  const webSearchGuide = '\n\n---\n\n[웹 검색 도구 사용 지침]\n해외 규제·제도 비교, 최신 정책 동향 등 위 참조 자료(법령 RAG·추가 지식·뉴스)에 없는 사실 정보가 필요하면 web_search 도구로 확인 후 답변하세요. 특히 "한국 고유", "유일한", "주요국 중 한국만" 등 국가 간 비교 단정 표현은 검색으로 확인하기 전에는 사용하지 마세요. 국내 법령 해석은 RAG 원문을 최우선으로 하고 웹 검색은 보조로만 사용하세요.';
+  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + customContext + newsContext;
 
   chatHistory.push({ role: 'user', content: userText });
 
@@ -779,6 +780,7 @@ async function callClaude(userText) {
       model: 'claude-sonnet-4-6',
       max_tokens: 16384,
       system: systemWithRag,
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
       messages: chatHistory
     })
   });
@@ -790,11 +792,31 @@ async function callClaude(userText) {
   }
 
   const data = await res.json();
-  const aiText = data.content[0].text;
+  // 웹 검색 사용 시 content가 여러 블록(server_tool_use / web_search_tool_result / text)으로 구성됨
+  var aiText = '';
+  var cited = [];
+  var seenUrl = new Set();
+  (data.content || []).forEach(function(block) {
+    if (block.type === 'text') {
+      aiText += block.text;
+      (block.citations || []).forEach(function(c) {
+        if (c.url && !seenUrl.has(c.url)) {
+          seenUrl.add(c.url);
+          cited.push({ url: c.url, title: c.title || c.url });
+        }
+      });
+    }
+  });
   chatHistory.push({ role: 'assistant', content: aiText });
+  // 웹 검색 출처 표시
+  if (cited.length > 0) {
+    aiText += '\n\n---\n\n**🌐 웹 검색 출처:**\n\n' + cited.slice(0, 5).map(function(c) {
+      return '- [' + c.title.replace(/[\[\]]/g, '') + '](' + c.url + ')';
+    }).join('\n');
+  }
   // 길이 제한으로 잘린 경우 안내 (히스토리에는 원문만 저장 → "계속" 입력 시 이어서 생성)
   if (data.stop_reason === 'max_tokens') {
-    return aiText + '\n\n---\n\n> ⚠️ 답변이 길이 제한으로 잘렸습니다. **"계속"**이라고 입력하면 이어서 답변합니다.';
+    aiText += '\n\n---\n\n> ⚠️ 답변이 길이 제한으로 잘렸습니다. **"계속"**이라고 입력하면 이어서 답변합니다.';
   }
   return aiText;
 }
@@ -805,6 +827,7 @@ async function callClaude(userText) {
 function renderMd(text) {
   const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const inline = s => esc(s)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.+?)`/g, '<code>$1</code>');
   const splitRow = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
