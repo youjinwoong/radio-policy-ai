@@ -627,7 +627,7 @@ async function searchCustomKnowledge(query) {
     if (keywords.length === 0) return '';
     var seen = new Set();
     var results = [];
-    for (var ki = 0; ki < Math.min(keywords.length, 3); ki++) {
+    for (var ki = 0; ki < Math.min(keywords.length, 5); ki++) {
       var kw = keywords[ki];
       if (kw.length < 2) continue;
       try {
