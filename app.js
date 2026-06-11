@@ -3092,4 +3092,54 @@ async function doPdfUpload() {
         });
       }
 
-      // 7. 법령·고시
+      // 7. 법령·고시 또는 ITU-R면 화면 목록에 추가
+      if (_pdfUploadCtx === 'law' || _pdfUploadCtx === 'itu') {
+        var listEl = document.getElementById(_pdfUploadCtx === 'itu' ? 'itu-upload-list' : 'law-upload-list');
+        if (listEl) {
+          var item = document.createElement('div');
+          item.className = 'card';
+          item.style.cssText = 'cursor:default;margin-bottom:10px';
+          item.innerHTML = '<div class="file-item">' +
+            '<div class="file-icon fi-purple"><i class="ti ti-file-upload"></i></div>' +
+            '<div style="flex:1"><div class="file-name">' + thisDocName + '</div>' +
+            '<div class="file-size">' + category + ' · 직접 업로드 · ' + allRows.length + '개 청크</div></div>' +
+            '<span class="badge badge-teal">최신</span>' +
+            '</div>';
+          listEl.appendChild(item);
+        }
+      }
+    } // end for files
+
+    // 보도자료 목록 갱신
+    if (_pdfUploadCtx === 'press') {
+      renderPressList(null);
+    }
+
+    _setPdfProgress(100, '완료!');
+    setTimeout(function() {
+      closePdfUpload();
+      var msg = totalFiles === 1
+        ? '✅ "' + (docName || files[0].name.replace(/\.[^.]+$/, '')) + '" 업로드 완료!\n' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.'
+        : '✅ ' + totalFiles + '개 파일 업로드 완료!\n총 ' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.';
+      alert(msg);
+    }, 400);
+
+  } catch(e) {
+    alert('업로드 실패: ' + (e.message || e));
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-upload"></i> 업로드';
+    prog.style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════
+//  앱 초기화
+// ════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+  initSupabase();
+  updateStatusDots();
+  loadSettingsUI();
+  loadPressJSON();
+  loadRemoteConfig().then(function() { loadNews(); });
+  setTimeout(autoExtractTermsIfNeeded, 60000);
+});
