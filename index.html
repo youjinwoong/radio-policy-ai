@@ -106,7 +106,10 @@
             <div class="msg msg-ai">
               <div class="msg-name">전파정책 전문가 AI</div>
               안녕하세요. 전파법·관련 고시, ITU-R 권고, 최신 뉴스, 웹 검색, 그리고 팀이 직접 입력한 검증 지식을 종합하여 제3자 관점에서 객관적인 자문을 드립니다.<br><br>
-              📄 <strong>법령·고시 (RAG 검색 — 271개 문서, 15,000+ 청크)</strong><br>
+              🔎 <strong>3중 하이브리드 검색</strong> <span style="font-size:10px;color:var(--accent-blue)">NEW</span><br>
+              · ① AI 쿼리 확장(질문을 동의어·법령 공식 용어로 변환) ② 키워드·조문 유사도 검색 ③ 시맨틱 벡터 검색(표현이 달라도 의미로 매칭)<br>
+              · 답변에 조항 번호·고시번호·시행일을 함께 인용합니다.<br><br>
+              📄 <strong>법령·고시 (하이브리드 RAG — 271개 문서, 15,331청크 전체 임베딩)</strong><br>
               · 전파법·시행령·시행규칙, 주파수 분배표, 무선설비 기술기준, 전자파 기준, 적합성평가 고시<br>
               · 지방세법·시행령 (무선국 등록면허세 등) <span style="font-size:10px;color:var(--accent-blue)">NEW</span><br>
               · ITU-R M.2150-3(5G) / M.2160-0(6G) / M.1036-8 / SM.329-13 등 6종<br>
@@ -756,6 +759,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612"></script>
-<script src="app.js?v=20260612b"></script>
+<script src="app.js?v=20260612c"></script>
 </body>
 </html>

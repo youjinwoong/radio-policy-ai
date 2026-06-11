@@ -2613,7 +2613,7 @@ function updateStatusDots() {
   if (ragDot) ragDot.style.background = ragOk ? 'var(--green)' : '#d1d5db';
   if (sbStatus) sbStatus.textContent = sbOk ? 'Supabase 연결됨' : 'Supabase 미연결';
   if (aiStatus) aiStatus.textContent = aiOk ? 'Claude API 설정됨' : 'Claude API 미설정';
-  if (ragStatus) ragStatus.textContent = ragOk ? 'RAG 활성 (키워드 검색)' : 'RAG 키워드 검색';
+  if (ragStatus) ragStatus.textContent = ragOk ? 'RAG 활성 (하이브리드 검색)' : 'RAG 하이브리드 검색';
 }
 
 // ════════════════════════════════════════════
