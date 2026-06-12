@@ -1291,7 +1291,7 @@ let selectedNewsId = null;   // 현재 선택된 뉴스 id
 var IMPORTANCE_RULES = {
   긴급: {
     color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: '2px solid #ef4444',
-    label: '🔴 긴급', badge_class: 'badge-red',
+    label: '🔴 중요', badge_class: 'badge-red',
     desc: '즉각 임원 보고 및 대관 대응 필요',
     keywords: ['취소','회수','처분','반납','강제','의무화','시정명령','이행강제','과징금',
                '청문','위반','제재','즉시','긴급','주파수 반납','할당 취소','할당취소',
@@ -1636,7 +1636,7 @@ function _impSelHtml(newsId, current) {
     var act = (current === v);
     return '<span onclick="setNewsImportance(\'' + newsId + '\',\'' + v + '\')" ' +
       'style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:4px;white-space:nowrap;border:1px solid ' + (act ? r.color : 'var(--border-secondary)') + ';' +
-      'color:' + (act ? '#fff' : 'var(--text-tertiary)') + ';background:' + (act ? r.color : 'transparent') + '">' + v + '</span>';
+      'color:' + (act ? '#fff' : 'var(--text-tertiary)') + ';background:' + (act ? r.color : 'transparent') + '">' + (v === '긴급' ? '중요' : v) + '</span>';
   }).join('');
 }
 
@@ -1732,7 +1732,7 @@ function showNewsDetail(newsId) {
     '<i class="ti ti-trash"></i> 삭제</button>';
 
   var impSel = '<div style="display:flex;align-items:center;gap:5px;margin-bottom:8px;flex-wrap:wrap">' +
-    '<span style="font-size:10px;color:var(--text-tertiary);white-space:nowrap">긴급도 수정</span>' +
+    '<span style="font-size:10px;color:var(--text-tertiary);white-space:nowrap">중요도 수정</span>' +
     '<span id="imp-sel-' + n.id + '" title="수정 내역은 AI 분류 학습에 반영됩니다" style="display:inline-flex;gap:4px">' + _impSelHtml(n.id, n._importance) + '</span></div>';
 
   var html =
