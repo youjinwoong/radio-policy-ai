@@ -1669,8 +1669,43 @@ async function setNewsImportance(newsId, newVal) {
     if (badge && rule) { badge.textContent = rule.label; badge.style.color = rule.color; badge.style.background = rule.bg; }
     var sel = document.getElementById('imp-sel-' + newsId);
     if (sel) sel.innerHTML = _impSelHtml(newsId, newVal);
+    // 당일 브리핑에 포함된 기사면 브리핑 원문의 🔴 표시도 동기화
+    try { await syncBriefingUrgency(newsId, newVal); } catch(e2) { console.warn('[브리핑 동기화] 실패(무시):', e2); }
   } catch(e) {
     alert('긴급도 수정 실패: ' + e.message);
+  }
+}
+
+// ── 긴급도 수정 → 당일 브리핑 원문 🔴 동기화 ──
+// 기사가 오늘 daily_briefings에 [ID:..]로 포함돼 있으면, 긴급 지정 시 해당 줄에 🔴 추가,
+// 긴급 해제 시 🔴 제거. 화면이 열려 있으면 즉시 갱신. (이미 발송된 이메일·텔레그램은 소급 불가)
+async function syncBriefingUrgency(newsId, newVal) {
+  if (!sb) return;
+  var todayKst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  var resp = await sb.from('daily_briefings').select('content').eq('briefing_date', todayKst).limit(1);
+  if (resp.error || !resp.data || resp.data.length === 0) return;
+  var content = resp.data[0].content || '';
+  var tag = '[ID:' + newsId + ']';
+  if (content.indexOf(tag) === -1) return; // 오늘 브리핑에 없는 기사
+  var lines = content.split('\n');
+  var changed = false;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].indexOf(tag) === -1) continue;
+    if (newVal === '긴급' && lines[i].indexOf('🔴') === -1) {
+      lines[i] = lines[i].replace(/^(\s*•\s*)/, '$1🔴 ');
+      changed = true;
+    } else if (newVal !== '긴급' && lines[i].indexOf('🔴') !== -1) {
+      lines[i] = lines[i].replace(/🔴\s*/, '');
+      changed = true;
+    }
+    break;
+  }
+  if (!changed) return;
+  var ur = await sb.from('daily_briefings').update({ content: lines.join('\n') }).eq('briefing_date', todayKst);
+  if (!ur.error) {
+    console.log('[브리핑 동기화] 당일 브리핑 🔴 표시 갱신:', newVal);
+    var listEl = document.getElementById('briefing-list');
+    if (listEl && listEl.innerHTML) loadBriefing();
   }
 }
 
