@@ -45,15 +45,22 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         return extract_text_from_pdf(pdf_path)
 
 
-def chunk_text(text: str) -> list[str]:
-    """텍스트를 청크로 분할 (조/항 경계 우선, 없으면 크기 기준)"""
-    # 법령 조항 경계 패턴
-    article_pattern = re.compile(r'(?=제\d+조)')
+def chunk_text(text: str) -> list[dict]:
+    """텍스트를 청크로 분할 (조문 헤더 경계 우선, 없으면 크기 기준)
+    반환: [{'content': str, 'article_no': str | None}, ...]
 
-    # 우선 조항 단위로 분할 시도
-    splits = article_pattern.split(text)
+    조문 헤더는 줄 시작의 "제N조(제목)" / "제N조의M(제목)" 형식만 인식.
+    본문 내 인용("법 제24조제1항" 등)은 괄호가 없거나 줄 중간이므로 매칭되지 않음
+    — 과거 인용 번호가 article_no로 오태깅되던 버그 수정 (2026-06-12).
+    같은 조문이 크기 때문에 여러 청크로 나뉘면 모든 청크가 동일 article_no를 가짐.
+    """
+    # 조문 헤더 경계: 줄 시작 + 제N조(의M) + 여는 괄호
+    header_pattern = re.compile(r'(?=^제\d+조(?:의\d+)?\()', re.MULTILINE)
+
+    # 우선 조문 단위로 분할 시도
+    splits = header_pattern.split(text)
     if len(splits) < 5:
-        # 조항 구분이 없으면 단순 크기 기준 분할
+        # 조문 구분이 없으면 단순 크기 기준 분할
         splits = [text]
 
     chunks = []
@@ -61,26 +68,25 @@ def chunk_text(text: str) -> list[str]:
         block = block.strip()
         if not block:
             continue
+        # 블록 맨 앞의 조문 헤더에서만 조항번호 추출 (없으면 None)
+        m = re.match(r'제(\d+조(?:의\d+)?)\(', block)
+        article_no = m.group(1) if m else None
         if len(block) <= CHUNK_SIZE:
-            chunks.append(block)
+            chunks.append({'content': block, 'article_no': article_no})
         else:
             # 큰 블록은 CHUNK_SIZE 단위로 분할 (CHUNK_OVERLAP 중복)
             start = 0
             while start < len(block):
                 end = start + CHUNK_SIZE
-                chunks.append(block[start:end])
+                chunks.append({'content': block[start:end], 'article_no': article_no})
                 start += CHUNK_SIZE - CHUNK_OVERLAP
 
-    return [c for c in chunks if len(c.strip()) > 50]
+    return [c for c in chunks if len(c['content'].strip()) > 50]
 
 
 def parse_chunk_metadata(content: str, doc_name: str) -> dict:
-    """청크 내용·문서명에서 메타데이터 파싱"""
+    """청크 내용·문서명에서 메타데이터 파싱 (조항번호는 chunk_text에서 처리)"""
     meta = {}
-    # 조항번호: 제X조(의Y) — 청크 첫 번째 매칭
-    m = re.search(r'제(\d+조(?:의\d+)?)', content)
-    if m:
-        meta['article_no'] = m.group(1)
     # 고시번호: 문서명 또는 content 앞 300자
     m = re.search(r'(\d{4}-\d+)', doc_name)
     if not m:
@@ -94,7 +100,7 @@ def parse_chunk_metadata(content: str, doc_name: str) -> dict:
     return meta
 
 
-def upload_to_supabase(doc_name: str, doc_category: str, chunks: list[str]) -> bool:
+def upload_to_supabase(doc_name: str, doc_category: str, chunks: list[dict]) -> bool:
     """Supabase document_chunks 테이블에 업로드"""
     try:
         from supabase import create_client
@@ -118,8 +124,10 @@ def upload_to_supabase(doc_name: str, doc_category: str, chunks: list[str]) -> b
     # 배치 삽입 (50개씩) — 메타데이터 파싱 포함
     rows = []
     for i, chunk in enumerate(chunks):
-        row = {"doc_name": doc_name, "doc_category": doc_category, "chunk_index": i, "content": chunk}
-        row.update(parse_chunk_metadata(chunk, doc_name))
+        row = {"doc_name": doc_name, "doc_category": doc_category, "chunk_index": i, "content": chunk['content']}
+        if chunk.get('article_no'):
+            row['article_no'] = chunk['article_no']
+        row.update(parse_chunk_metadata(chunk['content'], doc_name))
         rows.append(row)
 
     batch_size = 50
@@ -169,7 +177,7 @@ def main():
 
     print(f"[2/3] 텍스트 청킹")
     chunks = chunk_text(text)
-    print(f"  생성된 청크: {len(chunks)}개 (평균 {sum(len(c) for c in chunks)//len(chunks)}자)")
+    print(f"  생성된 청크: {len(chunks)}개 (평균 {sum(len(c['content']) for c in chunks)//len(chunks)}자)")
 
     print(f"[3/3] Supabase 업로드: doc_name='{doc_name}', category='{doc_category}'")
     success = upload_to_supabase(doc_name, doc_category, chunks)
