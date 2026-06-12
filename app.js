@@ -2458,8 +2458,7 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
     var rule = IMPORTANCE_RULES['긴급'];
     return '<div style="border:2px solid ' + rule.color + ';border-radius:10px;padding:12px 14px;margin-bottom:10px;background:' + rule.bg + '">'
       + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
-      +   '<span style="background:' + rule.color + ';color:#fff;font-size:10px;font-weight:700;padding:2px 9px;border-radius:5px;flex-shrink:0">' + rule.label + '</span>'
-      +   '<span style="font-size:11px;color:' + rule.color + ';font-weight:500">' + rule.desc + '</span>'
+      +   '<span style="background:' + rule.color + ';color:#fff;font-size:10px;font-weight:700;padding:2px 9px;border-radius:5px;flex-shrink:0">중요</span>'
       + '</div>'
       + '<div style="margin-bottom:6px">' + titleHtml + '</div>'
       + summaryHtml
@@ -2569,7 +2568,7 @@ async function loadBriefing() {
       const urgentCount = parsed.urgentCount;
       const badgeHtml = isToday ? '<span style="background:var(--accent);color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;margin-left:8px">오늘</span>' : '';
       const urgentBadge = urgentCount > 0
-        ? '<span style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px">🔴 긴급 ' + urgentCount + '건</span>'
+        ? '<span style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px">중요 ' + urgentCount + '건</span>'
         : '';
       const metaHtml = (b.news_count || b.terms_count)
         ? '<span style="color:var(--text-secondary);font-size:11px">뉴스 ' + (b.news_count||0) + '건 · 용어 ' + (b.terms_count||0) + '건</span>'
