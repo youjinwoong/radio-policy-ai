@@ -1920,29 +1920,9 @@ async function analyzeNewsImpact(newsId) {
       }
     }
 
-    // ── AI priority → 배지 업데이트 ──────────────────────────
-    if (priorityText) {
-      var AI_PRIORITY_MAP = {
-        '즉시대응': '긴급',
-        '금주검토': '보통',
-        '동향파악': '참고'
-      };
-      var aiImportance = AI_PRIORITY_MAP[priorityText.trim()];
-      if (aiImportance && aiImportance !== n._importance) {
-        var aiRule  = IMPORTANCE_RULES[aiImportance] || IMPORTANCE_RULES['참고'];
-        var badge   = document.getElementById('importance-badge-' + newsId);
-        if (badge) {
-          badge.textContent = aiRule.label;
-          badge.style.color      = aiRule.color;
-          badge.style.background = aiRule.bg;
-        }
-        // 캐시도 갱신 — 뉴스 목록 재렌더링
-        n._importance = aiImportance;
-        renderNewsList();
-        // Supabase DB도 업데이트 — 다음 로드 시부터 반영
-        if (sb) { try { await sb.from('news_feed').update({ urgency: aiImportance, importance: aiImportance }).eq('id', newsId); } catch(e) { console.warn('urgency 업데이트 실패:', e); } }
-      }
-    }
+    // ※ 과거에는 분석의 priority로 긴급도 배지·DB를 자동 덮어썼으나 제거됨 (2026-06-12).
+    //    긴급도의 단일 기준은 크롤러 분류 + 담당자 수동 수정(importance_feedback)이며,
+    //    영향도 분석은 표시 전용. (자동 덮어쓰기가 담당자 수정을 되돌리는 버그의 원인이었음)
   } catch(e) {
     console.warn('영향도 분석 오류:', e);
     if (box) { box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">분석 실패 (' + e.message + ') — AI 자문에서 직접 질문해 주세요.</span>'; }
