@@ -1532,7 +1532,7 @@ function renderNewsList() {
     if (group.length === 1) {
       html += _renderSingleItem(group[0]);
     } else {
-      var gid = 'g' + gi;
+      var gid = 'g-' + String(group[0].id);
       var isOpen = !!_newsGroupOpen[gid];
       var gtitle = _groupTitle(group);
       var date = (group[0].published_at || group[0].created_at || '').slice(0, 10);
@@ -1645,7 +1645,10 @@ async function setNewsImportance(newsId, newVal) {
   var oldVal = n._importance || n.importance || n.urgency || '참고';
   if (oldVal === newVal) return;
   try {
-    await sb.from('news_feed').update({ importance: newVal, urgency: newVal }).eq('id', newsId);
+    var ur = await sb.from('news_feed').update({ importance: newVal, urgency: newVal })
+      .eq('id', newsId).select('id,importance');
+    if (ur.error) throw new Error('news_feed 업데이트 실패: ' + ur.error.message);
+    if (!ur.data || ur.data.length === 0) throw new Error('news_feed 업데이트 실패: 대상 행을 찾지 못함');
     // 피드백 기록 — ai_importance는 최초 AI 판정값 보존 (news_id당 1행)
     var fb = { title: n.title || '', summary: (n.summary || '').slice(0, 300),
                user_importance: newVal, updated_at: new Date().toISOString() };
