@@ -1627,6 +1627,48 @@ async function deleteNewsItem(newsId) {
   }
 }
 
+// ── 긴급도 수정 셀렉터 HTML (뉴스 상세 모달) ──
+function _impSelHtml(newsId, current) {
+  return ['긴급', '보통', '참고'].map(function(v) {
+    var r = IMPORTANCE_RULES[v] || {};
+    var act = (current === v);
+    return '<span onclick="setNewsImportance(\'' + newsId + '\',\'' + v + '\')" ' +
+      'style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ' + (act ? r.color : 'var(--border-secondary)') + ';' +
+      'color:' + (act ? '#fff' : 'var(--text-tertiary)') + ';background:' + (act ? r.color : 'transparent') + '">' + v + '</span>';
+  }).join('');
+}
+
+// ── 긴급도 수동 수정 — importance_feedback에 기록되어 크롤러 분류가 학습됨 ──
+async function setNewsImportance(newsId, newVal) {
+  var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
+  if (!n || !sb) return;
+  var oldVal = n._importance || n.importance || n.urgency || '참고';
+  if (oldVal === newVal) return;
+  try {
+    await sb.from('news_feed').update({ importance: newVal, urgency: newVal }).eq('id', newsId);
+    // 피드백 기록 — ai_importance는 최초 AI 판정값 보존 (news_id당 1행)
+    var fb = { title: n.title || '', summary: (n.summary || '').slice(0, 300),
+               user_importance: newVal, updated_at: new Date().toISOString() };
+    var ex = await sb.from('importance_feedback').select('id').eq('news_id', newsId).limit(1);
+    if (ex.data && ex.data.length > 0) {
+      await sb.from('importance_feedback').update(fb).eq('news_id', newsId);
+    } else {
+      fb.news_id = newsId;
+      fb.ai_importance = oldVal;
+      await sb.from('importance_feedback').insert(fb);
+    }
+    n.importance = newVal; n.urgency = newVal; n._importance = newVal;
+    renderNewsList();
+    var rule = IMPORTANCE_RULES[newVal];
+    var badge = document.getElementById('importance-badge-' + newsId);
+    if (badge && rule) { badge.textContent = rule.label; badge.style.color = rule.color; badge.style.background = rule.bg; }
+    var sel = document.getElementById('imp-sel-' + newsId);
+    if (sel) sel.innerHTML = _impSelHtml(newsId, newVal);
+  } catch(e) {
+    alert('긴급도 수정 실패: ' + e.message);
+  }
+}
+
 function showNewsDetail(newsId) {
   selectedNewsId = newsId;
   var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
@@ -1649,11 +1691,14 @@ function showNewsDetail(newsId) {
     'style="font-size:11px;padding:4px 10px;cursor:pointer;color:#d04545">' +
     '<i class="ti ti-trash"></i> 삭제</button>';
 
+  var impSel = '<span id="imp-sel-' + n.id + '" title="긴급도 수정 — 수정 내역은 AI 분류 학습에 반영됩니다" style="display:inline-flex;gap:4px;margin-left:2px">' + _impSelHtml(n.id, n._importance) + '</span>';
+
   var html =
     // 헤더: 중요도 + 제목
     '<div style="border-left:3px solid ' + rule.color + ';padding-left:10px;margin-bottom:14px">' +
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
         '<span id="importance-badge-' + n.id + '" style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px">' + rule.label + '</span>' +
+        impSel +
         '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
         '<div style="margin-left:auto;display:flex;gap:6px">' + lockBtn + delBtn + urlBtn + '</div>' +
       '</div>' +
@@ -2285,19 +2330,22 @@ function parseBriefingContent(rawContent, briefingIdx) {
     if (rawItemLines.length === 0) return;
     var rawBlock = rawItemLines.join('\n');
     if (currentSection === 'news') {
-      // 분류는 원본 텍스트 기준
-      var importance = classifyBriefingItemImportance(rawBlock);
+      // 긴급 여부는 브리핑 원문의 🔴(크롤러 긴급도 기반)로만 판정 — 이메일과 항상 일치
+      var importance = rawBlock.indexOf('🔴') !== -1 ? '긴급' : '참고';
+      var hasStoredAnalysis = rawBlock.indexOf('SKT 영향 분석') !== -1;
       // 렌더링은 이스케이프된 텍스트 기준
       var escBlock = rawItemLines.map(function(l){ return esc(l); }).join('\n');
       output.push(renderBriefingNewsItem(escBlock, importance, briefingIdx, itemIdx));
       if (importance === '긴급') {
         urgentCount++;
-        // 제목 추출 (원본)
-        var titleRaw = '';
-        for (var i = 0; i < rawItemLines.length; i++) {
-          if (/^• /.test(rawItemLines[i])) { titleRaw = rawItemLines[i].replace(/^• /, ''); break; }
+        // 저장된 분석이 있으면 즉석 생성 불필요 (구버전 브리핑만 폴백)
+        if (!hasStoredAnalysis) {
+          var titleRaw = '';
+          for (var i = 0; i < rawItemLines.length; i++) {
+            if (/^• /.test(rawItemLines[i])) { titleRaw = rawItemLines[i].replace(/^• /, ''); break; }
+          }
+          urgentItems.push({ elemId: 'bi-' + briefingIdx + '-' + itemIdx, title: titleRaw });
         }
-        urgentItems.push({ elemId: 'bi-' + briefingIdx + '-' + itemIdx, title: titleRaw });
       }
     } else {
       var escBlock = rawItemLines.map(function(l){ return esc(l); }).join('\n');
@@ -2359,6 +2407,7 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
   var titleLine = '';
   var summaryLines = [];
   var linkUrl = '';
+  var storedAnalysis = '';
 
   for (var i = 0; i < lines.length; i++) {
     var l = lines[i];
@@ -2368,6 +2417,8 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
       linkUrl = l.replace(/^  🔗 /, '').trim();
     } else if (/^  → /.test(l)) {
       summaryLines.push(l.replace(/^  → /, '').trim());
+    } else if (l.indexOf('SKT 영향 분석') !== -1) {
+      storedAnalysis = l.replace(/^\s*⚠️\s*SKT 영향 분석[::]\s*/, '').trim();
     }
   }
 
@@ -2392,10 +2443,12 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
       + summaryHtml
       + linkHtml
       + '<div id="' + analysisId + '" data-briefing-analysis="1" style="margin-top:10px;padding:10px 12px;background:rgba(239,68,68,0.06);border-radius:8px;border:1px solid rgba(239,68,68,0.2)">'
-      +   '<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary)">'
-      +     '<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>'
-      +     'AI 영향도 분석 중...'
-      +   '</div>'
+      +   (storedAnalysis
+          ? '<div style="font-size:12px;color:var(--text-primary);line-height:1.7"><span style="font-weight:700">⚠️ SKT 영향 분석</span> ' + storedAnalysis + '</div>'
+          : '<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary)">'
+            + '<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>'
+            + 'AI 영향도 분석 중...'
+            + '</div>')
       + '</div>'
       + '</div>';
   }
