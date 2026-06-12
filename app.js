@@ -622,7 +622,7 @@ async function fetchRecentNewsContext(query) {
     var listResp = await sb
       .from('news_feed')
       .select('title, source, published_at')
-      .gte('published_at', cutoffStr)
+      .or('published_at.gte.' + cutoffStr + ',locked.eq.true')
       .not('title', 'ilike', '[업데이트]%')
       .order('published_at', { ascending: false })
       .limit(30);
@@ -640,7 +640,7 @@ async function fetchRecentNewsContext(query) {
           var bodyResp = await sb
             .from('news_feed')
             .select('title, source, published_at, content')
-            .gte('published_at', cutoffStr)
+            .or('published_at.gte.' + cutoffStr + ',locked.eq.true')
             .ilike('content', '%' + kw + '%')
             .not('content', 'is', null)
             .order('published_at', { ascending: false })
@@ -1460,6 +1460,10 @@ function _renderSingleItem(n) {
   var urlIcon = n.url
     ? ' <a href="' + n.url + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:11px;vertical-align:middle"><i class="ti ti-external-link"></i></a>'
     : '';
+  var lockIcon = ' <span onclick="event.stopPropagation();toggleNewsLock(\'' + n.id + '\')" ' +
+    'title="' + (n.locked ? '잠금 해제 (해제 시 15일 경과 후 삭제됨)' : '잠금 (15일이 지나도 삭제되지 않음)') + '" ' +
+    'style="cursor:pointer;font-size:11px;vertical-align:middle;color:' + (n.locked ? 'var(--accent)' : 'var(--text-tertiary)') + ';opacity:' + (n.locked ? '1' : '.4') + '">' +
+    '<i class="ti ti-' + (n.locked ? 'lock' : 'lock-open') + '"></i></span>';
   return '<div class="news-item" onclick="showNewsDetail(\'' + n.id + '\')" style="cursor:pointer;border-left:' + rule.border + ';' + (isSelected ? 'background:var(--bg-secondary);border-radius:var(--radius-md)' : '') + '">' +
     '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '"></div>' +
     '<div style="flex:1;min-width:0;overflow:hidden">' +
@@ -1468,7 +1472,7 @@ function _renderSingleItem(n) {
         '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0">' + date + '</span>' +
         (n.source ? '<span class="news-item-source" style="font-size:10px;color:var(--text-tertiary);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px">' + n.source + '</span>' : '') +
       '</div>' +
-      '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + '</div>' +
+      '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + lockIcon + '</div>' +
       (n.summary ? '<div class="news-meta" style="margin-top:3px;font-size:11px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:var(--text-tertiary)">' + n.summary.slice(0, 80) + (n.summary.length > 80 ? '…' : '') + '</div>' : '') +
     '</div>' +
   '</div>';
@@ -1546,6 +1550,28 @@ function filterNewsByImportance(el, importance) {
 }
 
 // ── 뉴스 상세 패널 ─────────────────────────────────────────
+// ── 뉴스 잠금 토글 (locked=true면 15일 경과해도 삭제되지 않음) ──
+async function toggleNewsLock(newsId) {
+  var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
+  if (!n || !sb) return;
+  var newVal = !n.locked;
+  n.locked = newVal;
+  renderNewsList();
+  // 모달 잠금 버튼이 열려 있으면 상태 갱신
+  var btn = document.getElementById('lock-btn-' + newsId);
+  if (btn) {
+    btn.innerHTML = newVal ? '<i class="ti ti-lock"></i> 잠금됨' : '<i class="ti ti-lock-open"></i> 잠금';
+    btn.style.color = newVal ? 'var(--accent)' : '';
+  }
+  try {
+    await sb.from('news_feed').update({ locked: newVal }).eq('id', newsId);
+  } catch(e) {
+    n.locked = !newVal;
+    renderNewsList();
+    alert('잠금 변경 실패: ' + e.message);
+  }
+}
+
 function showNewsDetail(newsId) {
   selectedNewsId = newsId;
   var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
@@ -1559,6 +1585,10 @@ function showNewsDetail(newsId) {
   var urlBtn = n.url
     ? '<a href="' + n.url + '" target="_blank" class="btn" style="font-size:11px;padding:4px 10px;text-decoration:none"><i class="ti ti-external-link"></i> 원문 보기</a>'
     : '';
+  var lockBtn = '<button class="btn" id="lock-btn-' + n.id + '" onclick="toggleNewsLock(\'' + n.id + '\')" ' +
+    'title="잠금 시 15일이 지나도 삭제되지 않고 AI 자문에서 계속 참조됩니다" ' +
+    'style="font-size:11px;padding:4px 10px;cursor:pointer;' + (n.locked ? 'color:var(--accent)' : '') + '">' +
+    (n.locked ? '<i class="ti ti-lock"></i> 잠금됨' : '<i class="ti ti-lock-open"></i> 잠금') + '</button>';
 
   var html =
     // 헤더: 중요도 + 제목
@@ -1566,7 +1596,7 @@ function showNewsDetail(newsId) {
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
         '<span id="importance-badge-' + n.id + '" style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px">' + rule.label + '</span>' +
         '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
-        (urlBtn ? '<div style="margin-left:auto">' + urlBtn + '</div>' : '') +
+        '<div style="margin-left:auto;display:flex;gap:6px">' + lockBtn + urlBtn + '</div>' +
       '</div>' +
       '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.55;margin-bottom:4px">' + n.title + '</div>' +
       '<div style="font-size:11px;color:var(--text-secondary)">' + (n.source || '') + '</div>' +

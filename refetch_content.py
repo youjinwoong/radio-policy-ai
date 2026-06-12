@@ -83,8 +83,21 @@ def main():
     regen_all = "--all" in sys.argv
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+    # ── 15일 초과 기사 일괄 정리 (locked=true 기사는 보존) ──────────
+    try:
+        cutoff = (datetime.now(KST) - timedelta(days=15)).isoformat()
+        purged = sb.table("news_feed").delete() \
+            .lt("published_at", cutoff) \
+            .eq("locked", False) \
+            .execute()
+        n_purged = len(purged.data or [])
+        if n_purged:
+            print(f"🗑  15일 초과 기사 {n_purged}건 삭제 (잠금 기사 제외)")
+    except Exception as e:
+        print(f"[오래된 기사 정리 오류] {e}")
+
     # content=NULL 또는 100자 미만(제목만 저장된 경우) 기사 재수집
-    resp = sb.table("news_feed").select("id,title,source,url,content,published_at,summary") \
+    resp = sb.table("news_feed").select("id,title,source,url,content,published_at,summary,locked") \
         .order("published_at", desc=True).limit(500).execute()
     all_articles = resp.data or []
 
@@ -143,11 +156,14 @@ def main():
                     if pub_dt.tzinfo is None:
                         pub_dt = pub_dt.replace(tzinfo=KST)
                     age_days = (datetime.now(KST) - pub_dt).days
-                    if age_days > 15:
+                    if age_days > 15 and not article.get("locked"):
                         sb.table("news_feed").delete().eq("id", article["id"]).execute()
                         print(f"🗑  실제 발행일 {actual_date[:10]} ({age_days}일 전) — 15일 초과 삭제")
                         ok += 1
                         continue
+                    elif age_days > 15:
+                        update_data["published_at"] = actual_date
+                        print(f"🔒 15일 초과지만 잠금 기사 — 보존 ({actual_date[:10]})", end="")
                     else:
                         update_data["published_at"] = actual_date
                         print(f"✅ ({len(body)}자, 날짜보정 {actual_date[:10]})", end="")
