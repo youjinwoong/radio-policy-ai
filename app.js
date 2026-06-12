@@ -1228,17 +1228,17 @@ function askQ(q) {
 // ════════════════════════════════════════════
 function smartRefresh() {
   var active = document.querySelector('.panel[style*="display: block"], .panel[style*="display:block"]');
-  if (!active) active = document.getElementById('panel-home');
-  var id = active ? active.id : 'panel-home';
+  if (!active) active = document.getElementById('panel-news');
+  var id = active ? active.id : 'panel-news';
   var map = {
-    'panel-home':     function() { refreshDashboard(); },
+
     'panel-news':     function() { loadNews(); },
     'panel-briefing': function() { loadBriefing(); },
     'panel-terms':    function() { loadTerms && loadTerms(); },
     'panel-press':    function() { loadPressJSON(); },
     'panel-law':      function() { loadKbDocs(); },
   };
-  var fn = map[id] || function() { refreshDashboard(); };
+  var fn = map[id] || function() { loadNews(); };
   fn();
 }
 
