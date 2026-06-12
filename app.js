@@ -2015,7 +2015,11 @@ async function loadKbDocs(force) {
   try {
     var resp = await sb.rpc('list_kb_documents');
     if (resp.error) throw resp.error;
-    var rows = (resp.data || []).filter(function(r) { return r.doc_category !== 'ITU-R'; });
+    var rows = (resp.data || []).filter(function(r) {
+      if (r.doc_category === 'ITU-R') return false;   // ITU-R 탭에서 별도 표시
+      if (/^\d{6}/.test(r.doc_name)) return false;    // 날짜 파일명 = 보도자료 → 정부 보도자료 탭에서 표시
+      return true;
+    });
     var groups = _KB_GROUPS.map(function(g) { return { title: g[0], re: g[1], items: [] }; });
     var etc = { title: '기타 법령·고시', items: [] };
     rows.forEach(function(r) {
@@ -2033,7 +2037,7 @@ async function loadKbDocs(force) {
       total += g.items.length;
       var fileRows = g.items.map(function(it) {
         var badge = it.embedded
-          ? '<span class="badge badge-teal">검색 가능</span>'
+          ? ''
           : '<span class="badge" style="background:rgba(245,158,11,.12);color:#b45309" title="backfill_embeddings.py 실행 전 — 키워드 검색만 가능">임베딩 대기</span>';
         var dupTag = it.p.dup ? ' <span style="font-size:10px;color:var(--text-tertiary)">(중복본)</span>' : '';
         return '<div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div>' +
