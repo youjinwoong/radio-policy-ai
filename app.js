@@ -2029,9 +2029,15 @@ async function _readFileAsText(file) {
     for (var i = 1; i <= pdf.numPages; i++) {
       var page = await pdf.getPage(i);
       var content = await page.getTextContent();
-      pages.push(content.items.map(function(item) { return item.str; }).join(' '));
+      // hasEOL로 원본 줄바꿈 보존 — 페이지 전체가 한 줄로 뭉치면 조문 단위 DIFF가 불가능 (2026-06-12 수정)
+      pages.push(content.items.map(function(item) {
+        return item.str + (item.hasEOL ? '\n' : ' ');
+      }).join(''));
     }
-    return pages.join('\n');
+    var full = pages.join('\n');
+    // 조문 헤더 앞 줄바꿈 보강 — hasEOL 정보가 없는 PDF 대비
+    full = full.replace(/[ \t]+(?=제\d+조(?:의\d+)?\()/g, '\n');
+    return full;
   }
   return new Promise(function(resolve, reject) {
     var reader = new FileReader();
