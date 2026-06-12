@@ -1087,11 +1087,15 @@ async function openChatHistory() {
       return;
     }
     body.innerHTML = data.map(function(item) {
-      return '<div class="card" style="cursor:pointer;margin-bottom:8px;padding:12px 14px" onclick="viewChatHistoryItem(\'' + item.id + '\')">' +
-        '<div style="font-size:13px;font-weight:500;color:var(--text-primary);line-height:1.5">' + chEsc(item.question) + '</div>' +
-        '<div style="font-size:11px;color:var(--text-tertiary);margin-top:5px;display:flex;align-items:center;gap:8px">' +
-          '<span class="rag-tag">' + chEsc(item.category || '일반') + '</span>' + chDate(item.created_at) +
-        '</div></div>';
+      return '<div class="card" style="cursor:pointer;margin-bottom:8px;padding:12px 14px;display:flex;align-items:flex-start;gap:8px" onclick="viewChatHistoryItem(\'' + item.id + '\')">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:500;color:var(--text-primary);line-height:1.5">' + chEsc(item.question) + '</div>' +
+          '<div style="font-size:11px;color:var(--text-tertiary);margin-top:5px;display:flex;align-items:center;gap:8px">' +
+            '<span class="rag-tag">' + chEsc(item.category || '일반') + '</span>' + chDate(item.created_at) +
+          '</div>' +
+        '</div>' +
+        '<button class="btn" title="이력 삭제" style="padding:4px 8px;flex-shrink:0;color:var(--text-tertiary)" onclick="event.stopPropagation();deleteChatHistoryItem(\'' + item.id + '\', this)"><i class="ti ti-trash"></i></button>' +
+      '</div>';
     }).join('');
     body.scrollTop = 0;
   } catch(e) {
@@ -1120,6 +1124,7 @@ async function viewChatHistoryItem(id) {
     }
     body.innerHTML =
       '<button class="btn" onclick="openChatHistory()" style="margin-bottom:12px"><i class="ti ti-arrow-left"></i>목록으로</button>' +
+      '<button class="btn" onclick="deleteChatHistoryItem(\'' + id + '\', null)" style="margin-bottom:12px;margin-left:8px;color:#d04545"><i class="ti ti-trash"></i>삭제</button>' +
       '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.5">' + chEsc(row.question) + '</div>' +
       '<div style="font-size:11px;color:var(--text-tertiary);margin:5px 0 12px"><span class="rag-tag">' + chEsc(row.category || '일반') + '</span> ' + chDate(row.created_at) + '</div>' +
       '<div class="msg msg-ai" style="max-width:100%">' + renderMd(row.answer || '') + '</div>' + srcHtml;
@@ -1131,6 +1136,27 @@ async function viewChatHistoryItem(id) {
 
 function closeChatHistory() {
   document.getElementById('chat-history-modal').style.display = 'none';
+}
+
+// 자문 이력 삭제 — 목록 카드의 휴지통 버튼(btn 전달) / 상세 보기의 삭제 버튼(btn=null)
+async function deleteChatHistoryItem(id, btn) {
+  if (!confirm('이 자문 이력을 삭제할까요?')) return;
+  try {
+    var resp = await sb.from('chat_logs').delete().eq('id', id);
+    if (resp.error) throw resp.error;
+    if (btn && btn.closest) {
+      var card = btn.closest('.card');
+      if (card) card.remove();
+      var body = document.getElementById('chat-history-body');
+      if (body && !body.querySelector('.card')) {
+        body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">저장된 자문 이력이 없습니다.</div>';
+      }
+    } else {
+      openChatHistory(); // 상세 보기에서 삭제 → 목록으로 복귀
+    }
+  } catch(e) {
+    alert('이력 삭제 실패: ' + e.message);
+  }
 }
 
 // 홈 대시보드 최근 자문 카드 → 이력 모달 열고 바로 상세 표시
