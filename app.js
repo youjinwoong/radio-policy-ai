@@ -2058,6 +2058,28 @@ async function loadKbDocs(force) {
 
 var diffState = { before: null, after: null };  // { text, name }
 
+// ── DIFF 드롭존 UX 보강 (2026-06-12) ──
+// 드롭존을 빗나가게 떨어뜨려도 브라우저가 파일을 열며 페이지를 이탈하지 않도록 전역 차단
+document.addEventListener('dragover', function(e) { e.preventDefault(); });
+document.addEventListener('drop', function(e) { e.preventDefault(); });
+// 드롭존 진입 시 하이라이트 + 커서를 '복사'로 고정
+['before', 'after'].forEach(function(t) {
+  var dz = document.getElementById('drop-' + t);
+  if (!dz) return;
+  function clear() { dz.style.borderColor = ''; dz.style.background = ''; }
+  dz.addEventListener('dragenter', function(e) {
+    e.preventDefault();
+    dz.style.borderColor = 'var(--accent)';
+    dz.style.background = 'rgba(83,74,183,0.07)';
+  });
+  dz.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  });
+  dz.addEventListener('dragleave', clear);
+  dz.addEventListener('drop', clear);
+});
+
 function handleDiffDrop(type, event) {
   event.preventDefault();
   var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
