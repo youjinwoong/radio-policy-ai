@@ -203,11 +203,20 @@
       <!-- 국내 법령·고시 -->
       <div class="panel" id="panel-law">
         <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
-          <span style="font-size:12px;color:var(--text-secondary)">총 <strong>89개</strong> 문서 · 출처: law.go.kr · rra.go.kr</span>
+          <span style="font-size:12px;color:var(--text-secondary)">아래 분류 카드는 수동 정리 목록(2026.05 기준) · 실제 전체 목록은 상단 '지식 베이스 실제 문서' 참조</span>
           <span style="font-size:11px;color:var(--text-tertiary)">마지막 정리: 2026.05.26</span>
           <button class="btn btn-primary" style="margin-left:auto;font-size:12px" onclick="openPdfUpload('law')"><i class="ti ti-upload"></i> PDF 업로드</button>
         </div>
         <div id="law-upload-list"></div>
+
+        <div class="card" style="cursor:default;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="font-weight:600;font-size:13px"><i class="ti ti-database"></i> 지식 베이스 실제 문서 <span id="kb-doc-count" style="color:var(--accent)"></span></span>
+            <button class="btn" style="margin-left:auto;font-size:11px;padding:3px 10px" onclick="loadKbDocs(true)"><i class="ti ti-refresh"></i> 새로고침</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">AI 자문이 검색하는 DB(document_chunks) 기준 자동 목록 — 업로드 즉시 반영 · 분류를 펼쳐 문서를 확인하세요</div>
+          <div id="kb-doc-list" style="font-size:12px;color:var(--text-secondary)">메뉴 진입 시 자동 로드됩니다.</div>
+        </div>
 
         <div class="section-title">전파법 기본 법령 (4종)</div>
         <div class="card" style="cursor:default;margin-bottom:14px">
@@ -759,6 +768,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612b"></script>
-<script src="app.js?v=20260612p"></script>
+<script src="app.js?v=20260612q"></script>
 </body>
 </html>

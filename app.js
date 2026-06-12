@@ -1236,6 +1236,7 @@ function smartRefresh() {
     'panel-briefing': function() { loadBriefing(); },
     'panel-terms':    function() { loadTerms && loadTerms(); },
     'panel-press':    function() { loadPressJSON(); },
+    'panel-law':      function() { loadKbDocs(); },
   };
   var fn = map[id] || function() { refreshDashboard(); };
   fn();
@@ -1974,6 +1975,44 @@ function filterNews(el, cat) { filterNewsByImportance(el, cat); }
 // ════════════════════════════════════════════
 //  법령 DIFF 분석
 // ════════════════════════════════════════════
+// ── 지식 베이스 실제 문서 목록 (document_chunks 기준, 국내 법령·고시 탭) ──
+var _kbDocsLoaded = false;
+async function loadKbDocs(force) {
+  var el = document.getElementById('kb-doc-list');
+  if (!el || !sb) return;
+  if (_kbDocsLoaded && !force) return;
+  el.innerHTML = '불러오는 중...';
+  try {
+    var resp = await sb.rpc('list_kb_documents');
+    if (resp.error) throw resp.error;
+    var rows = resp.data || [];
+    var byCat = {};
+    rows.forEach(function(r) {
+      var c = r.doc_category || '기타';
+      (byCat[c] = byCat[c] || []).push(r);
+    });
+    var cats = Object.keys(byCat).sort(function(a, b) { return byCat[b].length - byCat[a].length; });
+    var html = cats.map(function(c) {
+      var items = byCat[c].map(function(r) {
+        var emb = (r.embedded > 0)
+          ? ''
+          : ' <span style="color:#f59e0b;font-size:10px" title="backfill_embeddings.py 실행 전 — 키워드 검색만 가능">임베딩 대기</span>';
+        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0 4px 14px;border-bottom:0.5px solid var(--border-tertiary)">' +
+          '<span style="word-break:break-all">' + r.doc_name + emb + '</span>' +
+          '<span style="color:var(--text-tertiary);flex-shrink:0;font-size:11px">' + r.chunks + '청크</span></div>';
+      }).join('');
+      return '<details style="margin-bottom:4px"><summary style="cursor:pointer;font-weight:600;font-size:12px;padding:5px 0;color:var(--text-primary)">' +
+        c + ' <span style="color:var(--text-tertiary);font-weight:400">(' + byCat[c].length + '개)</span></summary>' + items + '</details>';
+    }).join('');
+    var cnt = document.getElementById('kb-doc-count');
+    if (cnt) cnt.textContent = rows.length + '개';
+    el.innerHTML = html || '등록된 문서가 없습니다.';
+    _kbDocsLoaded = true;
+  } catch(e) {
+    el.innerHTML = '목록 조회 실패: ' + e.message;
+  }
+}
+
 var diffState = { before: null, after: null };  // { text, name }
 
 function handleDiffDrop(type, event) {
