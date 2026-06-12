@@ -1414,7 +1414,7 @@ function _extractKeywords(title) {
   });
   // 지명 정규화: '제주도' → '제주', '서울시' → '서울'
   var normalized = words.map(function(w){
-    return w.replace(/([가-힣]{2,})(도|시|군|구)$/, '$1');
+    return w.replace(/([가-힣]{2,})(도|시|군|구|광장)$/, '$1');
   });
   var all = normalized.concat(mixed);
   return all.filter(function(w){ return !stopwords.includes(w) && w.length >= 2; });
@@ -1425,7 +1425,9 @@ function _titleSimilarity(t1, t2) {
   var k2 = _extractKeywords(t2);
   if (!k1.length || !k2.length) return 0;
   var shared = k1.filter(function(w){ return k2.includes(w); });
-  if (shared.length === 0) return 0;
+  // 공유 키워드 1개만으로는 그룹핑하지 않음 — '기지국' 같은 흔한 도메인 단어가
+  // 서로 다른 주제(광화문 행사 vs 폐기지국 재활용)를 한 그룹으로 잇는 오류 방지 (2026-06-12)
+  if (shared.length < 2) return 0;
   return shared.length / Math.max(k1.length, k2.length);
 }
 
