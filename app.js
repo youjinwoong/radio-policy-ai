@@ -1975,41 +1975,80 @@ function filterNews(el, cat) { filterNewsByImportance(el, cat); }
 // ════════════════════════════════════════════
 //  법령 DIFF 분석
 // ════════════════════════════════════════════
-// ── 지식 베이스 실제 문서 목록 (document_chunks 기준, 국내 법령·고시 탭) ──
+// ── 지식 베이스 문서 목록 (document_chunks 실시간 · 수동정리 목록과 동일 스타일) ──
 var _kbDocsLoaded = false;
+
+var _KB_GROUPS = [
+  ['전파법 기본 법령', /^전파법/],
+  ['주파수 행정규칙', /주파수|할당|공동사용/],
+  ['전자파 행정규칙', /전자파/],
+  ['적합성평가 행정규칙', /적합성평가|시험기관|상호인정/],
+  ['전기통신사업법 계열', /전기통신사업|이동통신단말장치/],
+  ['정보통신망법 계열', /정보통신망/],
+  ['방송통신발전기본법 계열', /방송통신발전|방송통신설비|방송통신규제|기반시설|멀티미디어|재난/],
+  ['지방세법 계열', /지방세/],
+  ['무선설비·무선국·기술기준', /기술기준|무선설비|무선국|단말장치|간이무선|항공|해상|우주|선박|아마추어|검사업무/]
+];
+
+function _kbParseName(raw) {
+  var name = String(raw || '').replace(/\.(pdf|md|pptx|txt)$/i, '').replace(/\s*\(\d\)\s*$/, '');
+  var dup = /^_중복_/.test(name);
+  name = name.replace(/^_중복_/, '');
+  var kind = (name.match(/\((법률|대통령령|[가-힣]+부령|[가-힣]+고시|총리령)\)/) || [])[1] || '';
+  var no = (name.match(/\(제([0-9\-]+)호\)/) || [])[1] || '';
+  var date = (name.match(/\((20\d{6})\)/) || [])[1] || '';
+  var clean = name
+    .replace(/\((법률|대통령령|[가-힣]+부령|[가-힣]+고시|총리령)\)/g, '')
+    .replace(/\(제[0-9\-]+호\)/g, '')
+    .replace(/\(20\d{6}\)/g, '')
+    .trim();
+  var info = [];
+  if (kind || no) info.push((kind ? kind + ' ' : '') + (no ? '제' + no + '호' : ''));
+  if (date) info.push(date.slice(0, 4) + '.' + date.slice(4, 6) + '.' + date.slice(6, 8) + ' 시행');
+  return { clean: clean || name, info: info.join(' · '), dup: dup };
+}
+
 async function loadKbDocs(force) {
-  var el = document.getElementById('kb-doc-list');
+  var el = document.getElementById('kb-doc-groups');
   if (!el || !sb) return;
   if (_kbDocsLoaded && !force) return;
-  el.innerHTML = '불러오는 중...';
   try {
     var resp = await sb.rpc('list_kb_documents');
     if (resp.error) throw resp.error;
-    var rows = resp.data || [];
-    var byCat = {};
+    var rows = (resp.data || []).filter(function(r) { return r.doc_category !== 'ITU-R'; });
+    var groups = _KB_GROUPS.map(function(g) { return { title: g[0], re: g[1], items: [] }; });
+    var etc = { title: '기타 법령·고시', items: [] };
     rows.forEach(function(r) {
-      var c = r.doc_category || '기타';
-      (byCat[c] = byCat[c] || []).push(r);
+      var p = _kbParseName(r.doc_name);
+      var item = { p: p, chunks: r.chunks, embedded: r.embedded > 0 };
+      for (var i = 0; i < groups.length; i++) {
+        if (groups[i].re.test(p.clean)) { groups[i].items.push(item); return; }
+      }
+      etc.items.push(item);
     });
-    var cats = Object.keys(byCat).sort(function(a, b) { return byCat[b].length - byCat[a].length; });
-    var html = cats.map(function(c) {
-      var items = byCat[c].map(function(r) {
-        var emb = (r.embedded > 0)
-          ? ''
-          : ' <span style="color:#f59e0b;font-size:10px" title="backfill_embeddings.py 실행 전 — 키워드 검색만 가능">임베딩 대기</span>';
-        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0 4px 14px;border-bottom:0.5px solid var(--border-tertiary)">' +
-          '<span style="word-break:break-all">' + r.doc_name + emb + '</span>' +
-          '<span style="color:var(--text-tertiary);flex-shrink:0;font-size:11px">' + r.chunks + '청크</span></div>';
+    groups.push(etc);
+    var total = 0;
+    var html = groups.filter(function(g) { return g.items.length > 0; }).map(function(g, gi) {
+      g.items.sort(function(a, b) { return a.p.clean.localeCompare(b.p.clean, 'ko'); });
+      total += g.items.length;
+      var fileRows = g.items.map(function(it) {
+        var badge = it.embedded
+          ? '<span class="badge badge-teal">검색 가능</span>'
+          : '<span class="badge" style="background:rgba(245,158,11,.12);color:#b45309" title="backfill_embeddings.py 실행 전 — 키워드 검색만 가능">임베딩 대기</span>';
+        var dupTag = it.p.dup ? ' <span style="font-size:10px;color:var(--text-tertiary)">(중복본)</span>' : '';
+        return '<div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div>' +
+          '<div style="flex:1;min-width:0"><div class="file-name">' + it.p.clean + dupTag + '</div>' +
+          '<div class="file-size">' + (it.p.info ? it.p.info + ' · ' : '') + it.chunks + '청크</div></div>' + badge + '</div>';
       }).join('');
-      return '<details style="margin-bottom:4px"><summary style="cursor:pointer;font-weight:600;font-size:12px;padding:5px 0;color:var(--text-primary)">' +
-        c + ' <span style="color:var(--text-tertiary);font-weight:400">(' + byCat[c].length + '개)</span></summary>' + items + '</details>';
+      return '<div class="section-title"' + (gi > 0 ? ' style="margin-top:20px"' : '') + '>' + g.title + ' (' + g.items.length + '종)</div>' +
+        '<div class="card" style="cursor:default;margin-bottom:14px">' + fileRows + '</div>';
     }).join('');
-    var cnt = document.getElementById('kb-doc-count');
-    if (cnt) cnt.textContent = rows.length + '개';
-    el.innerHTML = html || '등록된 문서가 없습니다.';
+    var tot = document.getElementById('kb-total');
+    if (tot) tot.textContent = total;
+    el.innerHTML = html || '<div style="color:var(--text-secondary);font-size:12px;padding:16px 0">등록된 문서가 없습니다.</div>';
     _kbDocsLoaded = true;
   } catch(e) {
-    el.innerHTML = '목록 조회 실패: ' + e.message;
+    el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:16px 0">목록 조회 실패: ' + e.message + '</div>';
   }
 }
 
