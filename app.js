@@ -1633,7 +1633,7 @@ function _impSelHtml(newsId, current) {
     var r = IMPORTANCE_RULES[v] || {};
     var act = (current === v);
     return '<span onclick="setNewsImportance(\'' + newsId + '\',\'' + v + '\')" ' +
-      'style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ' + (act ? r.color : 'var(--border-secondary)') + ';' +
+      'style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:4px;white-space:nowrap;border:1px solid ' + (act ? r.color : 'var(--border-secondary)') + ';' +
       'color:' + (act ? '#fff' : 'var(--text-tertiary)') + ';background:' + (act ? r.color : 'transparent') + '">' + v + '</span>';
   }).join('');
 }
@@ -1680,28 +1680,30 @@ function showNewsDetail(newsId) {
   var rule   = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
   var date   = (n.published_at || n.created_at || '').slice(0, 10);
   var urlBtn = n.url
-    ? '<a href="' + n.url + '" target="_blank" class="btn" style="font-size:11px;padding:4px 10px;text-decoration:none"><i class="ti ti-external-link"></i> 원문 보기</a>'
+    ? '<a href="' + n.url + '" target="_blank" class="btn" style="font-size:11px;padding:4px 10px;text-decoration:none;white-space:nowrap"><i class="ti ti-external-link"></i> 원문 보기</a>'
     : '';
   var lockBtn = '<button class="btn" id="lock-btn-' + n.id + '" onclick="toggleNewsLock(\'' + n.id + '\')" ' +
     'title="잠금 시 15일이 지나도 삭제되지 않고 AI 자문에서 계속 참조됩니다" ' +
-    'style="font-size:11px;padding:4px 10px;cursor:pointer;' + (n.locked ? 'color:var(--accent)' : '') + '">' +
+    'style="font-size:11px;padding:4px 10px;cursor:pointer;white-space:nowrap;' + (n.locked ? 'color:var(--accent)' : '') + '">' +
     (n.locked ? '<i class="ti ti-lock"></i> 잠금됨' : '<i class="ti ti-lock-open"></i> 잠금') + '</button>';
   var delBtn = '<button class="btn" onclick="deleteNewsItem(\'' + n.id + '\')" ' +
     'title="이 기사를 목록에서 영구 삭제합니다 (재수집되지 않음)" ' +
-    'style="font-size:11px;padding:4px 10px;cursor:pointer;color:#d04545">' +
+    'style="font-size:11px;padding:4px 10px;cursor:pointer;color:#d04545;white-space:nowrap">' +
     '<i class="ti ti-trash"></i> 삭제</button>';
 
-  var impSel = '<span id="imp-sel-' + n.id + '" title="긴급도 수정 — 수정 내역은 AI 분류 학습에 반영됩니다" style="display:inline-flex;gap:4px;margin-left:2px">' + _impSelHtml(n.id, n._importance) + '</span>';
+  var impSel = '<div style="display:flex;align-items:center;gap:5px;margin-bottom:8px;flex-wrap:wrap">' +
+    '<span style="font-size:10px;color:var(--text-tertiary);white-space:nowrap">긴급도 수정</span>' +
+    '<span id="imp-sel-' + n.id + '" title="수정 내역은 AI 분류 학습에 반영됩니다" style="display:inline-flex;gap:4px">' + _impSelHtml(n.id, n._importance) + '</span></div>';
 
   var html =
     // 헤더: 중요도 + 제목
     '<div style="border-left:3px solid ' + rule.color + ';padding-left:10px;margin-bottom:14px">' +
-      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
-        '<span id="importance-badge-' + n.id + '" style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px">' + rule.label + '</span>' +
-        impSel +
-        '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
-        '<div style="margin-left:auto;display:flex;gap:6px">' + lockBtn + delBtn + urlBtn + '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;row-gap:6px">' +
+        '<span id="importance-badge-' + n.id + '" style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px;white-space:nowrap">' + rule.label + '</span>' +
+        '<span style="font-size:11px;color:var(--text-tertiary);white-space:nowrap">' + date + '</span>' +
+        '<div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' + lockBtn + delBtn + urlBtn + '</div>' +
       '</div>' +
+      impSel +
       '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.55;margin-bottom:4px">' + n.title + '</div>' +
       '<div style="font-size:11px;color:var(--text-secondary)">' + (n.source || '') + '</div>' +
     '</div>' +
