@@ -68,9 +68,8 @@ def chunk_text(text: str) -> list[dict]:
         block = block.strip()
         if not block:
             continue
-        # 블록 맨 앞의 조문 헤더에서 조항번호+제목 추출 (없으면 None)
-        # 예: '45조의2(준공검사의 면제 등)' — 제목 포함으로 AI 인용 시 조문 성격 즉시 인지
-        m = re.match(r'제(\d+조(?:의\d+)?\([^)]*\))', block)
+        # 블록 맨 앞의 조문 헤더에서만 조항번호 추출 (없으면 None)
+        m = re.match(r'제(\d+조(?:의\d+)?)\(', block)
         article_no = m.group(1) if m else None
         if len(block) <= CHUNK_SIZE:
             chunks.append({'content': block, 'article_no': article_no})

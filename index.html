@@ -37,6 +37,8 @@
       <div class="nav-item" onclick="go('custom',this)"><i class="ti ti-pencil-plus"></i>추가 지식 입력</div>
     </div>
     <div class="nav-group">
+      <div class="nav-label">메인</div>
+      <div class="nav-item" onclick="go('home',this)"><i class="ti ti-layout-dashboard"></i>대시보드</div>
       <div class="nav-item" onclick="go('settings',this)"><i class="ti ti-settings"></i>설정</div>
     </div>
     <div class="sidebar-bottom">
@@ -50,13 +52,49 @@
   <!-- Main -->
   <div class="main">
     <div class="topbar">
-      <span class="topbar-title" id="topbar-title">보도자료·뉴스</span>
+      <span class="topbar-title" id="topbar-title">대시보드</span>
       <div class="topbar-actions">
         <button class="btn" onclick="smartRefresh()"><i class="ti ti-refresh"></i>새로고침</button>
       </div>
     </div>
 
     <div class="content">
+
+      <!-- 대시보드 -->
+      <div class="panel" id="panel-home">
+        <div class="stat-row">
+          <div class="stat"><div class="stat-label">업로드 문서</div><div class="stat-val">231</div><div class="stat-sub">법령·고시 89 · ITU-R 6 · 정부 보도자료 136</div></div>
+          <div class="stat"><div class="stat-label">이번달 자문</div><div class="stat-val" id="stat-consult">—</div><div class="stat-sub" id="stat-consult-sub">Supabase 연결 필요</div></div>
+          <div class="stat"><div class="stat-label">최근 고시 변경</div><div class="stat-val">2건</div><div class="stat-sub">2026.05 개정예고</div></div>
+          <div class="stat"><div class="stat-label">미확인 뉴스</div><div class="stat-val" id="stat-news">—</div><div class="stat-sub" id="stat-news-sub">Supabase 연결 필요</div></div>
+        </div>
+        <div class="two-col">
+          <div>
+            <div class="section-title"><i class="ti ti-clock"></i>최근 자문 내역</div>
+            <div id="recent-logs">
+              <div style="font-size:12px;color:var(--text-tertiary);padding:20px 0;text-align:center;">Supabase 연결 후 자동으로 표시됩니다</div>
+            </div>
+          </div>
+          <div>
+            <div class="section-title"><i class="ti ti-bell"></i>주요 알림</div>
+            <div class="card">
+              <div class="card-header"><span class="card-title">고시 개정 행정예고</span><span class="badge badge-amber">신규</span></div>
+              <div class="card-desc">전기통신사업용 무선설비 기술기준 일부개정안 행정예고 (2026.04.27)</div>
+              <div class="card-meta"><i class="ti ti-external-link"></i>rra.go.kr 확인 필요</div>
+            </div>
+            <div class="card">
+              <div class="card-header"><span class="card-title">ITU-R M.2150-3 최신본</span><span class="badge badge-blue">업로드됨</span></div>
+              <div class="card-desc">5G Advanced 내용 반영 Rev.3 (2026.02) — 지식 베이스 적용 완료</div>
+              <div class="card-meta"><i class="ti ti-calendar"></i>2026.02 승인</div>
+            </div>
+            <div class="card">
+              <div class="card-header"><span class="card-title">방통기자재 시험기관 고시 예고</span><span class="badge badge-amber">신규</span></div>
+              <div class="card-desc">방송통신기자재 시험기관 지정 및 관리 고시 일부개정안 예고 (2026.05.04)</div>
+              <div class="card-meta"><i class="ti ti-external-link"></i>rra.go.kr 확인 필요</div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- AI 자문 -->
       <div class="panel" id="panel-chat">
@@ -71,7 +109,7 @@
               🔎 <strong>3중 하이브리드 검색</strong> <span style="font-size:10px;color:var(--accent-blue)">NEW</span><br>
               · ① AI 쿼리 확장(질문을 동의어·법령 공식 용어로 변환) ② 키워드·조문 유사도 검색 ③ 시맨틱 벡터 검색(표현이 달라도 의미로 매칭)<br>
               · 답변에 조항 번호·고시번호·시행일을 함께 인용합니다.<br><br>
-              📄 <strong>법령·고시 (하이브리드 RAG — 전 문서 임베딩 · 실시간 목록: 지식 베이스 → 국내 법령·고시)</strong><br>
+              📄 <strong>법령·고시 (하이브리드 RAG — 271개 문서, 15,331청크 전체 임베딩)</strong><br>
               · 전파법·시행령·시행규칙, 주파수 분배표, 무선설비 기술기준, 전자파 기준, 적합성평가 고시<br>
               · 지방세법·시행령 (무선국 등록면허세 등) <span style="font-size:10px;color:var(--accent-blue)">NEW</span><br>
               · ITU-R M.2150-3(5G) / M.2160-0(6G) / M.1036-8 / SM.329-13 등 6종<br>
@@ -90,14 +128,14 @@
           <div style="margin-top:8px">
             <div class="section-title">자주 묻는 질문</div>
             <div class="tag-list">
-              <span class="tag" onclick="askQ('무선국 등록면허세 부과 기준과 면제·감면 조건을 설명해줘')">등록면허세 부과·감면</span>
-              <span class="tag" onclick="askQ('준공검사가 면제되는 무선국 유형을 시행령 근거와 함께 알려줘')">준공검사 면제 대상</span>
-              <span class="tag" onclick="askQ('무선국 자기적합확인 제도(전파법 제24조제2항, 2026.4.21 신설)의 내용과 시행령 위임 현황을 알려줘')">무선국 자기적합확인</span>
-              <span class="tag" onclick="askQ('주파수 재할당 신청 절차와 법정 기한을 알려줘')">주파수 재할당 절차</span>
-              <span class="tag" onclick="askQ('3G 서비스 종료 시 필요한 법적 절차와 기한을 알려줘')">3G 종료 절차</span>
-              <span class="tag" onclick="askQ('무선국 개설 시 허가 대상과 신고 대상의 구분 기준을 알려줘')">개설 허가·신고 구분</span>
-              <span class="tag" onclick="askQ('중계기·DAS(분산안테나) 무선국의 검사·신고 의무를 알려줘')">중계기·DAS 검사</span>
-              <span class="tag" onclick="askQ('해외 주요국의 무선국 면허세·전파사용료 제도를 우리나라와 비교해줘')">해외 전파사용료 비교</span>
+              <span class="tag" onclick="askQ('주파수 할당 조건 및 재할당 기준을 설명해줘')">주파수 할당·재할당</span>
+              <span class="tag" onclick="askQ('전자파 인체보호기준 최신 내용을 설명해줘')">전자파 인체보호기준</span>
+              <span class="tag" onclick="askQ('5G 무선설비 기술기준 주요 내용은?')">5G 기술기준</span>
+              <span class="tag" onclick="askQ('ITU-R WRC-27 주요 의제를 설명해줘')">WRC-27 의제</span>
+              <span class="tag" onclick="askQ('방송통신기자재 적합성평가 절차를 알려줘')">적합성평가 절차</span>
+              <span class="tag" onclick="askQ('6GHz 대역 IMT 분배 현황을 알려줘')">6GHz IMT 분배</span>
+              <span class="tag" onclick="askQ('최근 과기정통부 주파수 관련 보도자료 내용을 요약해줘')">보도자료 요약</span>
+              <span class="tag" onclick="askQ('2025년 주파수 할당 관련 보도자료를 알려줘')">주파수 보도자료</span>
             </div>
           </div>
           <div class="chat-input-wrap" style="margin-top:12px">
@@ -165,13 +203,76 @@
       <!-- 국내 법령·고시 -->
       <div class="panel" id="panel-law">
         <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
-          <span style="font-size:12px;color:var(--text-secondary)">총 <strong id="kb-total">—</strong>개 문서 · 지식 베이스 실시간 목록 · 출처: law.go.kr · rra.go.kr</span>
-          <button class="btn" style="font-size:11px;padding:3px 10px" onclick="loadKbDocs(true)"><i class="ti ti-refresh"></i> 새로고침</button>
+          <span style="font-size:12px;color:var(--text-secondary)">총 <strong>89개</strong> 문서 · 출처: law.go.kr · rra.go.kr</span>
+          <span style="font-size:11px;color:var(--text-tertiary)">마지막 정리: 2026.05.26</span>
           <button class="btn btn-primary" style="margin-left:auto;font-size:12px" onclick="openPdfUpload('law')"><i class="ti ti-upload"></i> PDF 업로드</button>
         </div>
         <div id="law-upload-list"></div>
 
-        <div id="kb-doc-groups"><div style="color:var(--text-secondary);font-size:12px;padding:16px 0">불러오는 중...</div></div>
+        <div class="section-title">전파법 기본 법령 (4종)</div>
+        <div class="card" style="cursor:default;margin-bottom:14px">
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">전파법</div><div class="file-size">법률 제21065호 · 2026.01.02 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">전파법 시행령</div><div class="file-size">대통령령 제35801호 · 2025.10.01 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">전파법 시행규칙</div><div class="file-size">과기정통부령 제00156호 · 2025.10.01 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">전파법 시행에 관한 방송통신위원회 규칙</div><div class="file-size">방통위고시 제2019-2호</div></div><span class="badge badge-teal">최신</span></div>
+        </div>
+
+        <div class="section-title">주파수 행정규칙 (13종)</div>
+        <div class="card" style="cursor:default;margin-bottom:14px">
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">대한민국 주파수 분배표</div><div class="file-size">과기정통부고시 제2024-44호 · 2025.02.17 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">주파수할당 신청 절차 및 방법 등 세부사항</div><div class="file-size">과기정통부고시 제2026-23호 · 2026.04.16</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">주파수할당대가의 산정 및 부과에 관한 세부사항</div><div class="file-size">과기정통부고시 제2025-10호</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">주파수 공동사용 범위와 조건, 절차, 방법 기준</div><div class="file-size">과기정통부고시 제2019-96호</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">공공용 주파수 업무처리지침 외 8종</div><div class="file-size">주파수 관련 행정규칙 일체</div></div><span class="badge badge-teal">최신</span></div>
+        </div>
+
+        <div class="section-title">전자파 행정규칙 (10종)</div>
+        <div class="card" style="cursor:default;margin-bottom:14px">
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">전자파인체보호기준</div><div class="file-size">과기정통부고시 제2019-4호</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">전자파적합성 기준</div><div class="file-size">RRA고시 제2025-22호 · 2026.07.01 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">전자파흡수율 측정기준</div><div class="file-size">RRA고시 제2025-9호 · 2026.04.01 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">전자파강도 측정기준 외 7종</div><div class="file-size">전자파 관련 행정규칙 일체</div></div><span class="badge badge-teal">최신</span></div>
+        </div>
+
+        <div class="section-title">적합성평가 행정규칙 (11종)</div>
+        <div class="card" style="cursor:default;margin-bottom:14px">
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">방송통신기자재등의 적합성평가에 관한 고시</div><div class="file-size">과기정통부고시 제2025-56호 · 2026.11.06 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">방송통신기자재등 시험기관의 지정 및 관리에 관한 고시</div><div class="file-size">RRA고시 제2025-22호 · 2026.07.01 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">한·EU, 한·영, 한·인도네시아 상호인정협정 외</div><div class="file-size">적합성평가 상호인정 협정 4개국</div></div><span class="badge badge-teal">최신</span></div>
+        </div>
+
+        <div class="section-title">무선설비·단말장치 기술기준 (27종)</div>
+        <div class="card" style="cursor:default">
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">간이무선국·우주국 무선설비 기술기준</div><div class="file-size">RRA고시 제2025-5호 · 2025.05.26 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">항공업무용 무선설비의 기술기준</div><div class="file-size">RRA고시 제2025-11호 · 2025.12.22 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">해상업무용 무선설비의 기술기준</div><div class="file-size">RRA고시 제2025-6호 · 2025.06.23 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">단말장치 기술기준</div><div class="file-size">RRA고시 제2025-13호 · 2026.06.23 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">무선국의 운용 등에 관한 규정 외 23종</div><div class="file-size">무선·전파 관련 행정규칙 일체</div></div><span class="badge badge-teal">최신</span></div>
+        </div>
+
+        <div class="section-title" style="margin-top:20px">전기통신사업법 계열 (4종)</div>
+        <div class="card">
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">전기통신사업법</div><div class="file-size">법률 제21652호 · 2026.05.19 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">전기통신사업법 시행령</div><div class="file-size">대통령령 제36281호 · 2026.04.28 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">전기통신사업법 시행에 관한 과기정통부규정</div><div class="file-size">과기정통부고시 제2026-37호 · 2026.04.28 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">이동통신단말장치 유통 관련 과징금 부과 세부기준</div><div class="file-size">방통위고시 제2026-6호 · 2026.04.28 시행</div></div><span class="badge badge-teal">최신</span></div>
+        </div>
+
+        <div class="section-title" style="margin-top:20px">정보통신망법 계열 (3종)</div>
+        <div class="card">
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">정보통신망 이용촉진 및 정보보호 등에 관한 법률</div><div class="file-size">법률 제21066호 · 2025.10.01 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">정보통신망법 시행령</div><div class="file-size">대통령령 제36220호 · 2026.03.24 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">정보통신망법 시행규칙</div><div class="file-size">과기정통부령 제00071호 · 2021.03.31 시행</div></div><span class="badge badge-teal">현행</span></div>
+        </div>
+
+        <div class="section-title" style="margin-top:20px">방송통신발전기본법 계열 (11종)</div>
+        <div class="card">
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">방송통신발전 기본법</div><div class="file-size">법률 제21066호 · 2025.10.01 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div><div style="flex:1"><div class="file-name">방송통신발전 기본법 시행령</div><div class="file-size">대통령령 제35810호 · 2025.10.01 시행</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">방송통신발전기금 운용·관리규정</div><div class="file-size">과기정통부고시</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">방송통신규제업무 운영규정</div><div class="file-size">방통위 내부규정</div></div><span class="badge badge-teal">최신</span></div>
+          <div class="file-item"><div class="file-icon fi-blue"><i class="ti ti-file"></i></div><div style="flex:1"><div class="file-name">방송통신설비 기술기준 조사·시험 업무처리지침 외 7종</div><div class="file-size">방송통신설비·정보통신기반시설·인터넷멀티미디어 관련 규정 일체</div></div><span class="badge badge-teal">최신</span></div>
+        </div>
       </div>
 
       <!-- ITU-R -->
@@ -238,7 +339,7 @@
         <!-- 중요도 필터 탭 -->
         <div class="tag-list" style="margin-bottom:12px" id="news-filter-tabs">
           <span class="tag selected" onclick="filterNewsByImportance(this,'전체')">전체</span>
-          <span class="tag" onclick="filterNewsByImportance(this,'긴급')" style="border-color:#ef4444;color:#ef4444">🔴 중요</span>
+          <span class="tag" onclick="filterNewsByImportance(this,'긴급')" style="border-color:#ef4444;color:#ef4444">🔴 긴급</span>
           <span class="tag" onclick="filterNewsByImportance(this,'보통')" style="border-color:#f59e0b;color:#d97706">🟡 보통</span>
           <span class="tag" onclick="filterNewsByImportance(this,'참고')" style="border-color:#22c55e;color:#16a34a">🟢 참고</span>
         </div>
@@ -565,6 +666,9 @@
     <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('more-sub')"></div>
     <div class="mobile-submenu-sheet">
       <div class="mobile-submenu-title">더보기</div>
+      <button class="mobile-submenu-item" onclick="go('home',null);setBottomNav('bn-more');closeMobileSubMenu('more-sub')">
+        <i class="ti ti-layout-dashboard"></i>대시보드
+      </button>
       <button class="mobile-submenu-item" onclick="go('settings',null);setBottomNav('bn-more');closeMobileSubMenu('more-sub')">
         <i class="ti ti-settings"></i>설정
       </button>
@@ -654,7 +758,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
-<script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260612w"></script>
+<script src="system_prompt.js?v=20260612"></script>
+<script src="app.js?v=20260612d"></script>
 </body>
 </html>

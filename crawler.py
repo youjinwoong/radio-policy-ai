@@ -1249,9 +1249,13 @@ def save_new_items(items: list, existing_data: tuple) -> list:
         item['importance'] = val
 
     try:
-        sb.table('news_feed').insert(valid).execute()
+        # upsert(on_conflict=url, ignore_duplicates): 크롤러 동시 실행 시
+        # 같은 기사 중복 저장 방지 (idx_news_feed_url_unique와 한 쌍)
+        sb.table('news_feed').upsert(
+            valid, on_conflict='url', ignore_duplicates=True
+        ).execute()
     except Exception as e:
-        print(f'[저장 오류] Supabase insert 실패: {e}')
+        print(f'[저장 오류] Supabase upsert 실패: {e}')
         return []
     urgent_count = sum(1 for i in valid if i.get('urgency') == '긴급')
     print(f'[저장] {len(valid)}건 저장 완료 (긴급 {urgent_count}건)')
