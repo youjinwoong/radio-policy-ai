@@ -1490,6 +1490,10 @@ function _renderSingleItem(n) {
     'title="' + (n.locked ? '잠금 해제 (해제 시 15일 경과 후 삭제됨)' : '잠금 (15일이 지나도 삭제되지 않음)') + '" ' +
     'style="cursor:pointer;font-size:11px;vertical-align:middle;color:' + (n.locked ? 'var(--accent)' : 'var(--text-tertiary)') + ';opacity:' + (n.locked ? '1' : '.4') + '">' +
     '<i class="ti ti-' + (n.locked ? 'lock' : 'lock-open') + '"></i></span>';
+  var delIcon = ' <span onclick="event.stopPropagation();deleteNewsItem(\'' + n.id + '\')" ' +
+    'title="기사 삭제" ' +
+    'style="cursor:pointer;font-size:11px;vertical-align:middle;color:var(--text-tertiary);opacity:.4">' +
+    '<i class="ti ti-trash"></i></span>';
   return '<div class="news-item" onclick="showNewsDetail(\'' + n.id + '\')" style="cursor:pointer;border-left:' + rule.border + ';' + (isSelected ? 'background:var(--bg-secondary);border-radius:var(--radius-md)' : '') + '">' +
     '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '"></div>' +
     '<div style="flex:1;min-width:0;overflow:hidden">' +
@@ -1498,7 +1502,7 @@ function _renderSingleItem(n) {
         '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0">' + date + '</span>' +
         (n.source ? '<span class="news-item-source" style="font-size:10px;color:var(--text-tertiary);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px">' + n.source + '</span>' : '') +
       '</div>' +
-      '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + lockIcon + '</div>' +
+      '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + lockIcon + delIcon + '</div>' +
       (n.summary ? '<div class="news-meta" style="margin-top:3px;font-size:11px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:var(--text-tertiary)">' + n.summary.slice(0, 80) + (n.summary.length > 80 ? '…' : '') + '</div>' : '') +
     '</div>' +
   '</div>';
@@ -1551,6 +1555,7 @@ function renderNewsList() {
               '<span style="font-size:12px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 6px;border-radius:4px;flex-shrink:0">' + rule.label + '</span>' +
               '<span style="font-size:13px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + n.title + urlIcon + '</span>' +
               '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0;margin-left:8px">' + (n.source||'') + '</span>' +
+              '<span onclick="event.stopPropagation();deleteNewsItem(\'' + n.id + '\')" title="기사 삭제" style="cursor:pointer;font-size:11px;color:var(--text-tertiary);opacity:.5;flex-shrink:0;margin-left:6px"><i class="ti ti-trash"></i></span>' +
             '</div>';
           }).join('') +
         '</div>' +
@@ -1598,6 +1603,30 @@ async function toggleNewsLock(newsId) {
   }
 }
 
+// ── 뉴스 기사 삭제 (news_feed 영구 삭제 + deleted_news 등록으로 재수집 방지) ──
+async function deleteNewsItem(newsId) {
+  var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
+  if (!n || !sb) return;
+  var msg = '이 기사를 삭제할까요?\n\n' + (n.title || '');
+  if (n.locked) msg += '\n\n⚠️ 잠금된 기사입니다. 삭제하면 AI 자문에서도 더 이상 참조되지 않습니다.';
+  if (!confirm(msg)) return;
+  try {
+    // 재수집 방지: 크롤러가 같은 URL·제목을 다시 저장하지 않도록 블록리스트 기록
+    try { await sb.from('deleted_news').insert({ url: n.url || null, title: n.title || null }); } catch(e2) {}
+    var resp = await sb.from('news_feed').delete().eq('id', newsId);
+    if (resp.error) throw resp.error;
+    newsDataCache = newsDataCache.filter(function(x) { return String(x.id) !== String(newsId); });
+    if (String(selectedNewsId) === String(newsId)) {
+      selectedNewsId = null;
+      var panel = document.getElementById('news-detail-panel');
+      if (panel) panel.style.display = 'none';
+    }
+    renderNewsList();
+  } catch(e) {
+    alert('기사 삭제 실패: ' + e.message);
+  }
+}
+
 function showNewsDetail(newsId) {
   selectedNewsId = newsId;
   var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
@@ -1615,6 +1644,10 @@ function showNewsDetail(newsId) {
     'title="잠금 시 15일이 지나도 삭제되지 않고 AI 자문에서 계속 참조됩니다" ' +
     'style="font-size:11px;padding:4px 10px;cursor:pointer;' + (n.locked ? 'color:var(--accent)' : '') + '">' +
     (n.locked ? '<i class="ti ti-lock"></i> 잠금됨' : '<i class="ti ti-lock-open"></i> 잠금') + '</button>';
+  var delBtn = '<button class="btn" onclick="deleteNewsItem(\'' + n.id + '\')" ' +
+    'title="이 기사를 목록에서 영구 삭제합니다 (재수집되지 않음)" ' +
+    'style="font-size:11px;padding:4px 10px;cursor:pointer;color:#d04545">' +
+    '<i class="ti ti-trash"></i> 삭제</button>';
 
   var html =
     // 헤더: 중요도 + 제목
@@ -1622,7 +1655,7 @@ function showNewsDetail(newsId) {
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
         '<span id="importance-badge-' + n.id + '" style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px">' + rule.label + '</span>' +
         '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
-        '<div style="margin-left:auto;display:flex;gap:6px">' + lockBtn + urlBtn + '</div>' +
+        '<div style="margin-left:auto;display:flex;gap:6px">' + lockBtn + delBtn + urlBtn + '</div>' +
       '</div>' +
       '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.55;margin-bottom:4px">' + n.title + '</div>' +
       '<div style="font-size:11px;color:var(--text-secondary)">' + (n.source || '') + '</div>' +

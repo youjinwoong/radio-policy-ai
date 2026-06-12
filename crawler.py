@@ -119,10 +119,17 @@ def classify_urgency(title: str, content: str = '') -> str:
 # ═══════════════════════════════════════════════════════
 
 def get_existing_urls() -> set:
-    """Supabase에 이미 저장된 URL + 제목 목록 조회 (Google RSS 중복 방지)"""
+    """Supabase에 이미 저장된 URL + 제목 목록 조회 (Google RSS 중복 방지)
+    + 사용자가 대시보드에서 삭제한 기사(deleted_news)도 포함해 재수집 방지"""
     res = sb.table('news_feed').select('url,title').execute()
     urls   = {row['url']   for row in (res.data or []) if row.get('url')}
     titles = {row['title'] for row in (res.data or []) if row.get('title')}
+    try:
+        dres = sb.table('deleted_news').select('url,title').execute()
+        urls   |= {row['url']   for row in (dres.data or []) if row.get('url')}
+        titles |= {row['title'] for row in (dres.data or []) if row.get('title')}
+    except Exception as e:
+        print(f'[삭제목록] deleted_news 조회 실패(무시): {e}')
     return urls, titles
 
 
