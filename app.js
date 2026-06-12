@@ -2887,6 +2887,7 @@ function go(page, navEl) {
   if (page === 'settings') loadSettingsUI();
   if (page === 'press') loadPressFromSupabase();
   if (page === 'terms') loadTerms();
+  if (page === 'law') loadKbDocs();
 }
 
 function setBottomNav(activeId) {
