@@ -28,11 +28,11 @@
       <div class="nav-label">법안 동향 모니터링</div>
       <div class="nav-item" onclick="go('assembly',this)"><i class="ti ti-building-bank"></i>국회 법안</div>
       <div class="nav-item" onclick="go('lawtrack',this)"><i class="ti ti-file-certificate"></i>행정부 입법예고·법령 개정</div>
+      <div class="nav-item" onclick="go('diff',this)"><i class="ti ti-git-diff"></i>법령 DIFF 분석</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">자문</div>
       <div class="nav-item" onclick="go('chat',this)"><i class="ti ti-message-circle"></i>AI 자문</div>
-      <div class="nav-item" onclick="go('diff',this)"><i class="ti ti-git-diff"></i>법령 DIFF 분석</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">지식 베이스</div>
@@ -601,6 +601,9 @@
       <button class="mobile-submenu-item" onclick="go('lawtrack',null);setBottomNav('bn-monitor');closeMobileSubMenu('monitor-sub')">
         <i class="ti ti-file-certificate"></i>행정부 입법예고·법령 개정
       </button>
+      <button class="mobile-submenu-item" onclick="go('diff',null);setBottomNav('bn-monitor');closeMobileSubMenu('monitor-sub')">
+        <i class="ti ti-git-diff"></i>법령 DIFF 분석
+      </button>
     </div>
   </div>
 
@@ -719,6 +722,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260614d"></script>
+<script src="app.js?v=20260614e"></script>
 </body>
 </html>
