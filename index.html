@@ -27,7 +27,7 @@
     <div class="nav-group">
       <div class="nav-label">법안 동향</div>
       <div class="nav-item" onclick="go('assembly',this)"><i class="ti ti-building-bank"></i>국회 법안</div>
-      <div class="nav-item" onclick="go('lawtrack',this)"><i class="ti ti-file-certificate"></i>입법예고·법령 개정</div>
+      <div class="nav-item" onclick="go('lawtrack',this)"><i class="ti ti-file-certificate"></i>행정부 입법예고·법령 개정</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">자문</div>
@@ -507,7 +507,7 @@
         </div><!-- settings-unlocked -->
       </div><!-- panel-settings -->
 
-      <!-- 입법예고·법령 개정 타임라인 -->
+      <!-- 행정부 입법예고·법령 개정 타임라인 -->
       <div class="panel" id="panel-lawtrack">
         <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
           <span style="font-size:12px;color:var(--text-secondary)">법제처 Open API · 매일 11:00 KST 갱신 · 입법예고→공포→시행 단계 추적</span>
@@ -600,7 +600,7 @@
         <i class="ti ti-building-bank"></i>국회 법안
       </button>
       <button class="mobile-submenu-item" onclick="go('lawtrack',null);setBottomNav('bn-monitor');closeMobileSubMenu('monitor-sub')">
-        <i class="ti ti-file-certificate"></i>입법예고·법령 개정
+        <i class="ti ti-file-certificate"></i>행정부 입법예고·법령 개정
       </button>
     </div>
   </div>
@@ -720,6 +720,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260614a"></script>
+<script src="app.js?v=20260614b"></script>
 </body>
 </html>
