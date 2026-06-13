@@ -1284,8 +1284,10 @@ async function refreshDashboard() {
 //  News — 팀 중요도 기반 분류 & 액션 아이템 패널
 // ════════════════════════════════════════════
 let currentNewsFilter = '전체';
+let currentNewsSourceType = 'gov'; // 'gov' | 'media' | 'all'
 let newsDataCache = [];      // 전체 로드된 뉴스 캐시
 let selectedNewsId = null;   // 현재 선택된 뉴스 id
+var GOV_SOURCE_PREFIXES = ['국립전파연구원', '과기정통부', '방통위'];
 
 function closeNewsDetail() {
   selectedNewsId = null;
@@ -1521,6 +1523,17 @@ function renderNewsList() {
   var data = currentNewsFilter === '전체'
     ? newsDataCache
     : newsDataCache.filter(function(n) { return n._importance === currentNewsFilter; });
+
+  // 소스 타입 필터
+  if (currentNewsSourceType === 'gov') {
+    data = data.filter(function(n) {
+      return GOV_SOURCE_PREFIXES.some(function(p) { return (n.source || '').startsWith(p); });
+    });
+  } else if (currentNewsSourceType === 'media') {
+    data = data.filter(function(n) {
+      return !GOV_SOURCE_PREFIXES.some(function(p) { return (n.source || '').startsWith(p); });
+    });
+  }
 
   var sorted = data.slice().sort(function(a, b) {
     return new Date(b.published_at || b.created_at) - new Date(a.published_at || a.created_at);
@@ -2898,15 +2911,19 @@ function updateStatusDots() {
 // ════════════════════════════════════════════
 //  Navigation
 // ════════════════════════════════════════════
-function go(page, navEl) {
+function go(page, navEl, sourceType) {
   document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
   document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
   var panel = document.getElementById('panel-' + page);
   if (panel) panel.classList.add('active');
   if (navEl && navEl.classList) navEl.classList.add('active');
 
+  // 뉴스 소스 타입 설정
+  if (page === 'news' && sourceType !== undefined) currentNewsSourceType = sourceType;
+
   // 상단 바 제목 업데이트
-  var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정'};
+  var newsTitle = currentNewsSourceType === 'gov' ? '정부 보도자료' : (currentNewsSourceType === 'media' ? '뉴스' : '보도자료·뉴스');
+  var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:newsTitle, briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
@@ -4030,6 +4047,6 @@ document.addEventListener('DOMContentLoaded', function() {
   updateStatusDots();
   loadSettingsUI();
   loadPressJSON();
-  loadRemoteConfig().then(function() { loadNews(); });
+  loadRemoteConfig().then(function() { currentNewsSourceType = 'gov'; loadNews(); });
   setTimeout(autoExtractTermsIfNeeded, 60000);
 });
