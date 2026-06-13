@@ -145,6 +145,8 @@ def crawl_rra() -> list:
                 href = title_tag.get('href', '')
                 if href.startswith('/'):
                     href = 'https://www.rra.go.kr' + href
+                elif href and not href.startswith('http'):
+                    href = 'https://www.rra.go.kr/' + href
                 tds = row.find_all('td')
                 date_str = tds[-2].get_text(strip=True) if len(tds) >= 3 else ''
                 items.append({
