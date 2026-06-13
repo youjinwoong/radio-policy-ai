@@ -2900,12 +2900,12 @@ function go(page, navEl) {
   if (navEl && navEl.classList) navEl.classList.add('active');
 
   // 상단 바 제목 업데이트
-  var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', briefing:'Daily Briefing', assembly:'국회 법안', settings:'설정'};
+  var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'입법예고·법령 개정', settings:'설정'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-more', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', settings:'bn-more'};
+  var pageTobn = {home:'bn-more', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', settings:'bn-more'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
@@ -2915,6 +2915,7 @@ function go(page, navEl) {
   if (page === 'terms') loadTerms();
   if (page === 'law') loadKbDocs();
   if (page === 'assembly') loadAssemblyBills();
+  if (page === 'lawtrack') loadLawTrack();
 }
 
 function setBottomNav(activeId) {
@@ -3855,6 +3856,157 @@ function renderAssemblyBills(bills) {
 function escHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ════════════════════════════════════════════
+//  입법예고·법령 개정 타임라인
+// ════════════════════════════════════════════
+
+var lawTrackCache = null;
+var lawTrackFilterMode = '전체';
+
+async function loadLawTrack(forceRefresh) {
+  if (!sb) return;
+  var listEl = document.getElementById('lawtrack-list');
+  if (!listEl) return;
+
+  if (!lawTrackCache || forceRefresh) {
+    listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center;font-size:12px">불러오는 중...</div>';
+    try {
+      var resp = await sb
+        .from('law_amendments')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(200);
+      if (resp.error) throw resp.error;
+      lawTrackCache = resp.data || [];
+    } catch(e) {
+      listEl.innerHTML = '<div style="color:#f66;padding:20px;text-align:center;font-size:12px">불러오기 실패: ' + e.message + '</div>';
+      return;
+    }
+  }
+  renderLawTrack(lawTrackCache);
+}
+
+function filterLawTrack(el, mode) {
+  lawTrackFilterMode = mode;
+  document.querySelectorAll('#lawtrack-filter-tabs .tag').forEach(function(t) { t.classList.remove('selected'); });
+  el.classList.add('selected');
+  if (lawTrackCache) renderLawTrack(lawTrackCache);
+}
+
+function lawTrackTypeLabel(law_type) {
+  var map = { lsAnc:'입법예고', bylaw:'시행령', rules:'시행규칙', admrul:'고시' };
+  var colors = { lsAnc:'#f59e0b', bylaw:'#3b82f6', rules:'#8b5cf6', admrul:'#6b7280' };
+  return { text: map[law_type] || law_type, color: colors[law_type] || '#6b7280' };
+}
+
+function fmtLawDate(dt) {
+  // YYYYMMDD → YYYY.MM.DD
+  if (!dt) return null;
+  dt = String(dt).replace(/-/g, '');
+  if (dt.length === 8) return dt.slice(0,4) + '.' + dt.slice(4,6) + '.' + dt.slice(6);
+  return dt;
+}
+
+function renderLawTrack(items) {
+  var listEl = document.getElementById('lawtrack-list');
+  if (!listEl) return;
+
+  var now = new Date();
+  var weekAgo = new Date(now - 7 * 86400000);
+  var todayStr = now.toISOString().slice(0,10).replace(/-/g,'');
+
+  var filtered = lawTrackFilterMode === '전체'
+    ? items
+    : items.filter(function(r) { return r.law_type === lawTrackFilterMode; });
+
+  // 통계
+  var ancCount  = items.filter(function(r) { return r.law_type === 'lsAnc'; }).length;
+  var newCount  = items.filter(function(r) { return new Date(r.created_at) >= weekAgo; }).length;
+  var enfCount  = items.filter(function(r) { return r.enf_dt && r.enf_dt >= todayStr; }).length;
+  var setV = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+  setV('lt-total', items.length);
+  setV('lt-anc',   ancCount);
+  setV('lt-new',   newCount);
+  setV('lt-enf',   enfCount);
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = '<div style="color:var(--text-secondary);padding:24px;text-align:center;font-size:12px">해당 항목이 없습니다</div>';
+    return;
+  }
+
+  var html = '';
+  filtered.forEach(function(r) {
+    var tl   = lawTrackTypeLabel(r.law_type);
+    var kws  = (r.matched_keywords || []).slice(0,3).join(', ');
+    var isNew = new Date(r.created_at) >= weekAgo;
+    var pubDt = fmtLawDate(r.public_dt);
+    var enfDt = fmtLawDate(r.enf_dt);
+    var prevDt = fmtLawDate(r.prev_public_dt);
+    var isUpdated = prevDt && prevDt !== pubDt;
+    var link = r.link_url
+      ? '<a href="' + escHtml(r.link_url) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none"><i class="ti ti-external-link" style="font-size:10px"></i> 상세보기</a>'
+      : '';
+
+    // 타임라인 스텝 생성
+    // 입법예고(lsAnc): [입법예고] → [공포] → [시행]
+    // 시행령/규칙/고시: [공포] → [시행]
+    var steps = [];
+    if (r.law_type === 'lsAnc') {
+      steps.push({ label:'입법예고', date: pubDt, done: !!pubDt, icon:'📢' });
+      steps.push({ label:'공포',     date: null,  done: false,   icon:'📋' });
+      steps.push({ label:'시행',     date: enfDt, done: false,   icon:'✅' });
+    } else {
+      steps.push({ label:'공포',  date: pubDt, done: !!pubDt, icon:'📋' });
+      steps.push({ label:'시행',  date: enfDt, done: enfDt && enfDt.replace(/\./g,'') <= todayStr, icon:'✅' });
+    }
+
+    // 타임라인 HTML
+    var tlHtml = '<div style="display:flex;align-items:flex-start;gap:0;margin:10px 0 4px">';
+    steps.forEach(function(step, idx) {
+      var doneColor = step.done ? 'var(--accent)' : '#d1d5db';
+      var dotBg     = step.done ? 'var(--accent)' : 'var(--bg-secondary)';
+      var textColor = step.done ? 'var(--text-primary)' : 'var(--text-muted)';
+      var connector = idx < steps.length - 1
+        ? '<div style="flex:1;height:2px;background:' + doneColor + ';margin-top:7px;min-width:24px"></div>'
+        : '';
+      tlHtml += '<div style="display:flex;flex-direction:column;align-items:center;min-width:64px">'
+        + '<div style="width:14px;height:14px;border-radius:50%;background:' + dotBg + ';border:2px solid ' + doneColor + ';display:flex;align-items:center;justify-content:center;font-size:8px">'
+        + (step.done ? '<span style="color:#fff;font-size:8px">✓</span>' : '') + '</div>'
+        + '<div style="font-size:10px;font-weight:600;color:' + textColor + ';margin-top:3px;text-align:center">' + step.label + '</div>'
+        + '<div style="font-size:9px;color:var(--text-muted);text-align:center;line-height:1.3">' + (step.date || '—') + '</div>'
+        + '</div>'
+        + connector;
+    });
+    tlHtml += '</div>';
+
+    html += '<div class="card" style="margin-bottom:10px;padding:12px 14px">'
+      // 헤더
+      + '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:2px">'
+      + '<span style="flex:1;font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.4">' + escHtml(r.law_nm) + '</span>'
+      + (isNew ? '<span style="font-size:10px;background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:99px;flex-shrink:0">신규</span>' : '')
+      + (isUpdated ? '<span style="font-size:10px;background:#fef3c7;color:#b45309;padding:1px 6px;border-radius:99px;flex-shrink:0">개정</span>' : '')
+      + '</div>'
+      // 메타
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:2px">'
+      + '<span style="font-size:10px;font-weight:600;color:' + tl.color + ';background:' + tl.color + '1a;padding:1px 7px;border-radius:99px">' + tl.text + '</span>'
+      + (r.ann_type ? '<span style="font-size:10px;color:var(--text-muted)">' + escHtml(r.ann_type) + '</span>' : '')
+      + (kws ? '<span style="font-size:10px;color:var(--text-muted)">키워드: ' + escHtml(kws) + '</span>' : '')
+      + '</div>'
+      // 타임라인
+      + tlHtml
+      // 개정 이력
+      + (isUpdated ? '<div style="font-size:10px;color:#b45309;margin-top:2px">이전 공포: ' + prevDt + ' → ' + (pubDt || '—') + '</div>' : '')
+      // 링크
+      + (link ? '<div style="margin-top:6px">' + link + '</div>' : '')
+      + '</div>';
+  });
+
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;text-align:right">'
+    + filtered.length + '건 표시 (전체 ' + items.length + '건)</div>';
+
+  listEl.innerHTML = html;
 }
 
 // ════════════════════════════════════════════
