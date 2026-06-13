@@ -1146,7 +1146,14 @@ def fetch_article_body(url: str, source: str) -> tuple:
             '정보통신신문': ['div#article_body', 'div.article-content', 'div.view_cont'],
             'Telecom Reseller': ['div.entry-content', 'article', 'div.post-content'],
         }
-        candidates = naver_selectors + selectors_map.get(source, []) + [
+        # 소스 라벨이 '국립전파연구원 공지사항'처럼 접미사를 가질 수 있어 부분 매칭
+        src_selectors = selectors_map.get(source, [])
+        if not src_selectors and source:
+            for _key, _sels in selectors_map.items():
+                if _key in source:
+                    src_selectors = _sels
+                    break
+        candidates = naver_selectors + src_selectors + [
             'article', 'div.article', 'div.news-content',
             'div.view_cont', 'div.view-content', 'div#content',
             'div.article-body', 'div.news_body', 'div.article_txt'
