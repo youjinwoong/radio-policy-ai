@@ -1062,6 +1062,9 @@ def fetch_article_body(url: str, source: str) -> tuple:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=8)
         resp.raise_for_status()
+        # RRA(국립전파연구원) 사이트는 EUC-KR 인코딩
+        if 'rra.go.kr' in url:
+            resp.encoding = 'euc-kr'
         soup = BeautifulSoup(resp.text, 'html.parser')
 
         # ── 발행일 추출 (meta 태그 우선) ───────────────────
@@ -1104,6 +1107,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
             ]
 
         selectors_map = {
+            '국립전파연구원': ['div.board_view', 'div.view_content', 'div#contents', 'div.content_area', 'td.view_cont'],
             '전자신문':    ['div.article_body', 'div#articleBody', 'div.news_view', 'div#articleView'],
             '연합뉴스':    ['div.article-txt', 'article.story-news', 'div#articleWrap'],
             '디지털타임스': ['div#article_txt', 'div.article_content', 'div#articleBody'],
