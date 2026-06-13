@@ -117,6 +117,8 @@ def crawl_rra() -> list:
         ('https://www.rra.go.kr/ko/notice/newsList.do',   '보도자료',  '기타'),
     ]
     for url, label, category in targets:
+        # 상대경로 href 해석을 위한 페이지 기준 디렉토리 (예: .../ko/notice/)
+        base_dir = url.rsplit('/', 1)[0] + '/'
         try:
             res = fetch_with_retry(url, timeout=20)
             res.encoding = 'euc-kr'
@@ -133,7 +135,7 @@ def crawl_rra() -> list:
                 if href.startswith('/'):
                     href = 'https://www.rra.go.kr' + href
                 elif href and not href.startswith('http'):
-                    href = 'https://www.rra.go.kr/' + href
+                    href = base_dir + href
                 tds = row.find_all('td')
                 # td를 역순으로 순회해 날짜 패턴 매칭 (위치 의존 제거)
                 date_str = ''
