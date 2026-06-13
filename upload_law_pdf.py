@@ -1,12 +1,13 @@
 """
-PDF 법령/고시 업로드 스크립트
-사용법: python upload_law_pdf.py <PDF파일경로> [문서명] [카테고리]
+PDF/TXT 법령·고시 업로드 스크립트
+사용법: python upload_law_pdf.py <파일경로> [문서명] [카테고리]
 
-카테고리 선택: 법령 / 고시 / ITU-R (기본값: 고시)
+입력 파일: .pdf 또는 .txt (법령 본문 텍스트)
+카테고리 선택: 법령 / 고시 / ITU-R / 전파법 / 전파법_시행령 / 전파법_시행규칙 등
 
 예시:
-  python upload_law_pdf.py 전파법.pdf
-  python upload_law_pdf.py 전파법.pdf "전파법" 법령
+  python upload_law_pdf.py 전파법.pdf "전파법(법률)(제21065호)(20260102)" 전파법
+  python upload_law_pdf.py 전파법_텍스트.txt "전파법(법률)(제21065호)(20260102)" 전파법
   python upload_law_pdf.py 고시2024-10.pdf "전파연구원 고시 2024-10호" 고시
 """
 
@@ -45,7 +46,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         return extract_text_from_pdf(pdf_path)
 
 
-def chunk_text(text: str) -> list[dict]:
+def chunk_text(text: str) -> list:
     """텍스트를 청크로 분할 (조문 헤더 경계 우선, 없으면 크기 기준)
     반환: [{'content': str, 'article_no': str | None}, ...]
 
@@ -101,7 +102,7 @@ def parse_chunk_metadata(content: str, doc_name: str) -> dict:
     return meta
 
 
-def upload_to_supabase(doc_name: str, doc_category: str, chunks: list[dict]) -> bool:
+def upload_to_supabase(doc_name: str, doc_category: str, chunks: list) -> bool:
     """Supabase document_chunks 테이블에 업로드"""
     try:
         from supabase import create_client
@@ -164,32 +165,21 @@ def main():
     doc_name = sys.argv[2] if len(sys.argv) >= 3 else Path(pdf_path).stem
     doc_category = sys.argv[3] if len(sys.argv) >= 4 else "고시"
 
-    if doc_category not in ("법령", "고시", "ITU-R"):
-        print(f"오류: 카테고리는 법령 / 고시 / ITU-R 중 하나여야 합니다 (입력값: {doc_category})")
+    # 기존 DB 카테고리(전파법, 전파법_시행령 등)도 허용 — 재업로드 시 원래 카테고리 유지
+    VALID_CATEGORIES = (
+        "법령", "고시", "ITU-R",
+        "전파법", "전파법_시행령", "전파법_시행규칙",
+        "전기통신사업법", "전기통신사업법_시행령",
+        "방송통신발전기본법", "방송통신발전기본법_시행령",
+        "기술기준", "적합성평가", "주파수할당", "주파수분배표",
+        "전자파", "정보통신망법", "정보통신기반시설", "방송통신설비",
+    )
+    if doc_category not in VALID_CATEGORIES:
+        print(f"오류: 지원하지 않는 카테고리입니다 (입력값: {doc_category})")
+        print(f"  허용값: {', '.join(VALID_CATEGORIES)}")
         sys.exit(1)
 
-    print(f"\n[1/3] PDF 텍스트 추출: {pdf_path}")
-    text = extract_text_from_pdf(pdf_path)
-    print(f"  추출된 텍스트: {len(text):,}자")
-
-    if len(text) < 100:
-        print("오류: 텍스트가 너무 짧습니다. 스캔 PDF이거나 암호화된 PDF일 수 있습니다.")
-        sys.exit(1)
-
-    print(f"[2/3] 텍스트 청킹")
-    chunks = chunk_text(text)
-    print(f"  생성된 청크: {len(chunks)}개 (평균 {sum(len(c['content']) for c in chunks)//len(chunks)}자)")
-
-    print(f"[3/3] Supabase 업로드: doc_name='{doc_name}', category='{doc_category}'")
-    success = upload_to_supabase(doc_name, doc_category, chunks)
-
-    if success:
-        print(f"\n✅ 완료! '{doc_name}' → document_chunks {len(chunks)}개 저장됨")
-        print(f"   대시보드 AI 자문에서 바로 검색 가능합니다.")
-    else:
-        print("\n❌ 업로드 실패")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
+    suffix = Path(pdf_path).suffix.lower()
+    print(f"\n[1/4] 텍스트 추출: {pdf_path}")
+    if suffix == ".txt":
+        with open(pdf_path, "r", encod
