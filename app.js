@@ -1087,11 +1087,15 @@ async function openChatHistory() {
       return;
     }
     body.innerHTML = data.map(function(item) {
-      return '<div class="card" style="cursor:pointer;margin-bottom:8px;padding:12px 14px" onclick="viewChatHistoryItem(\'' + item.id + '\')">' +
-        '<div style="font-size:13px;font-weight:500;color:var(--text-primary);line-height:1.5">' + chEsc(item.question) + '</div>' +
-        '<div style="font-size:11px;color:var(--text-tertiary);margin-top:5px;display:flex;align-items:center;gap:8px">' +
-          '<span class="rag-tag">' + chEsc(item.category || '일반') + '</span>' + chDate(item.created_at) +
-        '</div></div>';
+      return '<div class="card" style="cursor:pointer;margin-bottom:8px;padding:12px 14px;display:flex;align-items:flex-start;gap:8px" onclick="viewChatHistoryItem(\'' + item.id + '\')">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:500;color:var(--text-primary);line-height:1.5">' + chEsc(item.question) + '</div>' +
+          '<div style="font-size:11px;color:var(--text-tertiary);margin-top:5px;display:flex;align-items:center;gap:8px">' +
+            '<span class="rag-tag">' + chEsc(item.category || '일반') + '</span>' + chDate(item.created_at) +
+          '</div>' +
+        '</div>' +
+        '<button class="btn" title="이력 삭제" style="padding:4px 8px;flex-shrink:0;color:var(--text-tertiary)" onclick="event.stopPropagation();deleteChatHistoryItem(\'' + item.id + '\', this)"><i class="ti ti-trash"></i></button>' +
+      '</div>';
     }).join('');
     body.scrollTop = 0;
   } catch(e) {
@@ -1120,6 +1124,7 @@ async function viewChatHistoryItem(id) {
     }
     body.innerHTML =
       '<button class="btn" onclick="openChatHistory()" style="margin-bottom:12px"><i class="ti ti-arrow-left"></i>목록으로</button>' +
+      '<button class="btn" onclick="deleteChatHistoryItem(\'' + id + '\', null)" style="margin-bottom:12px;margin-left:8px;color:#d04545"><i class="ti ti-trash"></i>삭제</button>' +
       '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.5">' + chEsc(row.question) + '</div>' +
       '<div style="font-size:11px;color:var(--text-tertiary);margin:5px 0 12px"><span class="rag-tag">' + chEsc(row.category || '일반') + '</span> ' + chDate(row.created_at) + '</div>' +
       '<div class="msg msg-ai" style="max-width:100%">' + renderMd(row.answer || '') + '</div>' + srcHtml;
@@ -1131,6 +1136,27 @@ async function viewChatHistoryItem(id) {
 
 function closeChatHistory() {
   document.getElementById('chat-history-modal').style.display = 'none';
+}
+
+// 자문 이력 삭제 — 목록 카드의 휴지통 버튼(btn 전달) / 상세 보기의 삭제 버튼(btn=null)
+async function deleteChatHistoryItem(id, btn) {
+  if (!confirm('이 자문 이력을 삭제할까요?')) return;
+  try {
+    var resp = await sb.from('chat_logs').delete().eq('id', id);
+    if (resp.error) throw resp.error;
+    if (btn && btn.closest) {
+      var card = btn.closest('.card');
+      if (card) card.remove();
+      var body = document.getElementById('chat-history-body');
+      if (body && !body.querySelector('.card')) {
+        body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">저장된 자문 이력이 없습니다.</div>';
+      }
+    } else {
+      openChatHistory(); // 상세 보기에서 삭제 → 목록으로 복귀
+    }
+  } catch(e) {
+    alert('이력 삭제 실패: ' + e.message);
+  }
 }
 
 // 홈 대시보드 최근 자문 카드 → 이력 모달 열고 바로 상세 표시
@@ -1202,16 +1228,17 @@ function askQ(q) {
 // ════════════════════════════════════════════
 function smartRefresh() {
   var active = document.querySelector('.panel[style*="display: block"], .panel[style*="display:block"]');
-  if (!active) active = document.getElementById('panel-home');
-  var id = active ? active.id : 'panel-home';
+  if (!active) active = document.getElementById('panel-news');
+  var id = active ? active.id : 'panel-news';
   var map = {
-    'panel-home':     function() { refreshDashboard(); },
+
     'panel-news':     function() { loadNews(); },
     'panel-briefing': function() { loadBriefing(); },
     'panel-terms':    function() { loadTerms && loadTerms(); },
     'panel-press':    function() { loadPressJSON(); },
+    'panel-law':      function() { loadKbDocs(); },
   };
-  var fn = map[id] || function() { refreshDashboard(); };
+  var fn = map[id] || function() { loadNews(); };
   fn();
 }
 
@@ -1265,7 +1292,7 @@ let selectedNewsId = null;   // 현재 선택된 뉴스 id
 var IMPORTANCE_RULES = {
   긴급: {
     color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: '2px solid #ef4444',
-    label: '🔴 긴급', badge_class: 'badge-red',
+    label: '🔴 중요', badge_class: 'badge-red',
     desc: '즉각 임원 보고 및 대관 대응 필요',
     keywords: ['취소','회수','처분','반납','강제','의무화','시정명령','이행강제','과징금',
                '청문','위반','제재','즉시','긴급','주파수 반납','할당 취소','할당취소',
@@ -1388,7 +1415,7 @@ function _extractKeywords(title) {
   });
   // 지명 정규화: '제주도' → '제주', '서울시' → '서울'
   var normalized = words.map(function(w){
-    return w.replace(/([가-힣]{2,})(도|시|군|구)$/, '$1');
+    return w.replace(/([가-힣]{2,})(도|시|군|구|광장)$/, '$1');
   });
   var all = normalized.concat(mixed);
   return all.filter(function(w){ return !stopwords.includes(w) && w.length >= 2; });
@@ -1399,7 +1426,9 @@ function _titleSimilarity(t1, t2) {
   var k2 = _extractKeywords(t2);
   if (!k1.length || !k2.length) return 0;
   var shared = k1.filter(function(w){ return k2.includes(w); });
-  if (shared.length === 0) return 0;
+  // 공유 키워드 1개만으로는 그룹핑하지 않음 — '기지국' 같은 흔한 도메인 단어가
+  // 서로 다른 주제(광화문 행사 vs 폐기지국 재활용)를 한 그룹으로 잇는 오류 방지 (2026-06-12)
+  if (shared.length < 2) return 0;
   return shared.length / Math.max(k1.length, k2.length);
 }
 
@@ -1464,6 +1493,10 @@ function _renderSingleItem(n) {
     'title="' + (n.locked ? '잠금 해제 (해제 시 15일 경과 후 삭제됨)' : '잠금 (15일이 지나도 삭제되지 않음)') + '" ' +
     'style="cursor:pointer;font-size:11px;vertical-align:middle;color:' + (n.locked ? 'var(--accent)' : 'var(--text-tertiary)') + ';opacity:' + (n.locked ? '1' : '.4') + '">' +
     '<i class="ti ti-' + (n.locked ? 'lock' : 'lock-open') + '"></i></span>';
+  var delIcon = ' <span onclick="event.stopPropagation();deleteNewsItem(\'' + n.id + '\')" ' +
+    'title="기사 삭제" ' +
+    'style="cursor:pointer;font-size:11px;vertical-align:middle;color:var(--text-tertiary);opacity:.4">' +
+    '<i class="ti ti-trash"></i></span>';
   return '<div class="news-item" onclick="showNewsDetail(\'' + n.id + '\')" style="cursor:pointer;border-left:' + rule.border + ';' + (isSelected ? 'background:var(--bg-secondary);border-radius:var(--radius-md)' : '') + '">' +
     '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '"></div>' +
     '<div style="flex:1;min-width:0;overflow:hidden">' +
@@ -1472,7 +1505,7 @@ function _renderSingleItem(n) {
         '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0">' + date + '</span>' +
         (n.source ? '<span class="news-item-source" style="font-size:10px;color:var(--text-tertiary);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px">' + n.source + '</span>' : '') +
       '</div>' +
-      '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + lockIcon + '</div>' +
+      '<div class="news-title" style="font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:break-word">' + n.title + urlIcon + lockIcon + delIcon + '</div>' +
       (n.summary ? '<div class="news-meta" style="margin-top:3px;font-size:11px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:var(--text-tertiary)">' + n.summary.slice(0, 80) + (n.summary.length > 80 ? '…' : '') + '</div>' : '') +
     '</div>' +
   '</div>';
@@ -1502,7 +1535,7 @@ function renderNewsList() {
     if (group.length === 1) {
       html += _renderSingleItem(group[0]);
     } else {
-      var gid = 'g' + gi;
+      var gid = 'g-' + String(group[0].id);
       var isOpen = !!_newsGroupOpen[gid];
       var gtitle = _groupTitle(group);
       var date = (group[0].published_at || group[0].created_at || '').slice(0, 10);
@@ -1525,6 +1558,7 @@ function renderNewsList() {
               '<span style="font-size:12px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 6px;border-radius:4px;flex-shrink:0">' + rule.label + '</span>' +
               '<span style="font-size:13px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + n.title + urlIcon + '</span>' +
               '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0;margin-left:8px">' + (n.source||'') + '</span>' +
+              '<span onclick="event.stopPropagation();deleteNewsItem(\'' + n.id + '\')" title="기사 삭제" style="cursor:pointer;font-size:11px;color:var(--text-tertiary);opacity:.5;flex-shrink:0;margin-left:6px"><i class="ti ti-trash"></i></span>' +
             '</div>';
           }).join('') +
         '</div>' +
@@ -1572,6 +1606,110 @@ async function toggleNewsLock(newsId) {
   }
 }
 
+// ── 뉴스 기사 삭제 (news_feed 영구 삭제 + deleted_news 등록으로 재수집 방지) ──
+async function deleteNewsItem(newsId) {
+  var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
+  if (!n || !sb) return;
+  var msg = '이 기사를 삭제할까요?\n\n' + (n.title || '');
+  if (n.locked) msg += '\n\n⚠️ 잠금된 기사입니다. 삭제하면 AI 자문에서도 더 이상 참조되지 않습니다.';
+  if (!confirm(msg)) return;
+  try {
+    // 재수집 방지: 크롤러가 같은 URL·제목을 다시 저장하지 않도록 블록리스트 기록
+    try { await sb.from('deleted_news').insert({ url: n.url || null, title: n.title || null }); } catch(e2) {}
+    var resp = await sb.from('news_feed').delete().eq('id', newsId);
+    if (resp.error) throw resp.error;
+    newsDataCache = newsDataCache.filter(function(x) { return String(x.id) !== String(newsId); });
+    if (String(selectedNewsId) === String(newsId)) {
+      selectedNewsId = null;
+      var panel = document.getElementById('news-detail-panel');
+      if (panel) panel.style.display = 'none';
+    }
+    renderNewsList();
+  } catch(e) {
+    alert('기사 삭제 실패: ' + e.message);
+  }
+}
+
+// ── 긴급도 수정 셀렉터 HTML (뉴스 상세 모달) ──
+function _impSelHtml(newsId, current) {
+  return ['긴급', '보통', '참고'].map(function(v) {
+    var r = IMPORTANCE_RULES[v] || {};
+    var act = (current === v);
+    return '<span onclick="setNewsImportance(\'' + newsId + '\',\'' + v + '\')" ' +
+      'style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:4px;white-space:nowrap;border:1px solid ' + (act ? r.color : 'var(--border-secondary)') + ';' +
+      'color:' + (act ? '#fff' : 'var(--text-tertiary)') + ';background:' + (act ? r.color : 'transparent') + '">' + (v === '긴급' ? '중요' : v) + '</span>';
+  }).join('');
+}
+
+// ── 긴급도 수동 수정 — importance_feedback에 기록되어 크롤러 분류가 학습됨 ──
+async function setNewsImportance(newsId, newVal) {
+  var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
+  if (!n || !sb) return;
+  var oldVal = n._importance || n.importance || n.urgency || '참고';
+  if (oldVal === newVal) return;
+  try {
+    var ur = await sb.from('news_feed').update({ importance: newVal, urgency: newVal })
+      .eq('id', newsId).select('id,importance');
+    if (ur.error) throw new Error('news_feed 업데이트 실패: ' + ur.error.message);
+    if (!ur.data || ur.data.length === 0) throw new Error('news_feed 업데이트 실패: 대상 행을 찾지 못함');
+    // 피드백 기록 — ai_importance는 최초 AI 판정값 보존 (news_id당 1행)
+    var fb = { title: n.title || '', summary: (n.summary || '').slice(0, 300),
+               user_importance: newVal, updated_at: new Date().toISOString() };
+    var ex = await sb.from('importance_feedback').select('id').eq('news_id', newsId).limit(1);
+    if (ex.data && ex.data.length > 0) {
+      await sb.from('importance_feedback').update(fb).eq('news_id', newsId);
+    } else {
+      fb.news_id = newsId;
+      fb.ai_importance = oldVal;
+      await sb.from('importance_feedback').insert(fb);
+    }
+    n.importance = newVal; n.urgency = newVal; n._importance = newVal;
+    renderNewsList();
+    var rule = IMPORTANCE_RULES[newVal];
+    var badge = document.getElementById('importance-badge-' + newsId);
+    if (badge && rule) { badge.textContent = rule.label; badge.style.color = rule.color; badge.style.background = rule.bg; }
+    var sel = document.getElementById('imp-sel-' + newsId);
+    if (sel) sel.innerHTML = _impSelHtml(newsId, newVal);
+    // 당일 브리핑에 포함된 기사면 브리핑 원문의 🔴 표시도 동기화
+    try { await syncBriefingUrgency(newsId, newVal); } catch(e2) { console.warn('[브리핑 동기화] 실패(무시):', e2); }
+  } catch(e) {
+    alert('긴급도 수정 실패: ' + e.message);
+  }
+}
+
+// ── 긴급도 수정 → 당일 브리핑 원문 🔴 동기화 ──
+// 기사가 오늘 daily_briefings에 [ID:..]로 포함돼 있으면, 긴급 지정 시 해당 줄에 🔴 추가,
+// 긴급 해제 시 🔴 제거. 화면이 열려 있으면 즉시 갱신. (이미 발송된 이메일·텔레그램은 소급 불가)
+async function syncBriefingUrgency(newsId, newVal) {
+  if (!sb) return;
+  var todayKst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  var resp = await sb.from('daily_briefings').select('content').eq('briefing_date', todayKst).limit(1);
+  if (resp.error || !resp.data || resp.data.length === 0) return;
+  var content = resp.data[0].content || '';
+  var tag = '[ID:' + newsId + ']';
+  if (content.indexOf(tag) === -1) return; // 오늘 브리핑에 없는 기사
+  var lines = content.split('\n');
+  var changed = false;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].indexOf(tag) === -1) continue;
+    if (newVal === '긴급' && lines[i].indexOf('🔴') === -1) {
+      lines[i] = lines[i].replace(/^(\s*•\s*)/, '$1🔴 ');
+      changed = true;
+    } else if (newVal !== '긴급' && lines[i].indexOf('🔴') !== -1) {
+      lines[i] = lines[i].replace(/🔴\s*/, '');
+      changed = true;
+    }
+    break;
+  }
+  if (!changed) return;
+  var ur = await sb.from('daily_briefings').update({ content: lines.join('\n') }).eq('briefing_date', todayKst);
+  if (!ur.error) {
+    console.log('[브리핑 동기화] 당일 브리핑 🔴 표시 갱신:', newVal);
+    var listEl = document.getElementById('briefing-list');
+    if (listEl && listEl.innerHTML) loadBriefing();
+  }
+}
+
 function showNewsDetail(newsId) {
   selectedNewsId = newsId;
   var n = newsDataCache.find(function(x) { return String(x.id) === String(newsId); });
@@ -1583,21 +1721,30 @@ function showNewsDetail(newsId) {
   var rule   = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
   var date   = (n.published_at || n.created_at || '').slice(0, 10);
   var urlBtn = n.url
-    ? '<a href="' + n.url + '" target="_blank" class="btn" style="font-size:11px;padding:4px 10px;text-decoration:none"><i class="ti ti-external-link"></i> 원문 보기</a>'
+    ? '<a href="' + n.url + '" target="_blank" class="btn" style="font-size:11px;padding:4px 10px;text-decoration:none;white-space:nowrap"><i class="ti ti-external-link"></i> 원문 보기</a>'
     : '';
   var lockBtn = '<button class="btn" id="lock-btn-' + n.id + '" onclick="toggleNewsLock(\'' + n.id + '\')" ' +
     'title="잠금 시 15일이 지나도 삭제되지 않고 AI 자문에서 계속 참조됩니다" ' +
-    'style="font-size:11px;padding:4px 10px;cursor:pointer;' + (n.locked ? 'color:var(--accent)' : '') + '">' +
+    'style="font-size:11px;padding:4px 10px;cursor:pointer;white-space:nowrap;' + (n.locked ? 'color:var(--accent)' : '') + '">' +
     (n.locked ? '<i class="ti ti-lock"></i> 잠금됨' : '<i class="ti ti-lock-open"></i> 잠금') + '</button>';
+  var delBtn = '<button class="btn" onclick="deleteNewsItem(\'' + n.id + '\')" ' +
+    'title="이 기사를 목록에서 영구 삭제합니다 (재수집되지 않음)" ' +
+    'style="font-size:11px;padding:4px 10px;cursor:pointer;color:#d04545;white-space:nowrap">' +
+    '<i class="ti ti-trash"></i> 삭제</button>';
+
+  var impSel = '<div style="display:flex;align-items:center;gap:5px;margin-bottom:8px;flex-wrap:wrap">' +
+    '<span style="font-size:10px;color:var(--text-tertiary);white-space:nowrap">중요도 수정</span>' +
+    '<span id="imp-sel-' + n.id + '" title="수정 내역은 AI 분류 학습에 반영됩니다" style="display:inline-flex;gap:4px">' + _impSelHtml(n.id, n._importance) + '</span></div>';
 
   var html =
     // 헤더: 중요도 + 제목
     '<div style="border-left:3px solid ' + rule.color + ';padding-left:10px;margin-bottom:14px">' +
-      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
-        '<span id="importance-badge-' + n.id + '" style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px">' + rule.label + '</span>' +
-        '<span style="font-size:11px;color:var(--text-tertiary)">' + date + '</span>' +
-        '<div style="margin-left:auto;display:flex;gap:6px">' + lockBtn + urlBtn + '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;row-gap:6px">' +
+        '<span id="importance-badge-' + n.id + '" style="font-size:11px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:2px 8px;border-radius:4px;white-space:nowrap">' + rule.label + '</span>' +
+        '<span style="font-size:11px;color:var(--text-tertiary);white-space:nowrap">' + date + '</span>' +
+        '<div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' + lockBtn + delBtn + urlBtn + '</div>' +
       '</div>' +
+      impSel +
       '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.55;margin-bottom:4px">' + n.title + '</div>' +
       '<div style="font-size:11px;color:var(--text-secondary)">' + (n.source || '') + '</div>' +
     '</div>' +
@@ -1809,29 +1956,9 @@ async function analyzeNewsImpact(newsId) {
       }
     }
 
-    // ── AI priority → 배지 업데이트 ──────────────────────────
-    if (priorityText) {
-      var AI_PRIORITY_MAP = {
-        '즉시대응': '긴급',
-        '금주검토': '보통',
-        '동향파악': '참고'
-      };
-      var aiImportance = AI_PRIORITY_MAP[priorityText.trim()];
-      if (aiImportance && aiImportance !== n._importance) {
-        var aiRule  = IMPORTANCE_RULES[aiImportance] || IMPORTANCE_RULES['참고'];
-        var badge   = document.getElementById('importance-badge-' + newsId);
-        if (badge) {
-          badge.textContent = aiRule.label;
-          badge.style.color      = aiRule.color;
-          badge.style.background = aiRule.bg;
-        }
-        // 캐시도 갱신 — 뉴스 목록 재렌더링
-        n._importance = aiImportance;
-        renderNewsList();
-        // Supabase DB도 업데이트 — 다음 로드 시부터 반영
-        if (sb) { try { await sb.from('news_feed').update({ urgency: aiImportance, importance: aiImportance }).eq('id', newsId); } catch(e) { console.warn('urgency 업데이트 실패:', e); } }
-      }
-    }
+    // ※ 과거에는 분석의 priority로 긴급도 배지·DB를 자동 덮어썼으나 제거됨 (2026-06-12).
+    //    긴급도의 단일 기준은 크롤러 분류 + 담당자 수동 수정(importance_feedback)이며,
+    //    영향도 분석은 표시 전용. (자동 덮어쓰기가 담당자 수정을 되돌리는 버그의 원인이었음)
   } catch(e) {
     console.warn('영향도 분석 오류:', e);
     if (box) { box.innerHTML = '<span style="color:var(--text-tertiary);font-size:11px">분석 실패 (' + e.message + ') — AI 자문에서 직접 질문해 주세요.</span>'; }
@@ -1848,7 +1975,110 @@ function filterNews(el, cat) { filterNewsByImportance(el, cat); }
 // ════════════════════════════════════════════
 //  법령 DIFF 분석
 // ════════════════════════════════════════════
+// ── 지식 베이스 문서 목록 (document_chunks 실시간 · 수동정리 목록과 동일 스타일) ──
+var _kbDocsLoaded = false;
+
+var _KB_GROUPS = [
+  ['전파법 기본 법령', /^전파법/],
+  ['주파수 행정규칙', /주파수|할당|공동사용/],
+  ['전자파 행정규칙', /전자파/],
+  ['적합성평가 행정규칙', /적합성평가|시험기관|상호인정/],
+  ['전기통신사업법 계열', /전기통신사업|이동통신단말장치/],
+  ['정보통신망법 계열', /정보통신망/],
+  ['방송통신발전기본법 계열', /방송통신발전|방송통신설비|방송통신규제|기반시설|멀티미디어|재난/],
+  ['지방세법 계열', /지방세/],
+  ['무선설비·무선국·기술기준', /기술기준|무선설비|무선국|단말장치|간이무선|항공|해상|우주|선박|아마추어|검사업무/]
+];
+
+function _kbParseName(raw) {
+  var name = String(raw || '').replace(/\.(pdf|md|pptx|txt)$/i, '').replace(/\s*\(\d\)\s*$/, '');
+  var dup = /^_중복_/.test(name);
+  name = name.replace(/^_중복_/, '');
+  var kind = (name.match(/\((법률|대통령령|[가-힣]+부령|[가-힣]+고시|총리령)\)/) || [])[1] || '';
+  var no = (name.match(/\(제([0-9\-]+)호\)/) || [])[1] || '';
+  var date = (name.match(/\((20\d{6})\)/) || [])[1] || '';
+  var clean = name
+    .replace(/\((법률|대통령령|[가-힣]+부령|[가-힣]+고시|총리령)\)/g, '')
+    .replace(/\(제[0-9\-]+호\)/g, '')
+    .replace(/\(20\d{6}\)/g, '')
+    .trim();
+  var info = [];
+  if (kind || no) info.push((kind ? kind + ' ' : '') + (no ? '제' + no + '호' : ''));
+  if (date) info.push(date.slice(0, 4) + '.' + date.slice(4, 6) + '.' + date.slice(6, 8) + ' 시행');
+  return { clean: clean || name, info: info.join(' · '), dup: dup };
+}
+
+async function loadKbDocs(force) {
+  var el = document.getElementById('kb-doc-groups');
+  if (!el || !sb) return;
+  if (_kbDocsLoaded && !force) return;
+  try {
+    var resp = await sb.rpc('list_kb_documents');
+    if (resp.error) throw resp.error;
+    var rows = (resp.data || []).filter(function(r) {
+      if (r.doc_category === 'ITU-R') return false;   // ITU-R 탭에서 별도 표시
+      if (/^\d{6}/.test(r.doc_name)) return false;    // 날짜 파일명 = 보도자료 → 정부 보도자료 탭에서 표시
+      return true;
+    });
+    var groups = _KB_GROUPS.map(function(g) { return { title: g[0], re: g[1], items: [] }; });
+    var etc = { title: '기타 법령·고시', items: [] };
+    rows.forEach(function(r) {
+      var p = _kbParseName(r.doc_name);
+      var item = { p: p, chunks: r.chunks, embedded: r.embedded > 0 };
+      for (var i = 0; i < groups.length; i++) {
+        if (groups[i].re.test(p.clean)) { groups[i].items.push(item); return; }
+      }
+      etc.items.push(item);
+    });
+    groups.push(etc);
+    var total = 0;
+    var html = groups.filter(function(g) { return g.items.length > 0; }).map(function(g, gi) {
+      g.items.sort(function(a, b) { return a.p.clean.localeCompare(b.p.clean, 'ko'); });
+      total += g.items.length;
+      var fileRows = g.items.map(function(it) {
+        var badge = it.embedded
+          ? ''
+          : '<span class="badge" style="background:rgba(245,158,11,.12);color:#b45309" title="backfill_embeddings.py 실행 전 — 키워드 검색만 가능">임베딩 대기</span>';
+        var dupTag = it.p.dup ? ' <span style="font-size:10px;color:var(--text-tertiary)">(중복본)</span>' : '';
+        return '<div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div>' +
+          '<div style="flex:1;min-width:0"><div class="file-name">' + it.p.clean + dupTag + '</div>' +
+          '<div class="file-size">' + (it.p.info ? it.p.info + ' · ' : '') + it.chunks + '청크</div></div>' + badge + '</div>';
+      }).join('');
+      return '<div class="section-title"' + (gi > 0 ? ' style="margin-top:20px"' : '') + '>' + g.title + ' (' + g.items.length + '종)</div>' +
+        '<div class="card" style="cursor:default;margin-bottom:14px">' + fileRows + '</div>';
+    }).join('');
+    var tot = document.getElementById('kb-total');
+    if (tot) tot.textContent = total;
+    el.innerHTML = html || '<div style="color:var(--text-secondary);font-size:12px;padding:16px 0">등록된 문서가 없습니다.</div>';
+    _kbDocsLoaded = true;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:16px 0">목록 조회 실패: ' + e.message + '</div>';
+  }
+}
+
 var diffState = { before: null, after: null };  // { text, name }
+
+// ── DIFF 드롭존 UX 보강 (2026-06-12) ──
+// 드롭존을 빗나가게 떨어뜨려도 브라우저가 파일을 열며 페이지를 이탈하지 않도록 전역 차단
+document.addEventListener('dragover', function(e) { e.preventDefault(); });
+document.addEventListener('drop', function(e) { e.preventDefault(); });
+// 드롭존 진입 시 하이라이트 + 커서를 '복사'로 고정
+['before', 'after'].forEach(function(t) {
+  var dz = document.getElementById('drop-' + t);
+  if (!dz) return;
+  function clear() { dz.style.borderColor = ''; dz.style.background = ''; }
+  dz.addEventListener('dragenter', function(e) {
+    e.preventDefault();
+    dz.style.borderColor = 'var(--accent)';
+    dz.style.background = 'rgba(83,74,183,0.07)';
+  });
+  dz.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  });
+  dz.addEventListener('dragleave', clear);
+  dz.addEventListener('drop', clear);
+});
 
 function handleDiffDrop(type, event) {
   event.preventDefault();
@@ -1903,9 +2133,15 @@ async function _readFileAsText(file) {
     for (var i = 1; i <= pdf.numPages; i++) {
       var page = await pdf.getPage(i);
       var content = await page.getTextContent();
-      pages.push(content.items.map(function(item) { return item.str; }).join(' '));
+      // hasEOL로 원본 줄바꿈 보존 — 페이지 전체가 한 줄로 뭉치면 조문 단위 DIFF가 불가능 (2026-06-12 수정)
+      pages.push(content.items.map(function(item) {
+        return item.str + (item.hasEOL ? '\n' : ' ');
+      }).join(''));
     }
-    return pages.join('\n');
+    var full = pages.join('\n');
+    // 조문 헤더 앞 줄바꿈 보강 — hasEOL 정보가 없는 PDF 대비
+    full = full.replace(/[ \t]+(?=제\d+조(?:의\d+)?\()/g, '\n');
+    return full;
   }
   return new Promise(function(resolve, reject) {
     var reader = new FileReader();
@@ -2226,19 +2462,22 @@ function parseBriefingContent(rawContent, briefingIdx) {
     if (rawItemLines.length === 0) return;
     var rawBlock = rawItemLines.join('\n');
     if (currentSection === 'news') {
-      // 분류는 원본 텍스트 기준
-      var importance = classifyBriefingItemImportance(rawBlock);
+      // 긴급 여부는 브리핑 원문의 🔴(크롤러 긴급도 기반)로만 판정 — 이메일과 항상 일치
+      var importance = rawBlock.indexOf('🔴') !== -1 ? '긴급' : '참고';
+      var hasStoredAnalysis = rawBlock.indexOf('SKT 영향 분석') !== -1;
       // 렌더링은 이스케이프된 텍스트 기준
       var escBlock = rawItemLines.map(function(l){ return esc(l); }).join('\n');
       output.push(renderBriefingNewsItem(escBlock, importance, briefingIdx, itemIdx));
       if (importance === '긴급') {
         urgentCount++;
-        // 제목 추출 (원본)
-        var titleRaw = '';
-        for (var i = 0; i < rawItemLines.length; i++) {
-          if (/^• /.test(rawItemLines[i])) { titleRaw = rawItemLines[i].replace(/^• /, ''); break; }
+        // 저장된 분석이 있으면 즉석 생성 불필요 (구버전 브리핑만 폴백)
+        if (!hasStoredAnalysis) {
+          var titleRaw = '';
+          for (var i = 0; i < rawItemLines.length; i++) {
+            if (/^• /.test(rawItemLines[i])) { titleRaw = rawItemLines[i].replace(/^• /, ''); break; }
+          }
+          urgentItems.push({ elemId: 'bi-' + briefingIdx + '-' + itemIdx, title: titleRaw });
         }
-        urgentItems.push({ elemId: 'bi-' + briefingIdx + '-' + itemIdx, title: titleRaw });
       }
     } else {
       var escBlock = rawItemLines.map(function(l){ return esc(l); }).join('\n');
@@ -2300,15 +2539,18 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
   var titleLine = '';
   var summaryLines = [];
   var linkUrl = '';
+  var storedAnalysis = '';
 
   for (var i = 0; i < lines.length; i++) {
     var l = lines[i];
     if (/^• /.test(l)) {
-      titleLine = l.replace(/^• /, '').replace(/\s*\[ID:[^\]]+\]/g, '');
+      titleLine = l.replace(/^• /, '').replace(/\s*\[ID:[^\]]+\]/g, '').replace(/🔴\s*/g, '');
     } else if (/^  🔗 /.test(l)) {
       linkUrl = l.replace(/^  🔗 /, '').trim();
     } else if (/^  → /.test(l)) {
       summaryLines.push(l.replace(/^  → /, '').trim());
+    } else if (l.indexOf('SKT 영향 분석') !== -1) {
+      storedAnalysis = l.replace(/^\s*⚠️\s*SKT 영향 분석[::]\s*/, '').trim();
     }
   }
 
@@ -2326,17 +2568,18 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
     var rule = IMPORTANCE_RULES['긴급'];
     return '<div style="border:2px solid ' + rule.color + ';border-radius:10px;padding:12px 14px;margin-bottom:10px;background:' + rule.bg + '">'
       + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
-      +   '<span style="background:' + rule.color + ';color:#fff;font-size:10px;font-weight:700;padding:2px 9px;border-radius:5px;flex-shrink:0">' + rule.label + '</span>'
-      +   '<span style="font-size:11px;color:' + rule.color + ';font-weight:500">' + rule.desc + '</span>'
+      +   '<span style="background:' + rule.color + ';color:#fff;font-size:10px;font-weight:700;padding:2px 9px;border-radius:5px;flex-shrink:0">중요</span>'
       + '</div>'
       + '<div style="margin-bottom:6px">' + titleHtml + '</div>'
       + summaryHtml
       + linkHtml
       + '<div id="' + analysisId + '" data-briefing-analysis="1" style="margin-top:10px;padding:10px 12px;background:rgba(239,68,68,0.06);border-radius:8px;border:1px solid rgba(239,68,68,0.2)">'
-      +   '<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary)">'
-      +     '<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>'
-      +     'AI 영향도 분석 중...'
-      +   '</div>'
+      +   (storedAnalysis
+          ? '<div style="font-size:12px;color:var(--text-primary);line-height:1.7"><span style="font-weight:700">⚠️ SKT 영향 분석</span> ' + storedAnalysis + '</div>'
+          : '<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary)">'
+            + '<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>'
+            + 'AI 영향도 분석 중...'
+            + '</div>')
       + '</div>'
       + '</div>';
   }
@@ -2435,7 +2678,7 @@ async function loadBriefing() {
       const urgentCount = parsed.urgentCount;
       const badgeHtml = isToday ? '<span style="background:var(--accent);color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;margin-left:8px">오늘</span>' : '';
       const urgentBadge = urgentCount > 0
-        ? '<span style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px">🔴 긴급 ' + urgentCount + '건</span>'
+        ? '<span style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px">중요 ' + urgentCount + '건</span>'
         : '';
       const metaHtml = (b.news_count || b.terms_count)
         ? '<span style="color:var(--text-secondary);font-size:11px">뉴스 ' + (b.news_count||0) + '건 · 용어 ' + (b.terms_count||0) + '건</span>'
@@ -2670,6 +2913,7 @@ function go(page, navEl) {
   if (page === 'settings') loadSettingsUI();
   if (page === 'press') loadPressFromSupabase();
   if (page === 'terms') loadTerms();
+  if (page === 'law') loadKbDocs();
 }
 
 function setBottomNav(activeId) {
