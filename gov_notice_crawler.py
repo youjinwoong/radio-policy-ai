@@ -8,6 +8,8 @@
 
 import os
 import re
+import json
+import hashlib
 import time
 from datetime import datetime, timezone, timedelta
 
@@ -31,8 +33,11 @@ from bs4 import BeautifulSoup
 from supabase import create_client, Client
 
 # ── 환경변수 ──────────────────────────────────────────────
-SUPABASE_URL  = os.environ['SUPABASE_URL']
-SUPABASE_KEY  = os.environ['SUPABASE_SERVICE_KEY']
+SUPABASE_URL       = os.environ['SUPABASE_URL']
+SUPABASE_KEY       = os.environ['SUPABASE_SERVICE_KEY']
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID   = os.environ.get('TELEGRAM_CHAT_ID', '')
+RESEND_API_KEY     = os.environ.get('RESEND_API_KEY', '')
 
 KST = timezone(timedelta(hours=9))
 sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -270,12 +275,170 @@ OPINION_KEYWORDS = [
 ]
 
 
+def _parse_opinion_date(s: str) -> str:
+    """'2026. 6. 12.' → '20260612'"""
+    s = s.strip().rstrip('.')
+    parts = [p.strip() for p in s.split('.') if p.strip()]
+    if len(parts) >= 3:
+        try:
+            return f"{int(parts[0]):04d}{int(parts[1]):02d}{int(parts[2]):02d}"
+        except ValueError:
+            pass
+    return ''
+
+
+def _opinion_law_id(title: str) -> str:
+    """법령명 MD5 기반 고유 ID — opinion.lawmaking.go.kr 항목용"""
+    h = hashlib.md5(title.encode('utf-8')).hexdigest()[:10]
+    return f'lsAnc_op_{h}'
+
+
+def _save_opinion_to_law_amendments(collected: dict) -> list:
+    """수집된 입법예고를 law_amendments에 upsert. 신규 행 목록 반환."""
+    try:
+        existing_rows = sb.table('law_amendments').select('law_id,matched_keywords') \
+            .like('law_id', 'lsAnc_op_%').execute().data
+        existing = {r['law_id']: r for r in existing_rows}
+    except Exception as e:
+        print(f'[입법예고 DB 조회 오류] {e}')
+        existing = {}
+
+    new_items = []
+    now_str = datetime.now(KST).isoformat()
+
+    for href, info in collected.items():
+        title = info['title']
+        dept = info['dept']
+        period = info['period']
+        keywords = list(info['keywords'])
+
+        parts = period.split('~')
+        public_dt = _parse_opinion_date(parts[0]) if parts else ''
+        enf_dt = _parse_opinion_date(parts[1]) if len(parts) > 1 else ''
+
+        law_id = _opinion_law_id(title)
+        row = {
+            'law_id':           law_id,
+            'law_nm':           title,
+            'law_type':         'lsAnc',
+            'ann_type':         f'입법예고 ({dept})' if dept else '입법예고',
+            'public_dt':        public_dt,
+            'enf_dt':           enf_dt,
+            'matched_keywords': keywords,
+            'link_url':         href,
+            'updated_at':       now_str,
+        }
+
+        if law_id not in existing:
+            try:
+                sb.table('law_amendments').insert(row).execute()
+                new_items.append({
+                    'title':    title,
+                    'law_nm':   title,
+                    'dept':     dept,
+                    'period':   period,
+                    'link_url': href,
+                    'ann_type': row['ann_type'],
+                    'public_dt': public_dt,
+                    'enf_dt':   enf_dt,
+                })
+                print(f'  🆕 신규 입법예고: {title[:40]}')
+            except Exception as e:
+                print(f'  [입법예고 저장 오류] {title[:30]}: {e}')
+        else:
+            existing_kw = set(existing[law_id].get('matched_keywords') or [])
+            new_kw = set(keywords)
+            if not new_kw.issubset(existing_kw):
+                try:
+                    sb.table('law_amendments').update({
+                        'matched_keywords': list(existing_kw | new_kw),
+                        'updated_at': now_str,
+                    }).eq('law_id', law_id).execute()
+                except Exception as e:
+                    print(f'  [키워드 업데이트 오류] {title[:30]}: {e}')
+
+    print(f'[입법예고] 신규 {len(new_items)}건 law_amendments 저장')
+    return new_items
+
+
+def _notify_opinion_items(new_items: list):
+    """신규 입법예고 텔레그램 + 이메일(Resend) 즉시 알림"""
+    # 텔레그램
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        for it in new_items:
+            msg = (
+                f'📢 <b>[신규 입법예고]</b>\n'
+                f'{it["title"]}\n\n'
+                f'• 담당: {it["dept"] or "—"}\n'
+                f'• 예고기간: {it["period"] or "—"}\n'
+                f'• 링크: {it["link_url"]}'
+            )
+            try:
+                resp = requests.post(
+                    f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage',
+                    json={'chat_id': TELEGRAM_CHAT_ID, 'text': msg, 'parse_mode': 'HTML'},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    print(f'  [텔레그램] "{it["title"][:30]}" 발송')
+                else:
+                    print(f'  [텔레그램 오류] HTTP {resp.status_code}')
+            except Exception as e:
+                print(f'  [텔레그램 오류] {e}')
+            time.sleep(0.5)
+
+    # 이메일 (Resend) — 미국 IP에서도 동작
+    if RESEND_API_KEY and new_items:
+        items_html = ''
+        for it in new_items:
+            items_html += (
+                f'<div style="border:2px solid #c53030;border-radius:6px;'
+                f'background:#fff5f5;padding:10px 14px;margin:10px 0">'
+                f'<b>📢 [신규 입법예고]</b> {it["title"]}<br>'
+                f'• 담당: {it["dept"] or "—"}<br>'
+                f'• 예고기간: {it["period"] or "—"}<br>'
+                f'• <a href="{it["link_url"]}">상세 보기</a>'
+                f'</div>'
+            )
+        body_html = (
+            f'<html><body style="font-family:sans-serif;max-width:640px;margin:auto;padding:20px">'
+            f'<h2 style="color:#c53030">🔴 신규 입법예고 {len(new_items)}건 감지</h2>'
+            f'{items_html}'
+            f'<hr style="margin-top:24px">'
+            f'<p style="color:#999;font-size:11px">SKT Comm센터 기술정책팀 전파정책 AI<br>'
+            f'<a href="https://youjinwoong.github.io/radio-policy-ai/">대시보드</a></p>'
+            f'</body></html>'
+        )
+        payload = json.dumps({
+            'from': '전파정책 AI <onboarding@resend.dev>',
+            'to': ['you.jinwoong@gmail.com'],
+            'subject': f'🔴 [전파정책 AI] 신규 입법예고 {len(new_items)}건',
+            'html': body_html,
+        }, ensure_ascii=False)
+        try:
+            resp = requests.post(
+                'https://api.resend.com/emails',
+                headers={
+                    'Authorization': f'Bearer {RESEND_API_KEY}',
+                    'Content-Type': 'application/json',
+                },
+                data=payload,
+                timeout=30,
+            )
+            if resp.status_code in (200, 201):
+                print(f'  [이메일] 입법예고 알림 발송 완료')
+            else:
+                print(f'  [이메일 오류] HTTP {resp.status_code}: {resp.text[:100]}')
+        except Exception as e:
+            print(f'  [이메일 오류] {e}')
+
+
 def crawl_opinion_lawmaking() -> list:
     """법령입법예고 시스템 (opinion.lawmaking.go.kr) 크롤링.
-    GET /gcom/ogLmPp?lsNm={키워드} → table tbody tr HTML 파싱.
-    입법예고는 의견수렴 단계 — 공포 수주~수개월 전이므로 긴급으로 분류."""
-    items = []
-    seen_urls: set[str] = set()
+    신규 입법예고 → law_amendments 저장 + 텔레그램·이메일 즉시 알림.
+    news_feed에는 저장하지 않음 (빈 리스트 반환)."""
+    # {href: {title, dept, period, keywords: set}}
+    collected: dict[str, dict] = {}
 
     for kw in OPINION_KEYWORDS:
         try:
@@ -285,57 +448,51 @@ def crawl_opinion_lawmaking() -> list:
             )
             soup = BeautifulSoup(res.text, 'html.parser')
             rows = soup.select('table tbody tr')
+            found_kw = 0
 
             for row in rows:
                 tds = row.find_all('td')
                 if len(tds) < 5:
                     continue
-
-                # td[1]: 법령명 + 링크
-                title_cell = tds[1]
-                a_tag = title_cell.find('a')
+                a_tag = tds[1].find('a')
                 if not a_tag:
                     continue
                 title = a_tag.get_text(strip=True)
                 if not title:
                     continue
-
                 href = a_tag.get('href', '')
                 if href.startswith('/'):
                     href = OPINION_BASE + href
                 elif not href.startswith('http'):
                     href = f'{OPINION_BASE}/gcom/{href}'
-                if not href or href in seen_urls:
+                if not href:
                     continue
-                seen_urls.add(href)
 
-                # td[2]: 부처명
                 dept = tds[2].get_text(strip=True)
-                # td[4]: 예고기간 "2026. 6. 12.~2026. 7. 22."
                 period = tds[4].get_text(strip=True)
-                # 시작일 파싱
-                start_dt = period.split('~')[0].strip() if '~' in period else period
 
-                items.append({
-                    'title':        f'[입법예고] {title}',
-                    'source':       f'법령입법예고 / {dept}' if dept else '법령입법예고',
-                    'category':     detect_category(title),
-                    'url':          href,
-                    'is_read':      False,
-                    'published_at': parse_date(start_dt) or datetime.now(KST).isoformat(),
-                    'urgency':      '긴급',
-                    'importance':   '긴급',
-                    'summary':      f'입법예고 의견수렴 기간: {period}. 시행 전 의견 제출 기회입니다.',
-                })
+                if href in collected:
+                    collected[href]['keywords'].add(kw)
+                else:
+                    collected[href] = {
+                        'title': title, 'dept': dept,
+                        'period': period, 'keywords': {kw},
+                    }
+                    found_kw += 1
 
-            print(f'[입법예고] "{kw}": {len(rows)}행 → {len(items)}건 누계')
+            print(f'[입법예고] "{kw}": {len(rows)}행 → {found_kw}건 신규')
             time.sleep(1)
 
         except Exception as e:
             print(f'[입법예고 오류] "{kw}": {e}')
 
-    print(f'[입법예고 합계] {len(items)}건')
-    return items
+    print(f'[입법예고 합계] {len(collected)}건 수집')
+    if collected:
+        new_items = _save_opinion_to_law_amendments(collected)
+        if new_items:
+            _notify_opinion_items(new_items)
+
+    return []  # news_feed에는 저장하지 않음
 
 
 # ═══════════════════════════════════════════════════════

@@ -382,6 +382,50 @@ def _send_via_gmail(subject: str, body_html: str, all_to: list):
 
 
 # ═══════════════════════════════════════════════════════
+#  STEP 5.5 — 신규 입법예고 조회 (law_amendments)
+# ═══════════════════════════════════════════════════════
+
+def fetch_new_law_announcements() -> list:
+    """최근 24h 신규 입법예고(lsAnc) 조회 — law_amendments"""
+    cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
+    try:
+        resp = sb.table('law_amendments') \
+            .select('law_nm,ann_type,public_dt,enf_dt,link_url,matched_keywords') \
+            .eq('law_type', 'lsAnc') \
+            .gte('created_at', cutoff) \
+            .execute()
+        items = resp.data or []
+        print(f'[입법예고] 최근 24h 신규 {len(items)}건')
+        return items
+    except Exception as e:
+        print(f'[입법예고 조회 오류] {e}')
+        return []
+
+
+def _fmt_dt(dt: str) -> str:
+    """'20260612' → '2026.06.12'"""
+    if dt and len(dt) == 8:
+        return f'{dt[:4]}.{dt[4:6]}.{dt[6:]}'
+    return dt or '—'
+
+
+def _format_law_anc_section(items: list) -> str:
+    """신규 입법예고 브리핑 섹션 (🔴 → 이메일에서 빨간 박스로 렌더링)"""
+    lines = [f'📢 [신규 입법예고] {len(items)}건 — 즉시 확인 필요']
+    for it in items:
+        law_nm = it.get('law_nm', '')
+        ann_type = it.get('ann_type', '입법예고')
+        public_dt = _fmt_dt(it.get('public_dt', ''))
+        enf_dt = _fmt_dt(it.get('enf_dt', ''))
+        link = it.get('link_url', '')
+        lines.append(f'🔴 [입법예고] {law_nm}')
+        lines.append(f'  → {ann_type} | 예고: {public_dt}~{enf_dt}')
+        if link:
+            lines.append(f'  🔗 {link}')
+    return '\n'.join(lines)
+
+
+# ═══════════════════════════════════════════════════════
 #  메인
 # ═══════════════════════════════════════════════════════
 
@@ -408,6 +452,9 @@ def main():
     # 중복 발송 방지 (daily_crawl과 morning_briefing.yml이 동시에 실행될 경우)
     if already_sent_today():
         return
+
+    # 신규 입법예고 조회 (법제처·opinion.lawmaking.go.kr → law_amendments)
+    law_ancs = fetch_new_law_announcements()
 
     # 본문 확인된 기사 조회
     items = fetch_items_with_content()
@@ -437,6 +484,11 @@ def main():
     if not briefing_text:
         print('[종료] 브리핑 생성 실패')
         return
+
+    # 신규 입법예고 섹션을 브리핑 앞에 삽입 (🔴 → 이메일 빨간 박스)
+    if law_ancs:
+        briefing_text = _format_law_anc_section(law_ancs) + '\n\n' + briefing_text
+        print(f'[입법예고] {len(law_ancs)}건 브리핑 앞에 삽입')
 
     # 긴급(DB 기준) 기사 SKT 영향 분석 — 저장본에 포함 (이메일·대시보드 공통)
     briefing_text = add_urgent_analyses(items, briefing_text)
