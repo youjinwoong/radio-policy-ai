@@ -25,7 +25,7 @@
       <div class="nav-item" onclick="go('terms',this)"><i class="ti ti-book"></i>기술 용어</div>
     </div>
     <div class="nav-group">
-      <div class="nav-label">법안 동향</div>
+      <div class="nav-label">법안 동향 모니터링</div>
       <div class="nav-item" onclick="go('assembly',this)"><i class="ti ti-building-bank"></i>국회 법안</div>
       <div class="nav-item" onclick="go('lawtrack',this)"><i class="ti ti-file-certificate"></i>행정부 입법예고·법령 개정</div>
     </div>
@@ -514,17 +514,16 @@
           <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:auto" onclick="loadLawTrack(true)"><i class="ti ti-refresh"></i> 새로고침</button>
         </div>
         <div class="tag-list" style="margin-bottom:12px" id="lawtrack-filter-tabs">
-          <span class="tag selected" onclick="filterLawTrack(this,'전체')">전체</span>
-          <span class="tag" onclick="filterLawTrack(this,'lsAnc')">입법예고</span>
-          <span class="tag" onclick="filterLawTrack(this,'bylaw')">시행령</span>
-          <span class="tag" onclick="filterLawTrack(this,'rules')">시행규칙</span>
-          <span class="tag" onclick="filterLawTrack(this,'admrul')">고시</span>
+          <span class="tag selected" onclick="filterLawTrack(this,'입법예고중')">📢 입법예고 중</span>
+          <span class="tag" onclick="filterLawTrack(this,'시행예정')">⏳ 시행 예정</span>
+          <span class="tag" onclick="filterLawTrack(this,'신규개정')">🆕 신규·개정</span>
+          <span class="tag" onclick="filterLawTrack(this,'전체')">전체</span>
         </div>
         <div class="stat-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
-          <div class="stat-card"><div class="stat-value" id="lt-total">—</div><div class="stat-label">전체</div></div>
-          <div class="stat-card"><div class="stat-value" id="lt-anc">—</div><div class="stat-label">입법예고</div></div>
-          <div class="stat-card"><div class="stat-value" id="lt-new">—</div><div class="stat-label">이번 주 신규</div></div>
+          <div class="stat-card"><div class="stat-value" id="lt-anc" style="color:var(--accent)">—</div><div class="stat-label">입법예고 중</div></div>
           <div class="stat-card"><div class="stat-value" id="lt-enf">—</div><div class="stat-label">시행 예정</div></div>
+          <div class="stat-card"><div class="stat-value" id="lt-new">—</div><div class="stat-label">신규·개정(30일)</div></div>
+          <div class="stat-card"><div class="stat-value" id="lt-total" style="color:var(--text-muted)">—</div><div class="stat-label">전체 추적</div></div>
         </div>
         <div id="lawtrack-list">
           <div style="color:var(--text-secondary);padding:20px;text-align:center;font-size:12px">불러오는 중...</div>
@@ -720,6 +719,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260614b"></script>
+<script src="app.js?v=20260614d"></script>
 </body>
 </html>

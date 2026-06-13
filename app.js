@@ -3863,7 +3863,7 @@ function escHtml(str) {
 // ════════════════════════════════════════════
 
 var lawTrackCache = null;
-var lawTrackFilterMode = '전체';
+var lawTrackFilterMode = '입법예고중';
 
 async function loadLawTrack(forceRefresh) {
   if (!sb) return;
@@ -3917,14 +3917,21 @@ function renderLawTrack(items) {
   var weekAgo = new Date(now - 7 * 86400000);
   var todayStr = now.toISOString().slice(0,10).replace(/-/g,'');
 
-  var filtered = lawTrackFilterMode === '전체'
-    ? items
-    : items.filter(function(r) { return r.law_type === lawTrackFilterMode; });
+  var monthAgo = new Date(now - 30 * 86400000);
+
+  function ltFilter(r) {
+    if (lawTrackFilterMode === '전체') return true;
+    if (lawTrackFilterMode === '입법예고중') return r.law_type === 'lsAnc';
+    if (lawTrackFilterMode === '시행예정') return r.enf_dt && r.enf_dt.replace(/\D/g,'') >= todayStr;
+    if (lawTrackFilterMode === '신규개정') return new Date(r.created_at) >= monthAgo || (r.prev_public_dt && r.prev_public_dt !== r.public_dt);
+    return true;
+  }
+  var filtered = items.filter(ltFilter);
 
   // 통계
   var ancCount  = items.filter(function(r) { return r.law_type === 'lsAnc'; }).length;
-  var newCount  = items.filter(function(r) { return new Date(r.created_at) >= weekAgo; }).length;
-  var enfCount  = items.filter(function(r) { return r.enf_dt && r.enf_dt >= todayStr; }).length;
+  var newCount  = items.filter(function(r) { return new Date(r.created_at) >= monthAgo || (r.prev_public_dt && r.prev_public_dt !== r.public_dt); }).length;
+  var enfCount  = items.filter(function(r) { return r.enf_dt && r.enf_dt.replace(/\D/g,'') >= todayStr; }).length;
   var setV = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
   setV('lt-total', items.length);
   setV('lt-anc',   ancCount);
