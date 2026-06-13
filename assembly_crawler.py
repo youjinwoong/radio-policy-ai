@@ -108,7 +108,7 @@ def upsert_bill(bill: dict, matched_keywords: list[str], existing: dict | None) 
     """법안 저장/갱신. 반환값: 'new' | 'status_changed' | 'unchanged'"""
     bill_id      = bill.get('BILL_ID', '')
     bill_name    = bill.get('BILL_NAME', '').strip()
-    proc_result  = bill.get('PROC_RESULT', '접수').strip() or '접수'
+    proc_result  = (bill.get('PROC_RESULT') or '접수').strip()
     propose_dt   = bill.get('PROPOSE_DT', '')
     link_url     = bill.get('LINK_URL', '')
 
