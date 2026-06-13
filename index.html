@@ -22,6 +22,7 @@
       <div class="nav-label">모니터링</div>
       <div class="nav-item active" onclick="go('news',this)"><i class="ti ti-news"></i>보도자료·뉴스</div>
       <div class="nav-item" onclick="go('briefing',this)"><i class="ti ti-coffee"></i>Daily Briefing</div>
+      <div class="nav-item" onclick="go('assembly',this)"><i class="ti ti-building-bank"></i>국회 법안</div>
       <div class="nav-item" onclick="go('terms',this)"><i class="ti ti-book"></i>기술 용어</div>
     </div>
     <div class="nav-group">
@@ -502,6 +503,36 @@
         </div><!-- settings-unlocked -->
       </div><!-- panel-settings -->
 
+      <!-- 국회 법안 모니터링 -->
+      <div class="panel" id="panel-assembly">
+        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+          <span style="font-size:12px;color:var(--text-secondary)">22대 국회 · 전파·통신 관련 법안 자동 추적 · 매일 10:00 KST 갱신</span>
+          <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:auto" onclick="loadAssemblyBills(true)"><i class="ti ti-refresh"></i> 새로고침</button>
+        </div>
+
+        <!-- 상태 필터 -->
+        <div class="tag-list" style="margin-bottom:12px" id="assembly-filter-tabs">
+          <span class="tag selected" onclick="filterAssembly(this,'전체')">전체</span>
+          <span class="tag" onclick="filterAssembly(this,'접수')">접수</span>
+          <span class="tag" onclick="filterAssembly(this,'소관위')">소관위 심사</span>
+          <span class="tag" onclick="filterAssembly(this,'법사위')">법사위 심사</span>
+          <span class="tag" onclick="filterAssembly(this,'본회의')">본회의</span>
+          <span class="tag" onclick="filterAssembly(this,'통과')">통과/공포</span>
+        </div>
+
+        <!-- 통계 -->
+        <div class="stat-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px" id="assembly-stats">
+          <div class="stat-card"><div class="stat-value" id="asm-total">—</div><div class="stat-label">전체 법안</div></div>
+          <div class="stat-card"><div class="stat-value" id="asm-new">—</div><div class="stat-label">이번 주 신규</div></div>
+          <div class="stat-card"><div class="stat-value" id="asm-active">—</div><div class="stat-label">심사 진행중</div></div>
+          <div class="stat-card"><div class="stat-value" id="asm-passed">—</div><div class="stat-label">통과/공포</div></div>
+        </div>
+
+        <div id="assembly-list">
+          <div style="color:var(--text-secondary);padding:20px;text-align:center;font-size:12px">불러오는 중...</div>
+        </div>
+      </div>
+
     </div><!-- content -->
   </div><!-- main -->
 
@@ -536,6 +567,9 @@
       </button>
       <button class="mobile-submenu-item" onclick="go('briefing',null);setBottomNav('bn-monitor');closeMobileSubMenu('monitor-sub')">
         <i class="ti ti-coffee"></i>Daily Briefing
+      </button>
+      <button class="mobile-submenu-item" onclick="go('assembly',null);setBottomNav('bn-monitor');closeMobileSubMenu('monitor-sub')">
+        <i class="ti ti-building-bank"></i>국회 법안
       </button>
     </div>
   </div>

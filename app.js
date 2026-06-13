@@ -2900,12 +2900,12 @@ function go(page, navEl) {
   if (navEl && navEl.classList) navEl.classList.add('active');
 
   // 상단 바 제목 업데이트
-  var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', briefing:'Daily Briefing', settings:'설정'};
+  var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:'보도자료·뉴스', briefing:'Daily Briefing', assembly:'국회 법안', settings:'설정'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-more', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', settings:'bn-more'};
+  var pageTobn = {home:'bn-more', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', settings:'bn-more'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
@@ -2914,6 +2914,7 @@ function go(page, navEl) {
   if (page === 'press') loadPressFromSupabase();
   if (page === 'terms') loadTerms();
   if (page === 'law') loadKbDocs();
+  if (page === 'assembly') loadAssemblyBills();
 }
 
 function setBottomNav(activeId) {
@@ -3727,6 +3728,133 @@ async function doPdfUpload() {
     btn.innerHTML = '<i class="ti ti-upload"></i> 업로드';
     prog.style.display = 'none';
   }
+}
+
+// ════════════════════════════════════════════
+//  국회 법안 모니터링
+// ════════════════════════════════════════════
+let assemblyBillsCache = null;
+let assemblyFilterMode = '전체';
+
+async function loadAssemblyBills(forceRefresh) {
+  if (!sb) return;
+  var listEl = document.getElementById('assembly-list');
+  if (!listEl) return;
+
+  if (!assemblyBillsCache || forceRefresh) {
+    listEl.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center;font-size:12px">불러오는 중...</div>';
+    try {
+      var resp = await sb
+        .from('assembly_bills')
+        .select('*')
+        .eq('age', 22)
+        .order('updated_at', { ascending: false });
+      if (resp.error) throw resp.error;
+      assemblyBillsCache = resp.data || [];
+    } catch(e) {
+      listEl.innerHTML = '<div style="color:#f66;padding:20px;text-align:center;font-size:12px">불러오기 실패: ' + e.message + '</div>';
+      return;
+    }
+  }
+  renderAssemblyBills(assemblyBillsCache);
+}
+
+function filterAssembly(el, mode) {
+  assemblyFilterMode = mode;
+  document.querySelectorAll('#assembly-filter-tabs .tag').forEach(function(t) { t.classList.remove('selected'); });
+  el.classList.add('selected');
+  if (assemblyBillsCache) renderAssemblyBills(assemblyBillsCache);
+}
+
+function assemblyStatusLabel(proc) {
+  if (!proc || proc === '접수') return { text: '접수', color: '#6b7280' };
+  if (proc.includes('소관위')) return { text: proc, color: '#3b82f6' };
+  if (proc.includes('법사위')) return { text: proc, color: '#8b5cf6' };
+  if (proc.includes('본회의')) return { text: proc, color: '#f59e0b' };
+  if (proc === '본회의 통과' || proc === '공포' || proc === '정부이송') return { text: proc, color: '#22c55e' };
+  if (proc === '부결' || proc === '철회' || proc === '대안반영폐기') return { text: proc, color: '#ef4444' };
+  return { text: proc, color: '#6b7280' };
+}
+
+function assemblyMatchesFilter(bill) {
+  var p = bill.proc_result || '접수';
+  if (assemblyFilterMode === '전체') return true;
+  if (assemblyFilterMode === '접수') return !p || p === '접수';
+  if (assemblyFilterMode === '소관위') return p.includes('소관위');
+  if (assemblyFilterMode === '법사위') return p.includes('법사위');
+  if (assemblyFilterMode === '본회의') return p.includes('본회의');
+  if (assemblyFilterMode === '통과') return ['본회의 통과','공포','정부이송'].includes(p);
+  return true;
+}
+
+function renderAssemblyBills(bills) {
+  var listEl = document.getElementById('assembly-list');
+  if (!listEl) return;
+
+  // 통계
+  var now = new Date();
+  var weekAgo = new Date(now - 7 * 86400000);
+  var totalCount   = bills.length;
+  var newCount     = bills.filter(function(b) { return new Date(b.created_at) >= weekAgo; }).length;
+  var activeCount  = bills.filter(function(b) { var p = b.proc_result || ''; return p.includes('심사') || p.includes('본회의'); }).length;
+  var passedCount  = bills.filter(function(b) { var p = b.proc_result || ''; return ['본회의 통과','공포','정부이송'].includes(p); }).length;
+
+  var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  setVal('asm-total',  totalCount);
+  setVal('asm-new',    newCount);
+  setVal('asm-active', activeCount);
+  setVal('asm-passed', passedCount);
+
+  var filtered = bills.filter(assemblyMatchesFilter);
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = '<div style="color:var(--text-secondary);padding:24px;text-align:center;font-size:12px">해당하는 법안이 없습니다</div>';
+    return;
+  }
+
+  var html = '<div class="card" style="cursor:default;padding:0;overflow:hidden">';
+  filtered.forEach(function(b, i) {
+    var sl = assemblyStatusLabel(b.proc_result);
+    var kws = (b.matched_keywords || []).slice(0, 3).join(', ');
+    var proposeDt = b.propose_dt
+      ? (b.propose_dt.length === 8
+          ? b.propose_dt.slice(0,4) + '.' + b.propose_dt.slice(4,6) + '.' + b.propose_dt.slice(6)
+          : b.propose_dt)
+      : '—';
+    var isNew = new Date(b.created_at) >= weekAgo;
+    var borderTop = i === 0 ? '' : 'border-top:1px solid var(--border);';
+    var link = b.link_url
+      ? '<a href="' + b.link_url + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none;white-space:nowrap"><i class="ti ti-external-link" style="font-size:11px"></i> 의안보기</a>'
+      : '';
+
+    html += '<div style="' + borderTop + 'padding:12px 14px">'
+      + '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px">'
+      + '<span style="flex:1;font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.4">' + escHtml(b.bill_name) + '</span>'
+      + (isNew ? '<span style="font-size:10px;background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:99px;flex-shrink:0">신규</span>' : '')
+      + '</div>'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+      + '<span style="font-size:10px;color:var(--text-muted)">' + escHtml(b.proposer || '—') + '</span>'
+      + '<span style="font-size:10px;color:var(--text-muted)">|</span>'
+      + '<span style="font-size:10px;color:var(--text-muted)">' + escHtml(b.committee || '—') + '</span>'
+      + '<span style="font-size:10px;color:var(--text-muted)">|</span>'
+      + '<span style="font-size:10px;color:var(--text-muted)">발의 ' + proposeDt + '</span>'
+      + '<span style="margin-left:auto;font-size:10px;font-weight:600;color:' + sl.color + '">' + escHtml(sl.text) + '</span>'
+      + '</div>'
+      + (kws ? '<div style="margin-top:4px;font-size:10px;color:var(--text-muted)">키워드: ' + escHtml(kws) + '</div>' : '')
+      + (link ? '<div style="margin-top:4px">' + link + '</div>' : '')
+      + '</div>';
+  });
+  html += '</div>';
+
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;text-align:right">'
+    + filtered.length + '건 표시 (전체 ' + totalCount + '건)</div>';
+
+  listEl.innerHTML = html;
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ════════════════════════════════════════════
