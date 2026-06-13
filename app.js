@@ -2922,7 +2922,7 @@ function go(page, navEl, sourceType) {
   if (page === 'news' && sourceType !== undefined) currentNewsSourceType = sourceType;
 
   // 상단 바 제목 업데이트
-  var newsTitle = currentNewsSourceType === 'gov' ? '정부 보도자료' : (currentNewsSourceType === 'media' ? '뉴스' : '보도자료·뉴스');
+  var newsTitle = currentNewsSourceType === 'gov' ? '정부 보도자료·공지사항' : (currentNewsSourceType === 'media' ? '뉴스' : '보도자료·뉴스');
   var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:newsTitle, briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
