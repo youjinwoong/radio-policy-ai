@@ -1060,7 +1060,9 @@ def crawl_news_site(cfg: dict) -> list:
 def fetch_article_body(url: str, source: str) -> tuple:
     """기사 URL에서 본문 텍스트와 발행일 추출. 반환: (body: str, published_at: str)"""
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=8)
+        # RRA 사이트는 DH_KEY_TOO_SMALL SSL 오류 → verify=False
+        ssl_verify = False if 'rra.go.kr' in url else True
+        resp = requests.get(url, headers=HEADERS, timeout=8, verify=ssl_verify)
         resp.raise_for_status()
         # RRA(국립전파연구원) 사이트는 EUC-KR 인코딩
         if 'rra.go.kr' in url:
