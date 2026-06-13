@@ -82,8 +82,8 @@ _BRIEFING_SYSTEM = """당신은 SK텔레콤 Comm센터 기술정책팀의 전파
 - 반드시 제공된 본문 내용에 근거해서만 요약 작성 — 추측·외부 지식 금지
 - 각 뉴스에 본문 기반 한 줄 요약 포함
 - [ID:기사id] 태그를 제목 뒤에 반드시 포함 (역저장에 사용)
-- 🔴 긴급 표시는 입력 뉴스 목록에서 🔴 아이콘이 붙은 기사에만 사용할 것 (크롤러·담당자 검증 분류 기준)
-  ※ 입력에서 🔴인 기사를 [주요 뉴스]에 선별하면 🔴를 그대로 유지하고, 🟡·🟢 기사에 새로 🔴를 붙이지 말 것
+- 🔴 긴급 표시는 SKT 또는 국내 사업에 직접적인 영향이 있는 기사에만 사용할 것
+  ※ 요약에서 "직접적인 영향 없음" 또는 "국내 영향 제한적"으로 판단한 기사에 🔴를 붙이는 것은 모순이므로 금지
 
 출력 형식 (아래 형식 그대로):
 📡 전파정책 모닝 브리핑 — {날짜}
@@ -147,57 +147,6 @@ def generate_briefing(items: list, new_terms: list) -> str:
     except Exception as e:
         print(f'[브리핑 생성 오류] {e}')
         return ''
-
-
-# ═══════════════════════════════════════════════════════
-#  STEP 2.5 — 긴급 기사 SKT 영향 분석 (DB 긴급도 기준, 생성 시 1회 저장)
-# ═══════════════════════════════════════════════════════
-
-_IMPACT_SYSTEM = """당신은 SKT Comm센터 기술정책팀의 정책 분석 AI입니다.
-긴급 분류된 기사 1건에 대해 SKT 관점의 영향 분석을 작성하세요.
-- 3~4문장, 제공된 본문에 근거한 내용만 (추측·과장 금지)
-- 영향이 불명확하면 '추가 정보 수집 필요'를 명시
-- 마지막 문장에 권고 대응 1가지 포함
-- 줄바꿈 없이 한 단락으로만 출력"""
-
-
-def add_urgent_analyses(items: list, briefing_text: str) -> str:
-    """DB 긴급도='긴급' 기사 중 브리핑에 포함된 기사에 SKT 영향 분석을 생성해
-    해당 기사 블록 뒤에 삽입. 저장본에 포함되므로 이메일·대시보드가 동일 내용 표시."""
-    if not ANTHROPIC_API_KEY or not briefing_text:
-        return briefing_text
-    urgent = [it for it in items if it.get('urgency') == '긴급' and f"[ID:{it['id']}]" in briefing_text]
-    if not urgent:
-        return briefing_text
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    lines = briefing_text.split('\n')
-    for it in urgent[:3]:
-        try:
-            body = (it.get('content') or '').replace('\n', ' ').strip()[:1500]
-            resp = client.messages.create(
-                model='claude-haiku-4-5-20251001', max_tokens=400,
-                system=_IMPACT_SYSTEM,
-                messages=[{'role': 'user', 'content': f"제목: {it['title']}\n본문: {body}"}],
-            )
-            analysis = resp.content[0].text.strip().replace('\n', ' ')
-        except Exception as e:
-            print(f'  [영향 분석 오류] {str(it.get("title",""))[:30]}: {e}')
-            continue
-        tag = f"[ID:{it['id']}]"
-        idx = next((i for i, l in enumerate(lines) if tag in l), None)
-        if idx is None:
-            continue
-        ins = idx
-        for j in range(idx + 1, min(idx + 5, len(lines))):
-            if '🔗' in lines[j]:
-                ins = j
-                break
-            if lines[j].strip() == '' or lines[j].startswith('['):
-                break
-            ins = j
-        lines.insert(ins + 1, f"  ⚠️ SKT 영향 분석: {analysis}")
-        print(f'  [영향 분석] {str(it.get("title",""))[:30]}... 삽입')
-    return '\n'.join(lines)
 
 
 # ═══════════════════════════════════════════════════════
@@ -296,8 +245,6 @@ def _briefing_to_html(text: str) -> str:
             out.append(f'<h3 style="color:#1a1a1a;margin:18px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px">{e}</h3>')
         elif e.startswith('•') or '🟡' in line or '🟢' in line:
             out.append(f'<p style="margin:4px 0 4px 12px">{e}</p>')
-        elif '⚠️ SKT 영향 분석' in line:
-            out.append(f'<p style="margin:6px 0 4px 24px;color:#9b2c2c;font-size:13px">{e.strip()}</p>')
         elif e.startswith('  →'):
             out.append(f'<p style="margin:2px 0 2px 24px;color:#555;font-size:13px">{e}</p>')
         elif e.startswith('  🔗'):
@@ -438,9 +385,6 @@ def main():
         print('[종료] 브리핑 생성 실패')
         return
 
-    # 긴급(DB 기준) 기사 SKT 영향 분석 — 저장본에 포함 (이메일·대시보드 공통)
-    briefing_text = add_urgent_analyses(items, briefing_text)
-
     # 저장
     save_briefing(briefing_text, len(items), len(new_terms))
 
@@ -450,9 +394,8 @@ def main():
     # 발송용 텍스트 — [ID:...] 태그 제거
     display_text = re.sub(r'\s*\[ID:[^\]]+\]', '', briefing_text)
 
-    # 발송 — 텔레그램은 4000자 제한 때문에 영향 분석 줄 제외
-    telegram_text = '\n'.join(l for l in display_text.split('\n') if 'SKT 영향 분석' not in l)
-    send_telegram(telegram_text)
+    # 발송
+    send_telegram(display_text)
     send_email(display_text, len(items))
 
     print(f'{"="*50}')
