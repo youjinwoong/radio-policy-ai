@@ -22,6 +22,8 @@ except ImportError:
     pass  # GitHub Actions에서는 환경변수 직접 주입, dotenv 불필요
 
 import requests
+import ssl
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 import anthropic
@@ -1057,12 +1059,25 @@ def crawl_news_site(cfg: dict) -> list:
 #  기사 본문 수집
 # ═══════════════════════════════════════════════════════
 
+class _WeakDHAdapter(HTTPAdapter):
+    """DH_KEY_TOO_SMALL 오류 우회용 SSL 어댑터 (SECLEVEL=1)"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT:@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        super().init_poolmanager(*args, **kwargs)
+
 def fetch_article_body(url: str, source: str) -> tuple:
     """기사 URL에서 본문 텍스트와 발행일 추출. 반환: (body: str, published_at: str)"""
     try:
-        # RRA 사이트는 DH_KEY_TOO_SMALL SSL 오류 → verify=False
-        ssl_verify = False if 'rra.go.kr' in url else True
-        resp = requests.get(url, headers=HEADERS, timeout=8, verify=ssl_verify)
+        if 'rra.go.kr' in url:
+            s = requests.Session()
+            s.mount('https://', _WeakDHAdapter())
+            resp = s.get(url, headers=HEADERS, timeout=8)
+        else:
+            resp = requests.get(url, headers=HEADERS, timeout=8)
         resp.raise_for_status()
         # RRA(국립전파연구원) 사이트는 EUC-KR 인코딩
         if 'rra.go.kr' in url:
