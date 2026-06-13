@@ -259,7 +259,8 @@
 
           <!-- 오른쪽: 상세 & 액션 패널 (뉴스 선택 시 표시) -->
           <div id="news-detail-panel" style="width:310px;flex-shrink:0;display:none;position:sticky;top:16px">
-            <div class="card" style="cursor:default;padding:16px" id="news-detail-content">
+            <div class="card" style="cursor:default;padding:16px;position:relative" id="news-detail-content">
+              <button onclick="closeNewsDetail()" title="닫기" style="position:absolute;top:8px;right:8px;background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-tertiary);line-height:1;padding:2px 4px;border-radius:4px;z-index:1" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-tertiary)'">✕</button>
               <div style="color:var(--text-secondary);text-align:center;padding:30px 16px;font-size:12px">
                 <i class="ti ti-news" style="font-size:28px;opacity:.3;display:block;margin-bottom:8px"></i>
                 뉴스를 선택하면<br>상세 분석이 표시됩니다
@@ -722,6 +723,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260614f"></script>
+<script src="app.js?v=20260614g"></script>
 </body>
 </html>

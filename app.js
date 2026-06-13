@@ -1287,6 +1287,12 @@ let currentNewsFilter = '전체';
 let newsDataCache = [];      // 전체 로드된 뉴스 캐시
 let selectedNewsId = null;   // 현재 선택된 뉴스 id
 
+function closeNewsDetail() {
+  selectedNewsId = null;
+  var panel = document.getElementById('news-detail-panel');
+  if (panel) panel.style.display = 'none';
+}
+
 // ── 중요도 분류 규칙 ──────────────────────────────────────
 // SKT Comm센터 기술정책팀 KPI 기준으로 키워드 매핑
 var IMPORTANCE_RULES = {
