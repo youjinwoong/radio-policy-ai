@@ -1107,7 +1107,9 @@ def fetch_article_body(url: str, source: str) -> tuple:
             ]
 
         selectors_map = {
-            '국립전파연구원': ['div.board_view', 'div.view_content', 'div#contents', 'div.content_area', 'td.view_cont'],
+            '국립전파연구원': ['div.bbs_view_cont', 'td.cont', 'div.memo', 'div.bbs_cont',
+                              'div.board_view_txt', 'div.view_area', 'table.bbs_view td:last-child',
+                              'div.board_view', 'div.view_content', 'td.view_cont'],
             '전자신문':    ['div.article_body', 'div#articleBody', 'div.news_view', 'div#articleView'],
             '연합뉴스':    ['div.article-txt', 'article.story-news', 'div#articleWrap'],
             '디지털타임스': ['div#article_txt', 'div.article_content', 'div#articleBody'],
@@ -1132,12 +1134,17 @@ def fetch_article_body(url: str, source: str) -> tuple:
             'div.view_cont', 'div.view-content', 'div#content',
             'div.article-body', 'div.news_body', 'div.article_txt'
         ]
+        # 정부 사이트 nav 텍스트 판별 (주메뉴 등으로 시작하면 nav 영역)
+        NAV_STARTS = ('주메뉴', '메뉴건너뛰기', 'Skip Navigation', '본문 바로가기')
+        def _is_nav(text: str) -> bool:
+            return any(text.startswith(s) for s in NAV_STARTS)
+
         body = ''
         for sel in candidates:
             tag = soup.select_one(sel)
             if tag:
                 text = tag.get_text(separator=' ', strip=True)
-                if len(text) > 100:
+                if len(text) > 100 and not _is_nav(text):
                     body = text[:1500]
                     break
 
@@ -1146,7 +1153,7 @@ def fetch_article_body(url: str, source: str) -> tuple:
             try:
                 import trafilatura
                 extracted = trafilatura.extract(resp.text, include_comments=False, include_tables=False)
-                if extracted and len(extracted.strip()) > 100:
+                if extracted and len(extracted.strip()) > 100 and not _is_nav(extracted.strip()):
                     body = extracted.strip()[:1500]
             except Exception:
                 pass
