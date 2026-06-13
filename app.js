@@ -1547,7 +1547,8 @@ function renderNewsList() {
     return;
   }
 
-  var groups = _groupNews(sorted);
+  // 정부 보도자료·공지사항은 그룹핑 없이 개별 표시
+  var groups = currentNewsSourceType === 'gov' ? sorted.map(function(n){ return [n]; }) : _groupNews(sorted);
   var html = '';
 
   groups.forEach(function(group, gi) {
