@@ -257,6 +257,190 @@ def crawl_kcc() -> list:
 
 
 # ═══════════════════════════════════════════════════════
+#  크롤러 — 법령입법예고 시스템 (opinion.lawmaking.go.kr)
+# ═══════════════════════════════════════════════════════
+
+OPINION_API  = 'https://opinion.lawmaking.go.kr/gcom/selectLmnList.do'
+OPINION_BASE = 'https://opinion.lawmaking.go.kr'
+
+# 입법예고 모니터링 대상 부처 코드 (과기정통부·방통위 우선)
+OPINION_DEPTS = [
+    ('1320000', '과학기술정보통신부'),
+    ('1150000', '방송통신위원회'),
+    ('',        ''),  # 전체 (키워드 검색)
+]
+
+# 입법예고 검색 키워드
+OPINION_KEYWORDS = [
+    '전파', '주파수', '전기통신', '방송통신', '무선', '전자파',
+    '적합성평가', '정보통신망', '이동통신', '기간통신', '위성',
+]
+
+
+def crawl_opinion_lawmaking() -> list:
+    """법령입법예고 시스템 (opinion.lawmaking.go.kr) 크롤링.
+    과기정통부·방통위 부처 필터 + 키워드 필터로 관련 입법예고 수집.
+    입법예고는 의견수렴 단계 — 공포 수주~수개월 전이므로 긴급으로 분류."""
+    items = []
+    seen_titles: set[str] = set()
+
+    # ① 과기정통부·방통위 부처별 전체 목록 (최신순 1페이지)
+    for dept_cd, dept_nm in OPINION_DEPTS[:2]:
+        try:
+            payload = {
+                'pageIndex': '1',
+                'recordCountPerPage': '20',
+                'mnistryCode': dept_cd,
+                'srchGbn': '1',  # 진행중+완료
+                'lmAnsYn': '',
+            }
+            res = fetch_with_retry(OPINION_API, timeout=20)
+            # POST로 재시도
+            if USE_CURL_CFFI:
+                import requests as _r
+                res = _r.post(OPINION_API, data=payload,
+                              headers={**HEADERS, 'Content-Type': 'application/x-www-form-urlencoded',
+                                       'X-Requested-With': 'XMLHttpRequest'},
+                              timeout=20)
+            else:
+                import requests as _r
+                res = _r.post(OPINION_API, data=payload,
+                              headers={**HEADERS, 'Content-Type': 'application/x-www-form-urlencoded',
+                                       'X-Requested-With': 'XMLHttpRequest'},
+                              timeout=20)
+
+            data = res.json()
+            rows = data.get('lmnList', data.get('list', data.get('data', [])))
+            if not isinstance(rows, list):
+                raise ValueError(f'응답 형식 예외: {list(data.keys())}')
+
+            for row in rows:
+                title = (row.get('lmTitle') or row.get('title') or '').strip()
+                if not title:
+                    continue
+                if not any(k in title for k in RADIO_KEYWORDS):
+                    continue
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+
+                # 상세 URL
+                seq = row.get('lmSeq') or row.get('seq') or ''
+                url = f'{OPINION_BASE}/gcom/ogLmSc.do?lmId={seq}' if seq else OPINION_BASE
+
+                # 날짜 (의견수렴 시작일)
+                dt_str = (row.get('rcptDt') or row.get('opnStrtDt') or
+                          row.get('lmRcptDt') or '').replace('-', '.')
+
+                items.append({
+                    'title':        f'[입법예고] {title}',
+                    'source':       f'법령입법예고 / {dept_nm}',
+                    'category':     detect_category(title),
+                    'url':          url,
+                    'is_read':      False,
+                    'published_at': parse_date(dt_str) or datetime.now(KST).isoformat(),
+                    'urgency':      '긴급',
+                    'importance':   '긴급',
+                    'summary':      f'입법예고 의견수렴 기간: {dt_str}. 시행 전 의견 제출 기회입니다.',
+                })
+
+            print(f'[입법예고/{dept_nm}] {len([i for i in items if dept_nm in i.get("source","")])}건')
+            time.sleep(1)
+
+        except Exception as e:
+            print(f'[입법예고/{dept_nm} 오류] {e}')
+            # ── POST API 실패 시 HTML 폴백 ──────────────────────
+            _items_fallback = _crawl_opinion_html(dept_cd, dept_nm, seen_titles)
+            items += _items_fallback
+
+    # ② 키워드 검색 (부처 무관)
+    for kw in OPINION_KEYWORDS[:5]:   # 상위 5개 키워드만 (속도 제한)
+        try:
+            payload = {
+                'pageIndex': '1',
+                'recordCountPerPage': '10',
+                'srchTitle': kw,
+                'srchGbn': '1',
+            }
+            if USE_CURL_CFFI:
+                import requests as _r
+            else:
+                import requests as _r
+            res = _r.post(OPINION_API, data=payload,
+                          headers={**HEADERS, 'Content-Type': 'application/x-www-form-urlencoded',
+                                   'X-Requested-With': 'XMLHttpRequest'},
+                          timeout=15)
+            data = res.json()
+            rows = data.get('lmnList', data.get('list', data.get('data', [])))
+            if not isinstance(rows, list):
+                continue
+
+            for row in rows:
+                title = (row.get('lmTitle') or row.get('title') or '').strip()
+                if not title or title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                seq  = row.get('lmSeq') or row.get('seq') or ''
+                url  = f'{OPINION_BASE}/gcom/ogLmSc.do?lmId={seq}' if seq else OPINION_BASE
+                dt_str = (row.get('rcptDt') or row.get('opnStrtDt') or '').replace('-', '.')
+                items.append({
+                    'title':        f'[입법예고] {title}',
+                    'source':       '법령입법예고',
+                    'category':     detect_category(title),
+                    'url':          url,
+                    'is_read':      False,
+                    'published_at': parse_date(dt_str) or datetime.now(KST).isoformat(),
+                    'urgency':      '긴급',
+                    'importance':   '긴급',
+                    'summary':      f'키워드 "{kw}" 입법예고.',
+                })
+            time.sleep(0.5)
+        except Exception as e:
+            print(f'[입법예고/키워드 오류] {kw}: {e}')
+
+    print(f'[입법예고 합계] {len(items)}건')
+    return items
+
+
+def _crawl_opinion_html(dept_cd: str, dept_nm: str, seen_titles: set) -> list:
+    """API 실패 시 HTML 페이지 직접 파싱 폴백"""
+    items = []
+    try:
+        url = f'{OPINION_BASE}/gcom/ogLmSc.do?mnistryCode={dept_cd}'
+        res = fetch_with_retry(url, timeout=20)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        rows = soup.select('table tbody tr, ul.list_type li, div.list_wrap li')[:20]
+        for row in rows:
+            title_tag = row.find('a')
+            if not title_tag:
+                continue
+            title = title_tag.get_text(strip=True)
+            if not title or not any(k in title for k in RADIO_KEYWORDS):
+                continue
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
+            href = title_tag.get('href', '')
+            if href.startswith('/'):
+                href = OPINION_BASE + href
+            date_tag = row.find(class_=re.compile(r'date|day|period|term'))
+            dt_str = date_tag.get_text(strip=True) if date_tag else ''
+            items.append({
+                'title':        f'[입법예고] {title}',
+                'source':       f'법령입법예고 / {dept_nm}',
+                'category':     detect_category(title),
+                'url':          href or url,
+                'is_read':      False,
+                'published_at': parse_date(dt_str) or datetime.now(KST).isoformat(),
+                'urgency':      '긴급',
+                'importance':   '긴급',
+            })
+    except Exception as e:
+        print(f'[입법예고 HTML 폴백 오류] {dept_nm}: {e}')
+    return items
+
+
+# ═══════════════════════════════════════════════════════
 #  저장
 # ═══════════════════════════════════════════════════════
 
@@ -306,6 +490,7 @@ def main():
     all_items += crawl_rra()
     all_items += crawl_msit()
     all_items += crawl_kcc()
+    all_items += crawl_opinion_lawmaking()   # 법령입법예고 (최우선 — 긴급 분류)
     print(f'[수집] 총 {len(all_items)}건')
 
     saved = save_items(all_items, existing_urls, existing_titles)
