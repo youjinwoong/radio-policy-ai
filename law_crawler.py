@@ -83,7 +83,7 @@ def fetch_laws(keyword: str, target: str, display: int = 20) -> list[dict]:
         'sort':    'lasc',   # 최신 공포일 기준 내림차순
     }
     try:
-        resp = requests.get(LAW_API_BASE, params=params, timeout=15)
+        resp = requests.get(LAW_API_BASE, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         # 응답 구조: {"LawSearch": {"law": [...]}} 또는 {"LawSearch": {"law": {...}}}
@@ -109,7 +109,7 @@ def fetch_announcements(keyword: str, display: int = 20) -> list[dict]:
         'page':    1,
     }
     try:
-        resp = requests.get(ANC_API_BASE, params=params, timeout=15)
+        resp = requests.get(ANC_API_BASE, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         items = data.get('LawSearch', {}).get('law', [])
