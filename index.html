@@ -533,22 +533,13 @@
           <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:auto" onclick="loadAssemblyBills(true)"><i class="ti ti-refresh"></i> 새로고침</button>
         </div>
 
-        <!-- 상태 필터 -->
-        <div class="tag-list" style="margin-bottom:12px" id="assembly-filter-tabs">
-          <span class="tag selected" data-mode="전체" onclick="filterAssembly(this,'전체')">전체</span>
-          <span class="tag" data-mode="최근" onclick="filterAssembly(this,'최근')">최근 발의(7일)</span>
-          <span class="tag" data-mode="접수" onclick="filterAssembly(this,'접수')">접수(계류)</span>
-          <span class="tag" data-mode="통과" onclick="filterAssembly(this,'통과')">통과</span>
-          <span class="tag" data-mode="폐기" onclick="filterAssembly(this,'폐기')">폐기·철회</span>
-        </div>
-
         <!-- 통계 -->
         <div class="stat-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px" id="assembly-stats">
-          <div class="stat-card" style="cursor:pointer" onclick="filterAssembly(this,'전체')"><div class="stat-value" id="asm-total">—</div><div class="stat-label">전체 법안</div></div>
-          <div class="stat-card" style="cursor:pointer" onclick="filterAssembly(this,'최근')"><div class="stat-value" id="asm-new">—</div><div class="stat-label">최근 발의(7일)</div></div>
-          <div class="stat-card" style="cursor:pointer" onclick="filterAssembly(this,'접수')"><div class="stat-value" id="asm-active">—</div><div class="stat-label">계류 중</div></div>
-          <div class="stat-card" style="cursor:pointer" onclick="filterAssembly(this,'통과')"><div class="stat-value" id="asm-passed">—</div><div class="stat-label">통과</div></div>
-          <div class="stat-card" style="cursor:pointer" onclick="filterAssembly(this,'폐기')"><div class="stat-value" id="asm-discarded">—</div><div class="stat-label">폐기·철회</div></div>
+          <div class="stat-card" style="cursor:pointer" data-mode="전체" onclick="filterAssembly(this,'전체')"><div class="stat-value" id="asm-total">—</div><div class="stat-label">전체 법안</div></div>
+          <div class="stat-card" style="cursor:pointer" data-mode="최근" onclick="filterAssembly(this,'최근')"><div class="stat-value" id="asm-new">—</div><div class="stat-label">최근 발의(7일)</div></div>
+          <div class="stat-card" style="cursor:pointer" data-mode="접수" onclick="filterAssembly(this,'접수')"><div class="stat-value" id="asm-active">—</div><div class="stat-label">계류 중</div></div>
+          <div class="stat-card" style="cursor:pointer" data-mode="통과" onclick="filterAssembly(this,'통과')"><div class="stat-value" id="asm-passed">—</div><div class="stat-label">통과</div></div>
+          <div class="stat-card" style="cursor:pointer" data-mode="폐기" onclick="filterAssembly(this,'폐기')"><div class="stat-value" id="asm-discarded">—</div><div class="stat-label">폐기·철회</div></div>
         </div>
 
         <div id="assembly-list">
@@ -721,6 +712,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260614q"></script>
+<script src="app.js?v=20260614r"></script>
 </body>
 </html>

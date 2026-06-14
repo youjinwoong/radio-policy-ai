@@ -3786,7 +3786,6 @@ async function loadAssemblyBills(forceRefresh) {
 
 function filterAssembly(el, mode) {
   assemblyFilterMode = mode;
-  document.querySelectorAll('#assembly-filter-tabs .tag').forEach(function(t) { t.classList.toggle('selected', t.getAttribute('data-mode') === mode); });
   if (assemblyBillsCache) renderAssemblyBills(assemblyBillsCache);
 }
 
@@ -3836,6 +3835,13 @@ function renderAssemblyBills(bills) {
   setVal('asm-active', activeCount);
   setVal('asm-passed', passedCount);
   setVal('asm-discarded', discardedCount);
+
+  // 선택된 카드 강조 (필터 버튼 줄 제거 → 카드가 필터 겸용)
+  document.querySelectorAll('#assembly-stats .stat-card').forEach(function(c) {
+    var on = c.getAttribute('data-mode') === assemblyFilterMode;
+    c.style.outline = on ? '2px solid var(--accent)' : '';
+    c.style.outlineOffset = on ? '-2px' : '';
+  });
 
   var filtered = bills.filter(assemblyMatchesFilter).slice().sort(function(a, b) {
     var da = _parseProposeDt(a.propose_dt), db = _parseProposeDt(b.propose_dt);
