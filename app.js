@@ -4048,6 +4048,6 @@ document.addEventListener('DOMContentLoaded', function() {
   updateStatusDots();
   loadSettingsUI();
   loadPressJSON();
-  loadRemoteConfig().then(function() { currentNewsSourceType = 'gov'; loadNews(); });
+  loadRemoteConfig().then(function() { currentNewsSourceType = 'media'; loadNews(); });
   setTimeout(autoExtractTermsIfNeeded, 60000);
 });
