@@ -1111,6 +1111,17 @@ def fetch_article_body(url: str, source: str) -> tuple:
                     pub_date = parsed
                     break
 
+        # ── RRA 등 정부 게시판: 본문이 table 구조 → trafilatura 우선 ──
+        #    (일반 'article' 셀렉터가 페이지 전체 네비게이션을 잡는 문제 회피)
+        if 'rra.go.kr' in url:
+            try:
+                import trafilatura
+                _ex = trafilatura.extract(resp.text, include_comments=False, include_tables=True)
+                if _ex and len(_ex.strip()) > 50:
+                    return _ex.strip()[:1500], pub_date
+            except Exception:
+                pass
+
         # ── 본문 추출 ───────────────────────────────────────
         # 네이버 뉴스 URL 감지 → 전용 셀렉터 우선 적용
         naver_selectors = []
