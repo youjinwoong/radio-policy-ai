@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-법제처 Open API 기반 법령·고시·입법예고 변경 모니터링
-- 시행령·시행규칙 개정 감지 → 텔레그램 알림
+법제처 국가법령정보 DRF Open API 기반 법령·고시 변경 모니터링
+- 현행 법령(법률·시행령·시행규칙) 개정 감지 → 텔레그램 알림
+- 시행예정 법령(eflaw) 감지 → 시행 예정 추적
 - 행정규칙(고시) 개정 감지 → 텔레그램 알림
-- 입법예고 신규 등록 감지 → 텔레그램 알림
+※ 입법예고는 gov_notice_crawler.py(opinion.lawmaking.go.kr)가 담당
+  (law.go.kr DRF는 lsAnc 미지원)
 
 GitHub Actions에서 매일 11:00 KST 실행 (law_crawl.yml)
 법제처 OC키: https://open.law.go.kr → 마이페이지 → API인증키관리
@@ -12,6 +14,7 @@ GitHub Actions에서 매일 11:00 KST 실행 (law_crawl.yml)
 import os
 import time
 import requests
+from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -33,16 +36,18 @@ sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 KST = timezone(timedelta(hours=9))
 
 # ── API 설정 ──────────────────────────────────────────────
-LAW_API_BASE = 'https://open.law.go.kr/LSO/openApi/apiSearch/retrieveLawInfoListByLawSrchType.do'
-ANC_API_BASE = 'https://open.law.go.kr/LSO/openApi/apiSearch/retrieveLsAnncList.do'
+LAW_API_BASE = 'http://www.law.go.kr/DRF/lawSearch.do'
 
-# 법령 유형별 설명
+# 내부 law_type → 화면 라벨 (대시보드 lawTrackTypeLabel과 일치)
 TYPE_LABEL = {
+    'law':    '법률',
     'bylaw':  '시행령',
     'rules':  '시행규칙',
-    'admrul': '고시·행정규칙',
-    'lsAnc':  '입법예고',
+    'admrul': '고시',
 }
+
+# 법령 조회 target: 현행(law) + 시행예정(eflaw)
+LAW_SEARCH_TARGETS = ['law', 'eflaw']
 
 # 모니터링 키워드
 KEYWORDS = [
@@ -60,35 +65,37 @@ KEYWORDS = [
     '기간통신',
     '전파관리',
     '전파간섭',
-    '혼신',
 ]
 
-# 조회할 법령 유형
-LAW_TARGETS = ['bylaw', 'rules', 'admrul']   # 시행령, 시행규칙, 고시
+
+def law_type_from_gubun(gubun: str) -> str:
+    """법령구분명 → 내부 law_type"""
+    g = (gubun or '').strip()
+    if '대통령령' in g:
+        return 'bylaw'        # 시행령
+    if '총리령' in g or '부령' in g:
+        return 'rules'        # 시행규칙
+    if '법률' in g:
+        return 'law'          # 법률 본법
+    return 'law'              # 기타(국회규칙 등)는 법률로 분류
 
 
 # ══════════════════════════════════════════════════════════
 #  API 조회
 # ══════════════════════════════════════════════════════════
 
-def fetch_laws(keyword: str, target: str, display: int = 20) -> list[dict]:
-    """법제처 API로 법령 목록 조회"""
+def fetch_laws(keyword: str, target: str, display: int = 20) -> list:
+    """법제처 DRF API로 법령 목록 조회 (target=law 현행 / eflaw 시행예정)"""
     if not LAW_OC_KEY:
         return []
     params = {
-        'OC':      LAW_OC_KEY,
-        'target':  target,
-        'type':    'JSON',
-        'query':   keyword,
-        'display': display,
-        'page':    1,
-        'sort':    'lasc',   # 최신 공포일 기준 내림차순
+        'OC': LAW_OC_KEY, 'target': target, 'type': 'JSON',
+        'query': keyword, 'display': display, 'page': 1, 'sort': 'ddes',
     }
     try:
         resp = requests.get(LAW_API_BASE, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        # 응답 구조: {"LawSearch": {"law": [...]}} 또는 {"LawSearch": {"law": {...}}}
         items = data.get('LawSearch', {}).get('law', [])
         if isinstance(items, dict):
             items = [items]
@@ -98,28 +105,24 @@ def fetch_laws(keyword: str, target: str, display: int = 20) -> list[dict]:
         return []
 
 
-def fetch_announcements(keyword: str, display: int = 20) -> list[dict]:
-    """입법예고 목록 조회"""
+def fetch_admrul(keyword: str, display: int = 20) -> list:
+    """행정규칙(고시·훈령·예규) 목록 조회"""
     if not LAW_OC_KEY:
         return []
     params = {
-        'OC':      LAW_OC_KEY,
-        'target':  'lsAnc',
-        'type':    'JSON',
-        'query':   keyword,
-        'display': display,
-        'page':    1,
+        'OC': LAW_OC_KEY, 'target': 'admrul', 'type': 'JSON',
+        'query': keyword, 'display': display, 'page': 1,
     }
     try:
-        resp = requests.get(ANC_API_BASE, params=params, timeout=10)
+        resp = requests.get(LAW_API_BASE, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        items = data.get('LawSearch', {}).get('law', [])
+        items = data.get('AdmRulSearch', {}).get('admrul', [])
         if isinstance(items, dict):
             items = [items]
         return items if isinstance(items, list) else []
     except Exception as e:
-        print(f'  [입법예고 API 오류] {keyword}: {e}')
+        print(f'  [고시 API 오류] {keyword}: {e}')
         return []
 
 
@@ -127,45 +130,60 @@ def fetch_announcements(keyword: str, display: int = 20) -> list[dict]:
 #  DB 처리
 # ══════════════════════════════════════════════════════════
 
-def load_existing() -> dict[str, dict]:
+def load_existing() -> dict:
     """DB의 기존 법령 목록 로드 (law_id → row)"""
     rows = sb.table('law_amendments').select('*').execute().data
     return {r['law_id']: r for r in rows}
 
 
+def item_name(item: dict) -> str:
+    return (item.get('법령명한글') or item.get('행정규칙명') or '').strip()
+
+
+def item_mst(item: dict) -> str:
+    return str(item.get('법령일련번호') or item.get('행정규칙일련번호') or '').strip()
+
+
 def make_law_id(item: dict, law_type: str) -> str:
-    """법령 고유 ID 생성 (법령MST + 유형)"""
-    mst = item.get('법령MST') or item.get('예고MST') or item.get('일련번호') or ''
-    return f"{law_type}_{mst}"
+    """법령 고유 ID 생성 (유형 + 일련번호)"""
+    return f"{law_type}_{item_mst(item)}"
 
 
-def upsert_law(item: dict, law_type: str, keywords: list[str],
-               existing: dict | None) -> str:
+def build_link(item: dict, law_type: str) -> str:
+    """사용자용 법령/고시 검색 링크 (OC키 노출 방지로 이름 검색 링크 사용)"""
+    nm = item_name(item)
+    if not nm:
+        return ''
+    if law_type == 'admrul':
+        return f'https://www.law.go.kr/admRulSc.do?menuId=1&query={quote(nm)}'
+    return f'https://www.law.go.kr/lsSc.do?menuId=1&query={quote(nm)}'
+
+
+def upsert_law(item: dict, law_type: str, keywords: list,
+               existing: dict) -> str:
     """법령 저장/갱신. 반환값: 'new' | 'updated' | 'unchanged'"""
-    law_id   = make_law_id(item, law_type)
-    law_nm   = (item.get('법령명_한글') or item.get('예고법령명') or
-                item.get('법령명') or '').strip()
-    public_dt = (item.get('공포일자') or item.get('예고공포일자') or
-                 item.get('입법예고일') or '').replace('-', '').strip()
-    enf_dt    = (item.get('시행일자') or item.get('예고시행일자') or '').replace('-', '').strip()
-    public_no = (item.get('공포번호') or item.get('예고번호') or '').strip()
-    ann_type  = (item.get('제개정구분명') or item.get('예고구분명') or '').strip()
+    law_id = make_law_id(item, law_type)
+    law_nm = item_name(item)
+    public_dt = str(item.get('공포일자') or item.get('발령일자') or '').replace('-', '').strip()
+    enf_dt    = str(item.get('시행일자') or '').replace('-', '').strip()
+    public_no = str(item.get('공포번호') or item.get('발령번호') or '').strip()
+    ann_type  = str(item.get('제개정구분명') or '').strip()
     link_url  = build_link(item, law_type)
 
-    if not law_id or not law_nm:
+    if not item_mst(item) or not law_nm:
         return 'unchanged'
 
     row = {
-        'law_id':          law_id,
-        'law_nm':          law_nm,
-        'law_type':        law_type,
-        'ann_type':        ann_type,
-        'public_dt':       public_dt,
-        'enf_dt':          enf_dt,
-        'public_no':       public_no,
+        'law_id':           law_id,
+        'law_nm':           law_nm,
+        'law_type':         law_type,
+        'ann_type':         ann_type,
+        'public_dt':        public_dt,
+        'enf_dt':           enf_dt,
+        'public_no':        public_no,
         'matched_keywords': keywords,
-        'link_url':        link_url,
-        'updated_at':      datetime.now(KST).isoformat(),
+        'link_url':         link_url,
+        'updated_at':       datetime.now(KST).isoformat(),
     }
 
     if existing is None:
@@ -189,15 +207,6 @@ def upsert_law(item: dict, law_type: str, keywords: list[str],
         }).eq('law_id', law_id).execute()
 
     return 'unchanged'
-
-
-def build_link(item: dict, law_type: str) -> str:
-    mst = item.get('법령MST') or item.get('예고MST') or ''
-    if not mst:
-        return ''
-    if law_type == 'lsAnc':
-        return f'https://www.law.go.kr/lsInfoP/lsisCrfP/lsisCrfPP01/retrieveLsInfoMainPageListP.do?lsNm={item.get("예고법령명","")}'
-    return f'https://www.law.go.kr/lsSc.do?query={item.get("법령명_한글","")}'
 
 
 # ══════════════════════════════════════════════════════════
@@ -226,16 +235,14 @@ def send_telegram(msg: str):
         print(f'[텔레그램 오류] {e}')
 
 
-def notify_new(item: dict, law_type: str, keywords: list[str]):
+def notify_new(item: dict, law_type: str, keywords: list):
     label = TYPE_LABEL.get(law_type, law_type)
-    law_nm = (item.get('법령명_한글') or item.get('예고법령명') or '').strip()
-    public_dt = (item.get('공포일자') or item.get('입법예고일') or '').replace('-', '')
-    enf_dt = (item.get('시행일자') or item.get('예고시행일자') or '').replace('-', '')
-    ann_type = item.get('제개정구분명') or item.get('예고구분명') or ''
-
-    icon = '📢' if law_type == 'lsAnc' else '⚖️'
+    law_nm = item_name(item)
+    public_dt = str(item.get('공포일자') or item.get('발령일자') or '').replace('-', '')
+    enf_dt = str(item.get('시행일자') or '').replace('-', '')
+    ann_type = item.get('제개정구분명') or ''
     msg = (
-        f'{icon} <b>[법령 {label} 신규]</b>\n'
+        f'⚖️ <b>[{label} 신규]</b>\n'
         f'{law_nm}\n\n'
         f'• 구분: {ann_type or "—"}\n'
         f'• 공포일: {fmt_date(public_dt)}\n'
@@ -245,12 +252,12 @@ def notify_new(item: dict, law_type: str, keywords: list[str]):
     send_telegram(msg)
 
 
-def notify_updated(item: dict, law_type: str, prev_dt: str, keywords: list[str]):
+def notify_updated(item: dict, law_type: str, prev_dt: str, keywords: list):
     label = TYPE_LABEL.get(law_type, law_type)
-    law_nm = (item.get('법령명_한글') or item.get('예고법령명') or '').strip()
-    public_dt = (item.get('공포일자') or '').replace('-', '')
+    law_nm = item_name(item)
+    public_dt = str(item.get('공포일자') or item.get('발령일자') or '').replace('-', '')
     msg = (
-        f'🔄 <b>[법령 {label} 재개정]</b>\n'
+        f'🔄 <b>[{label} 재개정]</b>\n'
         f'{law_nm}\n\n'
         f'• {fmt_date(prev_dt)} → <b>{fmt_date(public_dt)}</b>\n'
         f'• 키워드: {", ".join(keywords)}'
@@ -270,45 +277,44 @@ def main():
         return
 
     existing = load_existing()
-    print(f'  기존 추적 법령: {len(existing)}건')
+    is_baseline = len(existing) == 0   # 첫 실행이면 알림 폭주 방지(저장만)
+    print(f'  기존 추적 법령: {len(existing)}건' + ('  (첫 실행 — 알림 생략, 베이스라인 저장)' if is_baseline else ''))
 
-    # 키워드×유형 조합으로 수집 (law_id 기준 중복 제거)
-    collected: dict[str, tuple[dict, str, list[str]]] = {}  # law_id → (item, type, keywords)
+    collected = {}   # law_id → [item, law_type, keywords]
 
-    # ① 시행령·시행규칙·고시
-    for target in LAW_TARGETS:
-        label = TYPE_LABEL[target]
-        print(f'\n  [{label}] 검색 중...')
+    # ① 법령 (현행 law + 시행예정 eflaw) — law_type은 법령구분명으로 판정
+    for target in LAW_SEARCH_TARGETS:
+        print(f'\n  [법령:{target}] 검색 중...')
         for kw in KEYWORDS:
-            items = fetch_laws(kw, target, display=20)
-            for item in items:
-                lid = make_law_id(item, target)
-                if not lid or lid.endswith('_'):
+            for item in fetch_laws(kw, target, display=20):
+                lt = law_type_from_gubun(item.get('법령구분명'))
+                lid = make_law_id(item, lt)
+                if not item_mst(item):
                     continue
                 if lid in collected:
-                    collected[lid][2].append(kw)
+                    if kw not in collected[lid][2]:
+                        collected[lid][2].append(kw)
                 else:
-                    collected[lid] = (item, target, [kw])
-            time.sleep(0.2)
+                    collected[lid] = [item, lt, [kw]]
+            time.sleep(0.15)
 
-    # ② 입법예고
-    print(f'\n  [입법예고] 검색 중...')
+    # ② 고시·행정규칙
+    print(f'\n  [고시·행정규칙] 검색 중...')
     for kw in KEYWORDS:
-        items = fetch_announcements(kw, display=20)
-        for item in items:
-            lid = make_law_id(item, 'lsAnc')
-            if not lid or lid.endswith('_'):
+        for item in fetch_admrul(kw, display=20):
+            lid = make_law_id(item, 'admrul')
+            if not item_mst(item):
                 continue
             if lid in collected:
-                collected[lid][2].append(kw)
+                if kw not in collected[lid][2]:
+                    collected[lid][2].append(kw)
             else:
-                collected[lid] = (item, 'lsAnc', [kw])
-        time.sleep(0.2)
+                collected[lid] = [item, 'admrul', [kw]]
+        time.sleep(0.15)
 
-    print(f'\n  총 고유 법령: {len(collected)}건')
+    print(f'\n  총 고유 법령·고시: {len(collected)}건')
 
-    # DB 저장 및 알림
-    new_count     = 0
+    new_count = 0
     updated_count = 0
 
     for lid, (item, law_type, keywords) in collected.items():
@@ -318,18 +324,20 @@ def main():
         if result == 'new':
             new_count += 1
             label = TYPE_LABEL.get(law_type, law_type)
-            law_nm = (item.get('법령명_한글') or item.get('예고법령명') or '')[:40]
-            print(f'  🆕 신규 {label}: {law_nm}')
-            notify_new(item, law_type, keywords)
+            print(f'  🆕 신규 {label}: {item_name(item)[:40]}')
+            if not is_baseline:
+                notify_new(item, law_type, keywords)
 
         elif result == 'updated':
             updated_count += 1
-            law_nm = (item.get('법령명_한글') or item.get('예고법령명') or '')[:30]
             prev_dt = ex.get('public_dt', '') if ex else ''
-            print(f'  🔄 개정: {law_nm} ({fmt_date(prev_dt)} → {fmt_date((item.get("공포일자") or "").replace("-",""))})')
-            notify_updated(item, law_type, prev_dt, keywords)
+            new_dt = str(item.get('공포일자') or item.get('발령일자') or '').replace('-', '')
+            print(f'  🔄 개정: {item_name(item)[:30]} ({fmt_date(prev_dt)} → {fmt_date(new_dt)})')
+            if not is_baseline:
+                notify_updated(item, law_type, prev_dt, keywords)
 
-    print(f'\n[완료] 신규 {new_count}건 | 개정 {updated_count}건 | 총 추적 {len(collected)}건')
+    print(f'\n[완료] 신규 {new_count}건 | 개정 {updated_count}건 | 총 추적 {len(collected)}건'
+          + ('  (첫 실행 — 텔레그램 생략)' if is_baseline else ''))
 
 
 if __name__ == '__main__':
