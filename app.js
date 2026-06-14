@@ -3963,13 +3963,13 @@ function renderLawTrack(items) {
   var weekAgo = new Date(now - 7 * 86400000);
   var todayStr = now.toISOString().slice(0,10).replace(/-/g,'');
 
-  var monthAgo = new Date(now - 30 * 86400000);
+  var recent90Str = new Date(now - 90 * 86400000).toISOString().slice(0,10).replace(/-/g,'');
 
   function ltFilter(r) {
     if (lawTrackFilterMode === '전체') return true;
     if (lawTrackFilterMode === '입법예고중') return r.law_type === 'lsAnc';
     if (lawTrackFilterMode === '시행예정') return r.enf_dt && r.enf_dt.replace(/\D/g,'') >= todayStr;
-    if (lawTrackFilterMode === '신규개정') return new Date(r.created_at) >= monthAgo || (r.prev_public_dt && r.prev_public_dt !== r.public_dt);
+    if (lawTrackFilterMode === '신규개정') return _d(r.public_dt) >= recent90Str || (r.prev_public_dt && r.prev_public_dt !== r.public_dt);
     return true;
   }
   var _d = function(v) { return String(v || '').replace(/\D/g, ''); };
@@ -3982,7 +3982,7 @@ function renderLawTrack(items) {
 
   // 통계
   var ancCount  = items.filter(function(r) { return r.law_type === 'lsAnc'; }).length;
-  var newCount  = items.filter(function(r) { return new Date(r.created_at) >= monthAgo || (r.prev_public_dt && r.prev_public_dt !== r.public_dt); }).length;
+  var newCount  = items.filter(function(r) { return _d(r.public_dt) >= recent90Str || (r.prev_public_dt && r.prev_public_dt !== r.public_dt); }).length;
   var enfCount  = items.filter(function(r) { return r.enf_dt && r.enf_dt.replace(/\D/g,'') >= todayStr; }).length;
   var setV = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
   setV('lt-total', items.length);
@@ -4006,7 +4006,7 @@ function renderLawTrack(items) {
   filtered.forEach(function(r) {
     var tl   = lawTrackTypeLabel(r.law_type);
     var kws  = (r.matched_keywords || []).slice(0,3).join(', ');
-    var isNew = new Date(r.created_at) >= weekAgo;
+    var isNew = _d(r.public_dt) >= recent90Str;
     var pubDt = fmtLawDate(r.public_dt);
     var enfDt = fmtLawDate(r.enf_dt);
     var prevDt = fmtLawDate(r.prev_public_dt);
