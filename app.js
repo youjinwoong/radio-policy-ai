@@ -3947,6 +3947,13 @@ function fmtLawDate(dt) {
   return dt;
 }
 
+function lawTrackDetailUrl(r) {
+  var id = r.law_id || '', m;
+  if ((m = id.match(/^admrul_(\d+)$/))) return 'https://www.law.go.kr/admRulInfoP.do?admRulSeq=' + m[1];
+  if ((m = id.match(/^(?:law|bylaw|rules)_(\d+)$/))) return 'https://www.law.go.kr/lsInfoP.do?lsiSeq=' + m[1];
+  return r.link_url || '';
+}
+
 function renderLawTrack(items) {
   var listEl = document.getElementById('lawtrack-list');
   if (!listEl) return;
@@ -3997,8 +4004,9 @@ function renderLawTrack(items) {
     var enfDt = fmtLawDate(r.enf_dt);
     var prevDt = fmtLawDate(r.prev_public_dt);
     var isUpdated = prevDt && prevDt !== pubDt;
-    var link = r.link_url
-      ? '<a href="' + escHtml(r.link_url) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none"><i class="ti ti-external-link" style="font-size:10px"></i> 상세보기</a>'
+    var _lturl = lawTrackDetailUrl(r);
+    var link = _lturl
+      ? '<a href="' + escHtml(_lturl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none"><i class="ti ti-external-link" style="font-size:10px"></i> 상세보기</a>'
       : '';
 
     // 타임라인 스텝 생성
