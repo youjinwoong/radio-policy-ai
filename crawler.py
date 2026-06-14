@@ -192,7 +192,7 @@ def classify_urgency(title: str, content: str = '') -> str:
         text = title + ' ' + (content or '')[:300]
         return '보통' if any(k in text for k in _FALLBACK_MOBILE) else '참고'
 
-    snippet = (content or '').replace('\s+', ' ').strip()[:600]
+    snippet = re.sub(r'\s+', ' ', content or '').strip()[:600]
     user_msg = f"제목: {title}\n본문: {snippet}" if snippet else f"제목: {title}"
 
     try:
