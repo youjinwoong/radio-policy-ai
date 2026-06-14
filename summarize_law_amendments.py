@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-law_amendments.summary 채우기 — 법제처 DRF 상세에서 개정이유/주요내용을 받아 Haiku로 1~2문장 요약.
+law_amendments.summary 채우기 — 법제처 DRF 상세(본문 JSON)에서 개정이유/주요내용을 받아 Haiku로 1~2문장 요약.
 
+- DRF 본문 API는 계정에 'XML'이 아닌 'JSON'으로 신청돼 있으므로 type=JSON 사용.
+  (type=XML로 요청하면 "미신청된 목록/본문에 대한 접근입니다" 오류)
 - 대상: summary가 NULL인 행 중 DRF 지원 유형(law/bylaw/rules→target=law&MST, admrul→target=admrul&ID)
 - lsAnc(입법예고)는 DRF 미지원 → 건너뜀(추후 gov_notice_crawler에서 처리)
-- 멱등: summary NULL만 처리. 개정이유가 없으면(타법개정 등) ''로 표시해 재처리 방지.
-- 실행: GitHub Actions(law_crawl.yml) 매일 + 로컬 백필. 필요 환경변수:
-    SUPABASE_URL, SUPABASE_SERVICE_KEY, LAW_OC_KEY, ANTHROPIC_API_KEY
+- 멱등: summary NULL만 처리. 개정이유가 없으면 ''로 표시해 재처리 방지.
+- 필요 환경변수: SUPABASE_URL, SUPABASE_SERVICE_KEY, LAW_OC_KEY, ANTHROPIC_API_KEY
 """
 import os
 import re
@@ -44,22 +45,49 @@ def detail_params(law_id: str):
     return None  # lsAnc 등
 
 
+def _find_key(obj, key):
+    """중첩 dict/list에서 key를 재귀 탐색."""
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for v in obj.values():
+            r = _find_key(v, key)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _find_key(v, key)
+            if r is not None:
+                return r
+    return None
+
+
+def _flatten(x):
+    if x is None:
+        return []
+    if isinstance(x, str):
+        return [x]
+    if isinstance(x, list):
+        out = []
+        for i in x:
+            out += _flatten(i)
+        return out
+    return [str(x)]
+
+
 def fetch_reason(params: dict) -> str:
-    """DRF 상세 XML에서 제개정이유내용 추출(여러 CDATA 조각 결합)."""
-    q = {'OC': LAW_OC_KEY, 'type': 'XML'}
+    """DRF 상세(JSON)에서 제개정이유내용 추출."""
+    q = {'OC': LAW_OC_KEY, 'type': 'JSON'}
     q.update(params)
     try:
         resp = requests.get(DRF_SERVICE, params=q, timeout=10)
-        resp.encoding = 'UTF-8'
-        xml = resp.text
+        data = resp.json()
     except Exception as e:
         print(f'  [DRF 오류] {params}: {e}')
         return ''
-    m = re.search(r'<제개정이유내용>(.*?)</제개정이유내용>', xml, re.S)
-    if not m:
-        return ''
-    chunks = re.findall(r'<!\[CDATA\[(.*?)\]\]>', m.group(1), re.S)
-    text = ' '.join(c.strip() for c in chunks if c.strip())
+    content = _find_key(data, '제개정이유내용')
+    parts = _flatten(content)
+    text = ' '.join(p.strip() for p in parts if p and p.strip())
     # 머리기호·구분표기·출처 제거
     text = re.sub(r'\[\s*(제정|일부개정|전부개정|타법개정|폐지|타법폐지)\s*\]', ' ', text)
     text = text.replace('◇', ' ').replace('<법제처 제공>', ' ')
