@@ -4017,13 +4017,14 @@ function renderLawTrack(items) {
       : '';
 
     // 타임라인 스텝 생성
-    // 입법예고(lsAnc): [입법예고] → [공포] → [시행]
+    // 입법예고(lsAnc): [입법예고 시작] → [의견마감] → [공포·시행 미정]
+    //   ※ lsAnc는 enf_dt에 '의견 수렴 마감일'이 저장됨(공포·시행일은 입법예고 시점 미정)
     // 시행령/규칙/고시: [공포] → [시행]
     var steps = [];
     if (r.law_type === 'lsAnc') {
-      steps.push({ label:'입법예고', date: pubDt, done: !!pubDt, icon:'📢' });
-      steps.push({ label:'공포',     date: null,  done: false,   icon:'📋' });
-      steps.push({ label:'시행',     date: enfDt, done: false,   icon:'✅' });
+      steps.push({ label:'입법예고',   date: pubDt, done: !!pubDt, icon:'📢' });
+      steps.push({ label:'의견마감',   date: enfDt, done: !!(enfDt && enfDt.replace(/\./g,'') <= todayStr), icon:'⏰' });
+      steps.push({ label:'공포·시행', date: null,  done: false, icon:'📋' });
     } else {
       steps.push({ label:'공포',  date: pubDt, done: !!pubDt, icon:'📋' });
       steps.push({ label:'시행',  date: enfDt, done: enfDt && enfDt.replace(/\./g,'') <= todayStr, icon:'✅' });
