@@ -141,14 +141,14 @@ def main():
         if not reason:
             sb.table('law_amendments').update({'summary': ''}).eq('id', r['id']).execute()
             empty += 1
-            time.sleep(0.2)
+            time.sleep(0.1)
             continue
         s = summarize(r.get('law_nm', ''), reason)
         sb.table('law_amendments').update({'summary': s or ''}).eq('id', r['id']).execute()
         if s:
             summarized += 1
             print(f'  ok {(r.get("law_nm") or "")[:30]} -> {s[:50]}')
-        time.sleep(0.4)
+        time.sleep(0.15)
 
     print(f'[요약] 완료 - 요약 {summarized}건 / 이유없음 {empty}건 / 건너뜀(lsAnc 등) {skipped}건')
 
