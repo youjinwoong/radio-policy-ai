@@ -3786,8 +3786,7 @@ async function loadAssemblyBills(forceRefresh) {
 
 function filterAssembly(el, mode) {
   assemblyFilterMode = mode;
-  document.querySelectorAll('#assembly-filter-tabs .tag').forEach(function(t) { t.classList.remove('selected'); });
-  el.classList.add('selected');
+  document.querySelectorAll('#assembly-filter-tabs .tag').forEach(function(t) { t.classList.toggle('selected', t.getAttribute('data-mode') === mode); });
   if (assemblyBillsCache) renderAssemblyBills(assemblyBillsCache);
 }
 
@@ -3811,6 +3810,7 @@ function assemblyStatusLabel(proc) {
 function assemblyMatchesFilter(bill) {
   var p = bill.proc_result || '접수';
   if (assemblyFilterMode === '전체') return true;
+  if (assemblyFilterMode === '최근') { var d = _parseProposeDt(bill.propose_dt); return !!d && d >= new Date(Date.now() - 7 * 86400000); }
   if (assemblyFilterMode === '접수') return !bill.proc_result || p === '접수';
   if (assemblyFilterMode === '통과') return p.includes('가결') || p === '본회의 통과' || p === '공포' || p === '정부이송';
   if (assemblyFilterMode === '폐기') return p.includes('폐기') || p === '부결' || p === '철회';
@@ -3828,14 +3828,19 @@ function renderAssemblyBills(bills) {
   var newCount     = bills.filter(function(b) { var d = _parseProposeDt(b.propose_dt); return d && d >= weekAgo; }).length;
   var activeCount  = bills.filter(function(b) { var p = b.proc_result || ''; return !p || p === '접수'; }).length;
   var passedCount  = bills.filter(function(b) { var p = b.proc_result || ''; return p.includes('가결') || p === '본회의 통과' || p === '공포' || p === '정부이송'; }).length;
+  var discardedCount = bills.filter(function(b) { var p = b.proc_result || ''; return p.includes('폐기') || p === '부결' || p === '철회'; }).length;
 
   var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
   setVal('asm-total',  totalCount);
   setVal('asm-new',    newCount);
   setVal('asm-active', activeCount);
   setVal('asm-passed', passedCount);
+  setVal('asm-discarded', discardedCount);
 
-  var filtered = bills.filter(assemblyMatchesFilter);
+  var filtered = bills.filter(assemblyMatchesFilter).slice().sort(function(a, b) {
+    var da = _parseProposeDt(a.propose_dt), db = _parseProposeDt(b.propose_dt);
+    return (db ? db.getTime() : 0) - (da ? da.getTime() : 0);
+  });
 
   if (filtered.length === 0) {
     listEl.innerHTML = '<div style="color:var(--text-secondary);padding:24px;text-align:center;font-size:12px">해당하는 법안이 없습니다</div>';
