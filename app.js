@@ -3881,6 +3881,7 @@ function renderAssemblyBills(bills) {
       + '<span style="font-size:10px;color:var(--text-muted)">발의 ' + proposeDt + '</span>'
       + '<span style="margin-left:auto;font-size:10px;font-weight:600;color:' + sl.color + '">' + escHtml(sl.text) + '</span>'
       + '</div>'
+      + (b.summary ? '<div style="font-size:11px;color:var(--text-secondary);line-height:1.45;margin:6px 0 0">' + escHtml(b.summary) + '</div>' : '')
       + (kws ? '<div style="margin-top:4px;font-size:10px;color:var(--text-muted)">키워드: ' + escHtml(kws) + '</div>' : '')
       + (link ? '<div style="margin-top:4px">' + link + '</div>' : '')
       + '</div>';
