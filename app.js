@@ -284,6 +284,46 @@ async function searchKeywords(query, lawOnly) {
   return results.slice(0, 12);
 }
 
+async function fetchLawTrackContext() {
+  // AI 자문 보조용: 최근 법령·고시 개정 + 입법예고 동향(요약). 조문 인용은 지식베이스 원문 우선.
+  if (!sb) return '';
+  try {
+    var resp = await sb.from('law_amendments')
+      .select('law_nm,law_type,ann_type,public_dt,enf_dt,summary')
+      .order('public_dt', { ascending: false }).limit(500);
+    var rows = resp.data || [];
+    var dg = function(v) { return String(v || '').replace(/\D/g, ''); };
+    var latest = {};
+    rows.forEach(function(r) {
+      if (r.law_type === 'lsAnc') { latest['lsAnc::' + (r.law_nm || '')] = r; return; }
+      var k = r.law_nm || '';
+      if (!latest[k] || dg(r.public_dt) > dg(latest[k].public_dt)) latest[k] = r;
+    });
+    var now = new Date();
+    var todayStr = now.toISOString().slice(0,10).replace(/-/g,'');
+    var d180 = new Date(now - 180 * 86400000).toISOString().slice(0,10).replace(/-/g,'');
+    var items = Object.keys(latest).map(function(k) { return latest[k]; }).filter(function(r) {
+      if (r.law_type === 'lsAnc') return true;
+      if (dg(r.enf_dt) >= todayStr) return true;
+      return dg(r.public_dt) >= d180;
+    }).sort(function(a, b) { return dg(b.public_dt).localeCompare(dg(a.public_dt)); }).slice(0, 25);
+    if (!items.length) return '';
+    var fmt = function(v) { var d = dg(v); return d.length === 8 ? d.slice(0,4)+'.'+d.slice(4,6)+'.'+d.slice(6) : '—'; };
+    var lines = items.map(function(r) {
+      var typ = r.law_type === 'lsAnc' ? '입법예고' : (r.ann_type || '개정');
+      var dates = r.law_type === 'lsAnc' ? ('의견마감 ' + fmt(r.enf_dt)) : ('공포 ' + fmt(r.public_dt) + ', 시행 ' + fmt(r.enf_dt));
+      var sm = (r.summary || '').trim();
+      return '\u2022 [' + typ + '] ' + (r.law_nm || '') + ' (' + dates + ')' + (sm ? ': ' + sm : '');
+    });
+    return '\n\n---\n\n[최근 행정부 법령·고시 개정·입법예고 동향]\n' +
+      '(최근 추적된 변경/입법예고 요약. 정확한 조문 인용은 지식베이스 법령 원문을 우선하세요.)\n' +
+      lines.join('\n');
+  } catch (e) {
+    console.warn('lawtrack context 로드 실패:', e);
+    return '';
+  }
+}
+
 function buildRagContext(chunks) {
   if (!chunks || chunks.length === 0) return '';
   const items = chunks.map(function(c, i) {
@@ -885,8 +925,9 @@ async function callClaude(userText) {
   const ragContext    = buildRagContext(ragChunks);
   const customContext = await searchCustomKnowledge(userText);   // 팀 내부 추가 지식
   const newsContext   = await fetchRecentNewsContext(userText);  // 뉴스 본문+제목
+  const lawTrackContext = await fetchLawTrackContext();          // 최근 법령 개정·입법예고 동향
   const webSearchGuide = '\n\n---\n\n[웹 검색 도구 사용 지침]\n해외 규제·제도 비교, 최신 정책 동향 등 위 참조 자료(법령 RAG·추가 지식·뉴스)에 없는 사실 정보가 필요하면 web_search 도구로 확인 후 답변하세요. 특히 "한국 고유", "유일한", "주요국 중 한국만" 등 국가 간 비교 단정 표현은 검색으로 확인하기 전에는 사용하지 마세요. 국내 법령 해석은 RAG 원문을 최우선으로 하고 웹 검색은 보조로만 사용하세요.';
-  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + customContext + newsContext;
+  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + customContext + newsContext + lawTrackContext;
 
   chatHistory.push({ role: 'user', content: userText });
 
