@@ -33,7 +33,7 @@
       <div class="nav-label">법안 동향 모니터링</div>
       <div class="nav-item" onclick="go('assembly',this)"><i class="ti ti-building-bank"></i>국회 법안</div>
       <div class="nav-item" onclick="go('lawtrack',this)"><i class="ti ti-file-certificate"></i>행정부 입법예고·법령 개정</div>
-      <div class="nav-item" onclick="go('diff',this)"><i class="ti ti-git-diff"></i>법령 DIFF 분석</div>
+      <div class="nav-item" onclick="go('diff',this)"><i class="ti ti-arrows-diff"></i>법령 DIFF 분석</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">지식 베이스</div>
@@ -117,7 +117,7 @@
       <div class="panel" id="panel-diff">
         <div style="margin-bottom:16px">
           <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px">
-            <i class="ti ti-git-diff" style="color:var(--accent);margin-right:4px"></i>법령 DIFF 분석
+            <i class="ti ti-arrows-diff" style="color:var(--accent);margin-right:4px"></i>법령 DIFF 분석
           </div>
           <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">
             입법예고·행정예고 단계에서 <b style="color:var(--text-primary)">개정 전·후 파일</b>을 올리면 변경된 조문과 SKT 영향도를 자동 분석합니다.
@@ -607,7 +607,7 @@
         <i class="ti ti-file-certificate"></i>행정부 입법예고·법령 개정
       </button>
       <button class="mobile-submenu-item" onclick="go('diff',null);setBottomNav('bn-monitor');closeMobileSubMenu('monitor-sub')">
-        <i class="ti ti-git-diff"></i>법령 DIFF 분석
+        <i class="ti ti-arrows-diff"></i>법령 DIFF 분석
       </button>
     </div>
   </div>
@@ -727,6 +727,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260614l"></script>
+<script src="app.js?v=20260614m"></script>
 </body>
 </html>
