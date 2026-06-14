@@ -3924,8 +3924,6 @@ async function loadLawTrack(forceRefresh) {
 
 function filterLawTrack(el, mode) {
   lawTrackFilterMode = mode;
-  document.querySelectorAll('#lawtrack-filter-tabs .tag').forEach(function(t) { t.classList.remove('selected'); });
-  el.classList.add('selected');
   if (lawTrackCache) renderLawTrack(lawTrackCache);
 }
 
@@ -3971,6 +3969,13 @@ function renderLawTrack(items) {
   setV('lt-anc',   ancCount);
   setV('lt-new',   newCount);
   setV('lt-enf',   enfCount);
+
+  // 선택된 카드 강조 (필터 버튼 줄 제거 → 카드가 필터 겸용)
+  document.querySelectorAll('#lawtrack-stats .stat-card').forEach(function(c) {
+    var on = c.getAttribute('data-mode') === lawTrackFilterMode;
+    c.style.outline = on ? '2px solid var(--accent)' : '';
+    c.style.outlineOffset = on ? '-2px' : '';
+  });
 
   if (filtered.length === 0) {
     listEl.innerHTML = '<div style="color:var(--text-secondary);padding:24px;text-align:center;font-size:12px">해당 항목이 없습니다</div>';

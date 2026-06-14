@@ -515,17 +515,11 @@
           <span style="font-size:12px;color:var(--text-secondary)">법제처 Open API · 매일 11:00 KST 갱신 · 입법예고→공포→시행 단계 추적</span>
           <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:auto" onclick="loadLawTrack(true)"><i class="ti ti-refresh"></i> 새로고침</button>
         </div>
-        <div class="tag-list" style="margin-bottom:12px" id="lawtrack-filter-tabs">
-          <span class="tag selected" onclick="filterLawTrack(this,'입법예고중')">📢 입법예고 중</span>
-          <span class="tag" onclick="filterLawTrack(this,'시행예정')">⏳ 시행 예정</span>
-          <span class="tag" onclick="filterLawTrack(this,'신규개정')">🆕 신규·개정</span>
-          <span class="tag" onclick="filterLawTrack(this,'전체')">전체</span>
-        </div>
-        <div class="stat-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
-          <div class="stat-card"><div class="stat-value" id="lt-anc" style="color:var(--accent)">—</div><div class="stat-label">입법예고 중</div></div>
-          <div class="stat-card"><div class="stat-value" id="lt-enf">—</div><div class="stat-label">시행 예정</div></div>
-          <div class="stat-card"><div class="stat-value" id="lt-new">—</div><div class="stat-label">신규·개정(30일)</div></div>
-          <div class="stat-card"><div class="stat-value" id="lt-total" style="color:var(--text-muted)">—</div><div class="stat-label">전체 추적</div></div>
+        <div class="stat-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px" id="lawtrack-stats">
+          <div class="stat-card" style="cursor:pointer" data-mode="입법예고중" onclick="filterLawTrack(this,'입법예고중')"><div class="stat-value" id="lt-anc" style="color:var(--accent)">—</div><div class="stat-label">입법예고 중</div></div>
+          <div class="stat-card" style="cursor:pointer" data-mode="시행예정" onclick="filterLawTrack(this,'시행예정')"><div class="stat-value" id="lt-enf">—</div><div class="stat-label">시행 예정</div></div>
+          <div class="stat-card" style="cursor:pointer" data-mode="신규개정" onclick="filterLawTrack(this,'신규개정')"><div class="stat-value" id="lt-new">—</div><div class="stat-label">신규·개정(30일)</div></div>
+          <div class="stat-card" style="cursor:pointer" data-mode="전체" onclick="filterLawTrack(this,'전체')"><div class="stat-value" id="lt-total" style="color:var(--text-muted)">—</div><div class="stat-label">전체 추적</div></div>
         </div>
         <div id="lawtrack-list">
           <div style="color:var(--text-secondary);padding:20px;text-align:center;font-size:12px">불러오는 중...</div>
@@ -727,6 +721,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260614p"></script>
+<script src="app.js?v=20260614q"></script>
 </body>
 </html>
