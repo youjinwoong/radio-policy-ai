@@ -1069,15 +1069,28 @@ class _WeakDHAdapter(HTTPAdapter):
         kwargs['ssl_context'] = ctx
         super().init_poolmanager(*args, **kwargs)
 
+_KNOWN_WEAK_DH = ('rra.go.kr',)
+
+def _http_get(url: str, timeout: int = 8):
+    """일반 GET → DH_KEY_TOO_SMALL SSL 약점 사이트면 SECLEVEL=1 어댑터로 자동 재시도."""
+    # 알려진 약 DH 사이트는 처음부터 어댑터 사용 (불필요한 1차 실패 회피)
+    if any(d in url for d in _KNOWN_WEAK_DH):
+        s = requests.Session()
+        s.mount('https://', _WeakDHAdapter())
+        return s.get(url, headers=HEADERS, timeout=timeout)
+    try:
+        return requests.get(url, headers=HEADERS, timeout=timeout)
+    except requests.exceptions.SSLError as e:
+        if 'dh key too small' in str(e).lower() or 'DH_KEY_TOO_SMALL' in str(e):
+            s = requests.Session()
+            s.mount('https://', _WeakDHAdapter())
+            return s.get(url, headers=HEADERS, timeout=timeout)
+        raise
+
 def fetch_article_body(url: str, source: str) -> tuple:
     """기사 URL에서 본문 텍스트와 발행일 추출. 반환: (body: str, published_at: str)"""
     try:
-        if 'rra.go.kr' in url:
-            s = requests.Session()
-            s.mount('https://', _WeakDHAdapter())
-            resp = s.get(url, headers=HEADERS, timeout=8)
-        else:
-            resp = requests.get(url, headers=HEADERS, timeout=8)
+        resp = _http_get(url, timeout=8)
         resp.raise_for_status()
         # RRA(국립전파연구원) 사이트는 EUC-KR 인코딩
         if 'rra.go.kr' in url:
