@@ -542,19 +542,17 @@
         <!-- 상태 필터 -->
         <div class="tag-list" style="margin-bottom:12px" id="assembly-filter-tabs">
           <span class="tag selected" onclick="filterAssembly(this,'전체')">전체</span>
-          <span class="tag" onclick="filterAssembly(this,'접수')">접수</span>
-          <span class="tag" onclick="filterAssembly(this,'소관위')">소관위 심사</span>
-          <span class="tag" onclick="filterAssembly(this,'법사위')">법사위 심사</span>
-          <span class="tag" onclick="filterAssembly(this,'본회의')">본회의</span>
-          <span class="tag" onclick="filterAssembly(this,'통과')">통과/공포</span>
+          <span class="tag" onclick="filterAssembly(this,'접수')">접수(계류)</span>
+          <span class="tag" onclick="filterAssembly(this,'통과')">통과</span>
+          <span class="tag" onclick="filterAssembly(this,'폐기')">폐기·철회</span>
         </div>
 
         <!-- 통계 -->
         <div class="stat-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px" id="assembly-stats">
           <div class="stat-card"><div class="stat-value" id="asm-total">—</div><div class="stat-label">전체 법안</div></div>
-          <div class="stat-card"><div class="stat-value" id="asm-new">—</div><div class="stat-label">이번 주 신규</div></div>
-          <div class="stat-card"><div class="stat-value" id="asm-active">—</div><div class="stat-label">심사 진행중</div></div>
-          <div class="stat-card"><div class="stat-value" id="asm-passed">—</div><div class="stat-label">통과/공포</div></div>
+          <div class="stat-card"><div class="stat-value" id="asm-new">—</div><div class="stat-label">최근 발의(7일)</div></div>
+          <div class="stat-card"><div class="stat-value" id="asm-active">—</div><div class="stat-label">계류 중</div></div>
+          <div class="stat-card"><div class="stat-value" id="asm-passed">—</div><div class="stat-label">통과</div></div>
         </div>
 
         <div id="assembly-list">
@@ -727,6 +725,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260614n"></script>
+<script src="app.js?v=20260614o"></script>
 </body>
 </html>

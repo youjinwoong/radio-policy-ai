@@ -3791,24 +3791,29 @@ function filterAssembly(el, mode) {
   if (assemblyBillsCache) renderAssemblyBills(assemblyBillsCache);
 }
 
+function _parseProposeDt(s) {
+  if (!s) return null;
+  if (s.length === 8) s = s.slice(0,4) + '-' + s.slice(4,6) + '-' + s.slice(6);
+  var d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function assemblyStatusLabel(proc) {
   if (!proc || proc === '접수') return { text: '접수', color: '#6b7280' };
+  if (proc.includes('가결') || proc === '본회의 통과' || proc === '공포' || proc === '정부이송') return { text: proc, color: '#22c55e' };
+  if (proc.includes('폐기') || proc === '부결' || proc === '철회') return { text: proc, color: '#ef4444' };
   if (proc.includes('소관위')) return { text: proc, color: '#3b82f6' };
   if (proc.includes('법사위')) return { text: proc, color: '#8b5cf6' };
   if (proc.includes('본회의')) return { text: proc, color: '#f59e0b' };
-  if (proc === '본회의 통과' || proc === '공포' || proc === '정부이송') return { text: proc, color: '#22c55e' };
-  if (proc === '부결' || proc === '철회' || proc === '대안반영폐기') return { text: proc, color: '#ef4444' };
   return { text: proc, color: '#6b7280' };
 }
 
 function assemblyMatchesFilter(bill) {
   var p = bill.proc_result || '접수';
   if (assemblyFilterMode === '전체') return true;
-  if (assemblyFilterMode === '접수') return !p || p === '접수';
-  if (assemblyFilterMode === '소관위') return p.includes('소관위');
-  if (assemblyFilterMode === '법사위') return p.includes('법사위');
-  if (assemblyFilterMode === '본회의') return p.includes('본회의');
-  if (assemblyFilterMode === '통과') return ['본회의 통과','공포','정부이송'].includes(p);
+  if (assemblyFilterMode === '접수') return !bill.proc_result || p === '접수';
+  if (assemblyFilterMode === '통과') return p.includes('가결') || p === '본회의 통과' || p === '공포' || p === '정부이송';
+  if (assemblyFilterMode === '폐기') return p.includes('폐기') || p === '부결' || p === '철회';
   return true;
 }
 
@@ -3820,9 +3825,9 @@ function renderAssemblyBills(bills) {
   var now = new Date();
   var weekAgo = new Date(now - 7 * 86400000);
   var totalCount   = bills.length;
-  var newCount     = bills.filter(function(b) { return new Date(b.created_at) >= weekAgo; }).length;
-  var activeCount  = bills.filter(function(b) { var p = b.proc_result || ''; return p.includes('심사') || p.includes('본회의'); }).length;
-  var passedCount  = bills.filter(function(b) { var p = b.proc_result || ''; return ['본회의 통과','공포','정부이송'].includes(p); }).length;
+  var newCount     = bills.filter(function(b) { var d = _parseProposeDt(b.propose_dt); return d && d >= weekAgo; }).length;
+  var activeCount  = bills.filter(function(b) { var p = b.proc_result || ''; return !p || p === '접수'; }).length;
+  var passedCount  = bills.filter(function(b) { var p = b.proc_result || ''; return p.includes('가결') || p === '본회의 통과' || p === '공포' || p === '정부이송'; }).length;
 
   var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
   setVal('asm-total',  totalCount);
@@ -3846,7 +3851,7 @@ function renderAssemblyBills(bills) {
           ? b.propose_dt.slice(0,4) + '.' + b.propose_dt.slice(4,6) + '.' + b.propose_dt.slice(6)
           : b.propose_dt)
       : '—';
-    var isNew = new Date(b.created_at) >= weekAgo;
+    var isNew = (function() { var d = _parseProposeDt(b.propose_dt); return d && d >= weekAgo; })();
     var borderTop = i === 0 ? '' : 'border-top:1px solid var(--border);';
     var link = b.link_url
       ? '<a href="' + b.link_url + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none;white-space:nowrap"><i class="ti ti-external-link" style="font-size:11px"></i> 의안보기</a>'
