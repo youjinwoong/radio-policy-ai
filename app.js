@@ -3918,7 +3918,7 @@ async function loadLawTrack(forceRefresh) {
         .from('law_amendments')
         .select('*')
         .order('updated_at', { ascending: false })
-        .limit(200);
+        .limit(500);
       if (resp.error) throw resp.error;
       lawTrackCache = resp.data || [];
     } catch(e) {
@@ -3964,6 +3964,24 @@ function renderLawTrack(items) {
   var todayStr = now.toISOString().slice(0,10).replace(/-/g,'');
 
   var recent90Str = new Date(now - 90 * 86400000).toISOString().slice(0,10).replace(/-/g,'');
+  var year1Str    = new Date(now - 365 * 86400000).toISOString().slice(0,10).replace(/-/g,'');
+  var _d = function(v) { return String(v || '').replace(/\D/g, ''); };
+
+  // ── 추적 대상 정비: 현행 중복 제거 + 최근 1년 변동분만 표시 ──
+  //   · 입법예고(lsAnc)는 개별 유지, 그 외는 같은 법령명에서 공포일 최신 1건만(연혁 중복 제거)
+  //   · 표시 대상 = 입법예고 OR 시행예정(미래 시행일) OR 최근 1년 내 공포·개정
+  //   ※ 오래전 공포된 현행법(상시 참조용)은 지식베이스 '국내 법령·고시'에서 조회
+  var _latest = {};
+  (items || []).forEach(function(r) {
+    if (r.law_type === 'lsAnc') { _latest['lsAnc::' + (r.law_id || r.law_nm)] = r; return; }
+    var k = r.law_nm || r.law_id;
+    if (!_latest[k] || _d(r.public_dt) > _d(_latest[k].public_dt)) _latest[k] = r;
+  });
+  var tracked = Object.keys(_latest).map(function(k) { return _latest[k]; }).filter(function(r) {
+    if (r.law_type === 'lsAnc') return true;
+    if (_d(r.enf_dt) >= todayStr) return true;          // 시행 예정
+    return _d(r.public_dt) >= year1Str;                 // 최근 1년 공포·개정
+  });
 
   function ltFilter(r) {
     if (lawTrackFilterMode === '전체') return true;
@@ -3972,20 +3990,19 @@ function renderLawTrack(items) {
     if (lawTrackFilterMode === '신규개정') return _d(r.public_dt) >= recent90Str || (r.prev_public_dt && r.prev_public_dt !== r.public_dt);
     return true;
   }
-  var _d = function(v) { return String(v || '').replace(/\D/g, ''); };
-  var filtered = items.filter(ltFilter).slice().sort(function(a, b) {
+  var filtered = tracked.filter(ltFilter).slice().sort(function(a, b) {
     // 공포일 최신순(desc), 같거나 없으면 시행일로 보조 정렬
     var pa = _d(a.public_dt), pb = _d(b.public_dt);
     if (pa !== pb) return pb.localeCompare(pa);
     return _d(b.enf_dt).localeCompare(_d(a.enf_dt));
   });
 
-  // 통계
-  var ancCount  = items.filter(function(r) { return r.law_type === 'lsAnc'; }).length;
-  var newCount  = items.filter(function(r) { return _d(r.public_dt) >= recent90Str || (r.prev_public_dt && r.prev_public_dt !== r.public_dt); }).length;
-  var enfCount  = items.filter(function(r) { return r.enf_dt && r.enf_dt.replace(/\D/g,'') >= todayStr; }).length;
+  // 통계 (정비된 추적 대상 기준)
+  var ancCount  = tracked.filter(function(r) { return r.law_type === 'lsAnc'; }).length;
+  var newCount  = tracked.filter(function(r) { return _d(r.public_dt) >= recent90Str || (r.prev_public_dt && r.prev_public_dt !== r.public_dt); }).length;
+  var enfCount  = tracked.filter(function(r) { return r.enf_dt && r.enf_dt.replace(/\D/g,'') >= todayStr; }).length;
   var setV = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
-  setV('lt-total', items.length);
+  setV('lt-total', tracked.length);
   setV('lt-anc',   ancCount);
   setV('lt-new',   newCount);
   setV('lt-enf',   enfCount);
