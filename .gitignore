@@ -1,3 +1,5 @@
 .env 
 PROJECT_지침.md
 refetch_log.txt
+__pycache__/
+*.pyc
