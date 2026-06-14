@@ -3972,7 +3972,13 @@ function renderLawTrack(items) {
     if (lawTrackFilterMode === '신규개정') return new Date(r.created_at) >= monthAgo || (r.prev_public_dt && r.prev_public_dt !== r.public_dt);
     return true;
   }
-  var filtered = items.filter(ltFilter);
+  var _d = function(v) { return String(v || '').replace(/\D/g, ''); };
+  var filtered = items.filter(ltFilter).slice().sort(function(a, b) {
+    // 공포일 최신순(desc), 같거나 없으면 시행일로 보조 정렬
+    var pa = _d(a.public_dt), pb = _d(b.public_dt);
+    if (pa !== pb) return pb.localeCompare(pa);
+    return _d(b.enf_dt).localeCompare(_d(a.enf_dt));
+  });
 
   // 통계
   var ancCount  = items.filter(function(r) { return r.law_type === 'lsAnc'; }).length;
