@@ -4054,6 +4054,8 @@ function renderLawTrack(items) {
       + (r.ann_type ? '<span style="font-size:10px;color:var(--text-muted)">' + escHtml(r.ann_type) + '</span>' : '')
       + (kws ? '<span style="font-size:10px;color:var(--text-muted)">키워드: ' + escHtml(kws) + '</span>' : '')
       + '</div>'
+      // 개정이유 요약 (AI)
+      + (r.summary ? '<div style="font-size:11px;color:var(--text-secondary);line-height:1.45;margin:2px 0 0">' + escHtml(r.summary) + '</div>' : '')
       // 타임라인
       + tlHtml
       // 개정 이력
