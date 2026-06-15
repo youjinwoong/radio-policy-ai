@@ -1182,6 +1182,110 @@ async function openChatHistory() {
   }
 }
 
+// ── 자문 상세 내보내기 (MD / Word / PDF) ──
+//   viewChatHistoryItem이 현재 상세를 _chatDetail에 저장 → 아래 함수들이 전체 내용으로 내보냄
+//   (기존 프린트는 모달의 보이는 부분만 인쇄되던 문제 해결)
+var _chatDetail = null;
+
+function _chatExportName(ext) {
+  var d = _chatDetail || {};
+  var dt = d.created_at ? new Date(d.created_at) : new Date();
+  var p = function(n) { return (n < 10 ? '0' : '') + n; };
+  var stamp = dt.getFullYear() + p(dt.getMonth() + 1) + p(dt.getDate()) + '_' + p(dt.getHours()) + p(dt.getMinutes());
+  var t = (d.question || '자문').replace(/[\\/:*?"<>|\r\n\t]+/g, ' ').trim().slice(0, 30).trim();
+  return '자문_' + stamp + (t ? '_' + t : '') + '.' + ext;
+}
+
+function _chatDownload(blob, fn) {
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = fn;
+  document.body.appendChild(a); a.click();
+  setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+}
+
+function _chatExportStyle() {
+  return '<style>' +
+    'body{font-family:"Malgun Gothic","맑은 고딕",sans-serif;line-height:1.65;color:#1a1a1a;font-size:13px;max-width:780px;margin:28px auto;padding:0 18px}' +
+    'h1.ex-q{font-size:18px;margin:0 0 4px;line-height:1.4}h2,h3,h4{margin:18px 0 6px}' +
+    '.ex-meta{font-size:12px;color:#666;margin:0 0 14px}.ex-src{margin-top:18px;font-size:12px;color:#555}' +
+    'table{border-collapse:collapse;width:100%;margin:10px 0}th,td{border:1px solid #bbb;padding:6px 9px;font-size:12px;text-align:left;vertical-align:top}th{background:#f2f2f2}' +
+    'hr{border:none;border-top:1px solid #ddd;margin:14px 0}code{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}' +
+    'ul,ol{margin:6px 0 6px 4px;padding-left:20px}li{margin:2px 0}a{color:#1a56db}' +
+    '</style>';
+}
+
+function _chatContentHtml() {
+  var d = _chatDetail || {};
+  var srcHtml = (d.sources && d.sources.length)
+    ? '<p class="ex-src"><b>참조:</b> ' + d.sources.map(chEsc).join(', ') + '</p>' : '';
+  return '<h1 class="ex-q">' + chEsc(d.question || '') + '</h1>' +
+    '<p class="ex-meta">분류: ' + chEsc(d.category || '일반') + ' &nbsp;|&nbsp; ' + chDate(d.created_at) + '</p>' +
+    '<hr>' + renderMd(d.answer || '') + srcHtml;
+}
+
+function exportChatMd() {
+  if (!_chatDetail) return;
+  var d = _chatDetail;
+  var md = '# ' + (d.question || '') + '\n\n';
+  md += '- 분류: ' + (d.category || '일반') + '\n';
+  md += '- 일시: ' + chDate(d.created_at) + '\n\n---\n\n';
+  md += (d.answer || '') + '\n';
+  if (d.sources && d.sources.length) md += '\n---\n\n**참조:** ' + d.sources.join(', ') + '\n';
+  _chatDownload(new Blob([md], { type: 'text/markdown;charset=utf-8' }), _chatExportName('md'));
+}
+
+function exportChatPdf() {
+  if (!_chatDetail) return;
+  var w = window.open('', '_blank');
+  if (!w) { alert('팝업이 차단되어 PDF 인쇄 창을 열 수 없습니다. 팝업을 허용한 뒤 다시 시도하세요.'); return; }
+  w.document.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>' +
+    chEsc(_chatDetail.question || '자문') + '</title>' + _chatExportStyle() + '</head><body>' +
+    _chatContentHtml() + '</body></html>');
+  w.document.close(); w.focus();
+  setTimeout(function() { try { w.print(); } catch(e) {} }, 500);
+}
+
+async function exportChatDocx() {
+  if (!_chatDetail) return;
+  if (!window.JSZip) { alert('Word 변환 라이브러리(JSZip)가 로드되지 않았습니다.'); return; }
+  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+    '<head><meta charset="utf-8">' + _chatExportStyle() + '</head><body>' + _chatContentHtml() + '</body></html>';
+  try {
+    var zip = new JSZip();
+    zip.file('[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Default Extension="html" ContentType="text/html"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>');
+    zip.folder('_rels').file('.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>');
+    var wf = zip.folder('word');
+    wf.file('afchunk.html', html);
+    wf.folder('_rels').file('document.xml.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="htmlChunk" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk" Target="afchunk.html"/>' +
+      '</Relationships>');
+    wf.file('document.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      '<w:body><w:altChunk r:id="htmlChunk"/>' +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>' +
+      '</w:body></w:document>');
+    var blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    _chatDownload(blob, _chatExportName('docx'));
+  } catch (e) {
+    alert('Word 저장 실패: ' + e.message);
+  }
+}
+
 async function viewChatHistoryItem(id) {
   var body = document.getElementById('chat-history-body');
   body.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">불러오는 중...</div>';
@@ -1196,14 +1300,18 @@ async function viewChatHistoryItem(id) {
     if (typeof srcs === 'string') {
       try { srcs = JSON.parse(srcs); } catch(e) { srcs = srcs ? [srcs] : []; }
     }
-    if (Array.isArray(srcs) && srcs.length > 0) {
-      var uniqueSrcs = srcs.filter(function(v, i, a) { return a.indexOf(v) === i; });
+    var uniqueSrcs = Array.isArray(srcs) ? srcs.filter(function(v, i, a) { return a.indexOf(v) === i; }) : [];
+    if (uniqueSrcs.length > 0) {
       srcHtml = '<div class="rag-sources" style="margin-top:12px"><i class="ti ti-book"></i> 참조: ' +
         uniqueSrcs.slice(0, 6).map(function(s) { return '<span class="rag-tag">' + chEsc(s) + '</span>'; }).join(' ') + '</div>';
     }
+    _chatDetail = { question: row.question || '', answer: row.answer || '', category: row.category || '일반', created_at: row.created_at, sources: uniqueSrcs };
     body.innerHTML =
       '<button class="btn" onclick="openChatHistory()" style="margin-bottom:12px"><i class="ti ti-arrow-left"></i>목록으로</button>' +
       '<button class="btn" onclick="deleteChatHistoryItem(\'' + id + '\', null)" style="margin-bottom:12px;margin-left:8px;color:#d04545"><i class="ti ti-trash"></i>삭제</button>' +
+      '<button class="btn" onclick="exportChatMd()" title="Markdown(.md)으로 저장" style="margin-bottom:12px;margin-left:8px"><i class="ti ti-download"></i>MD</button>' +
+      '<button class="btn" onclick="exportChatDocx()" title="Word(.docx)로 저장" style="margin-bottom:12px;margin-left:8px"><i class="ti ti-download"></i>Word</button>' +
+      '<button class="btn" onclick="exportChatPdf()" title="PDF로 인쇄/저장 (전체 내용)" style="margin-bottom:12px;margin-left:8px"><i class="ti ti-download"></i>PDF</button>' +
       '<div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.5">' + chEsc(row.question) + '</div>' +
       '<div style="font-size:11px;color:var(--text-tertiary);margin:5px 0 12px"><span class="rag-tag">' + chEsc(row.category || '일반') + '</span> ' + chDate(row.created_at) + '</div>' +
       '<div class="msg msg-ai" style="max-width:100%">' + renderMd(row.answer || '') + '</div>' + srcHtml;
