@@ -173,7 +173,7 @@
         <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
           <span style="font-size:12px;color:var(--text-secondary)">총 <strong id="kb-total">—</strong>개 문서 · 지식 베이스 실시간 목록 · 출처: law.go.kr · rra.go.kr</span>
           <button class="btn" style="font-size:11px;padding:3px 10px" onclick="loadKbDocs(true)"><i class="ti ti-refresh"></i> 새로고침</button>
-          <button class="btn btn-primary" style="margin-left:auto;font-size:12px" onclick="openPdfUpload('law')"><i class="ti ti-upload"></i> PDF 업로드</button>
+          <button class="btn btn-primary" style="margin-left:auto;font-size:12px" onclick="openPdfUpload('law')"><i class="ti ti-upload"></i> 업로드 (PDF·Word·MD)</button>
         </div>
         <div id="law-upload-list"></div>
 
@@ -184,7 +184,7 @@
       <div class="panel" id="panel-itu">
         <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
           <span style="font-size:12px;color:var(--text-secondary)">총 <strong>6개</strong> 문서 · 출처: itu.int/rec/R-REC/en</span>
-          <button class="btn btn-primary" style="margin-left:auto;font-size:12px" onclick="openPdfUpload('itu')"><i class="ti ti-upload"></i> PDF 업로드</button>
+          <button class="btn btn-primary" style="margin-left:auto;font-size:12px" onclick="openPdfUpload('itu')"><i class="ti ti-upload"></i> 업로드 (PDF·Word·MD)</button>
         </div>
         <div id="itu-upload-list"></div>
         <div class="section-title">M 시리즈 — 이동통신·IMT</div>
@@ -286,15 +286,16 @@
         <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
           <span style="font-size:12px;color:var(--text-secondary)">출처: 과기정통부 보도자료 원본 파일 136개 · 2023~2026년</span>
           <span class="badge badge-teal">원본 파일 검색</span>
-          <button class="btn btn-primary" style="margin-left:auto;font-size:12px" onclick="openPdfUpload('press')"><i class="ti ti-upload"></i> 파일 업로드</button>
+          <button class="btn btn-primary" style="margin-left:auto;font-size:12px" onclick="openPdfUpload('press')"><i class="ti ti-upload"></i> 업로드 (PDF·Word·MD)</button>
         </div>
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:6px">
           <i class="ti ti-info-circle" style="font-size:13px"></i>
           보도자료 파일 업로드 지원 형식:
           <span class="badge" style="background:#2a1a3a;color:#c084fc">MD</span>
+          <span class="badge" style="background:#3a2a1a;color:#fbbf24">Word</span>
           <span class="badge" style="background:#1a2a3a;color:#60a5fa">PDF</span>
           <span class="badge" style="background:#1a3a2a;color:#34d399">PPTX</span>
-          · 여러 파일 동시 업로드 가능
+          · PDF는 텍스트 기반만 · 여러 파일 동시 업로드 가능
         </div>
 
         <!-- 연도별 통계 -->
@@ -667,9 +668,10 @@
     <!-- 파일 선택 -->
     <div id="pdf-drop-zone" style="border:1.5px dashed var(--border-mid);border-radius:var(--radius-md);padding:20px;text-align:center;margin-bottom:12px;cursor:pointer;transition:border-color 0.2s" onclick="document.getElementById('pdf-file-input').click()" ondragover="event.preventDefault();this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor='var(--border-mid)'" ondrop="handlePdfDrop(event)">
       <i class="ti ti-file-upload" style="font-size:28px;color:var(--accent);display:block;margin-bottom:6px"></i>
-      <div id="pdf-file-label" style="font-size:12px;color:var(--text-secondary)">PDF · MD · PPTX 파일 클릭 선택 또는 드래그</div>
+      <div id="pdf-file-label" style="font-size:12px;color:var(--text-secondary)">PDF · MD · Word · PPTX 파일 클릭 선택 또는 드래그</div>
     </div>
-    <input type="file" id="pdf-file-input" accept=".pdf,.md,.pptx" style="display:none" multiple onchange="handlePdfFileSelect(this)">
+    <input type="file" id="pdf-file-input" accept=".pdf,.md,.pptx,.docx" style="display:none" multiple onchange="handlePdfFileSelect(this)">
+    <div style="font-size:10px;color:var(--text-muted);margin:-4px 0 12px;line-height:1.4">※ PDF는 <b>텍스트 기반</b>만 추출됩니다 — 스캔 이미지 PDF는 본문이 비어 업로드되지 않습니다.</div>
 
     <!-- 문서명 -->
     <div style="margin-bottom:10px">
@@ -710,8 +712,9 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260615b"></script>
+<script src="app.js?v=20260615c"></script>
 </body>
 </html>

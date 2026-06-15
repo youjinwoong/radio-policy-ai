@@ -3500,18 +3500,18 @@ function openPdfUpload(ctx) {
   document.getElementById('pdf-press-date').value = new Date().toISOString().slice(0,10);
   if (prog) prog.style.display = 'none';
   if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-upload"></i> 업로드'; }
-  if (label) label.textContent = 'PDF 파일 클릭 선택 또는 드래그';
+  if (label) label.textContent = 'PDF · MD · Word · PPTX 파일 클릭 선택 또는 드래그';
 
   if (ctx === 'press') {
-    if (title) title.textContent = '정부 보도자료 업로드 (PDF · MD · PPTX)';
+    if (title) title.textContent = '정부 보도자료 업로드 (PDF · MD · Word · PPTX)';
     if (catRow) catRow.style.display = 'none';
     if (dateRow) dateRow.style.display = 'none';
   } else if (ctx === 'itu') {
-    if (title) title.textContent = 'ITU-R 문서 업로드 (PDF · MD · PPTX)';
+    if (title) title.textContent = 'ITU-R 문서 업로드 (PDF · MD · Word · PPTX)';
     if (catRow) catRow.style.display = 'none';
     if (dateRow) dateRow.style.display = 'none';
   } else {
-    if (title) title.textContent = '법령·고시 업로드 (PDF · MD · PPTX)';
+    if (title) title.textContent = '법령·고시 업로드 (PDF · MD · Word · PPTX)';
     if (catRow) catRow.style.display = 'block';
     if (dateRow) dateRow.style.display = 'none';
   }
@@ -3532,7 +3532,7 @@ function handlePdfFileSelect(input) {
     var file = files[0];
     if (label) label.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
     if (nameInput && !nameInput.value) {
-      nameInput.value = file.name.replace(/\.(pdf|md|pptx)$/i, '').replace(/[_-]/g, ' ');
+      nameInput.value = file.name.replace(/\.(pdf|md|pptx|docx)$/i, '').replace(/[_-]/g, ' ');
     }
   } else {
     if (label) label.textContent = files.length + '개 파일 선택됨';
@@ -3570,19 +3570,28 @@ async function _extractPptxText(file) {
   return slideTexts.join('\n\n');
 }
 
+async function _extractDocxText(file) {
+  if (typeof mammoth === 'undefined') throw new Error('mammoth 라이브러리 미로드');
+  var arrayBuffer = await file.arrayBuffer();
+  var result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+  return (result && result.value) ? result.value : '';
+}
+
 function handlePdfDrop(event) {
   event.preventDefault();
   var dz = document.getElementById('pdf-drop-zone');
   if (dz) dz.style.borderColor = 'var(--border-mid)';
-  var file = event.dataTransfer.files[0];
-  if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
-    alert('PDF 파일만 업로드 가능합니다.');
+  var files = Array.from(event.dataTransfer.files || []);
+  var allowed = /\.(pdf|md|pptx|docx)$/i;
+  files = files.filter(function(f) { return allowed.test(f.name); });
+  if (files.length === 0) {
+    alert('PDF · MD · Word(docx) · PPTX 파일만 업로드 가능합니다.');
     return;
   }
   var input = document.getElementById('pdf-file-input');
-  // DataTransfer로 file input 설정
+  // DataTransfer로 file input 설정 (다중 파일 지원)
   var dt = new DataTransfer();
-  dt.items.add(file);
+  files.forEach(function(f) { dt.items.add(f); });
   input.files = dt.files;
   handlePdfFileSelect(input);
 }
@@ -3692,8 +3701,13 @@ async function doPdfUpload() {
         if (text.replace(/\s/g, '').length < 10) {
           throw new Error(file.name + ': 텍스트를 추출할 수 없습니다.');
         }
+      } else if (ext === 'docx') {
+        text = await _extractDocxText(file);
+        if (text.replace(/\s/g, '').length < 10) {
+          throw new Error(file.name + ': 텍스트를 추출할 수 없습니다. 내용이 없거나 .doc(구버전) 파일일 수 있습니다.');
+        }
       } else {
-        throw new Error(file.name + ': 지원하지 않는 형식입니다. PDF, MD, PPTX만 가능합니다.');
+        throw new Error(file.name + ': 지원하지 않는 형식입니다. PDF, MD, Word(docx), PPTX만 가능합니다.');
       }
 
       // 2. 보도자료 MD 파일: ## YYMMDD 기준으로 보도자료별 청킹
@@ -4138,7 +4152,7 @@ function renderLawTrack(items) {
 }
 
 // ════════════════════════════════════════════
-//  앱 초기화
+//  앱 초기화 (DOCX 업로드 지원 — mammoth)
 // ════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
   initSupabase();
