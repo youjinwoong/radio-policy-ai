@@ -1,10 +1,10 @@
-name: 전파정책 모닝 브리핑 (매일 08:00 KST)
+name: 전파정책 모닝 브리핑 (매일 06:00 KST)
 
 on:
   schedule:
-    - cron: '3 23 * * *'    # 매일 08:03 KST (1차)
-    - cron: '33 23 * * *'   # 매일 08:33 KST (2차 — 1차 skip/지연 대비)
-    - cron: '3 0 * * *'     # 매일 09:03 KST (3차 — PC refetch 후 본문 확보 가능성↑)
+    # ※ 23~00 UTC(=08~09시 KST)는 GitHub cron 최혼잡 구간이라 드롭 잦음 → 한산한 21 UTC대로 이동 (2026-06-15)
+    - cron: '0 21 * * *'    # 매일 06:00 KST (1차)
+    - cron: '30 21 * * *'   # 매일 06:30 KST (2차 — 1차 skip/지연 대비)
   workflow_dispatch:
 # ※ 중복 발송은 morning_briefing.py의 already_sent_today()가 차단함
 
