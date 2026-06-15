@@ -3510,6 +3510,10 @@ function openPdfUpload(ctx) {
     if (title) title.textContent = 'ITU-R 문서 업로드 (PDF · MD · Word · PPTX)';
     if (catRow) catRow.style.display = 'none';
     if (dateRow) dateRow.style.display = 'none';
+  } else if (ctx === 'custom') {
+    if (title) title.textContent = '추가 지식 파일 업로드 (PDF · MD · Word · PPTX)';
+    if (catRow) catRow.style.display = 'none';
+    if (dateRow) dateRow.style.display = 'none';
   } else {
     if (title) title.textContent = '법령·고시 업로드 (PDF · MD · Word · PPTX)';
     if (catRow) catRow.style.display = 'block';
@@ -3651,6 +3655,8 @@ async function doPdfUpload() {
     ? '보도자료'
     : _pdfUploadCtx === 'itu'
     ? 'ITU-R'
+    : _pdfUploadCtx === 'custom'
+    ? '추가지식'
     : (document.getElementById('pdf-category').value || '고시');
   var pressDate = (document.getElementById('pdf-press-date').value || '');
 
