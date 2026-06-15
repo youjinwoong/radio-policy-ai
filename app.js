@@ -1121,6 +1121,21 @@ function renderMd(text) {
   while (i < lines.length) {
     const t = lines[i].trim();
 
+    // 펜스 코드블록 (``` 또는 ~~~) — 내부는 마크다운 해석 없이 원문 보존(박스 다이어그램 정렬 유지)
+    const fence = t.match(/^(```|~~~)/);
+    if (fence) {
+      flush();
+      i++;
+      let code = '';
+      while (i < lines.length && !lines[i].trim().startsWith(fence[1])) {
+        code += esc(lines[i]) + '\n';
+        i++;
+      }
+      i++; // 닫는 펜스 줄 건너뛰기
+      html += '<pre><code>' + code.replace(/\n$/, '') + '</code></pre>';
+      continue;
+    }
+
     // 표: |헤더| 다음 줄이 |---|---| 구분선
     if (t.startsWith('|') && i + 1 < lines.length && /^\|?[\s:|-]+\|?$/.test(lines[i + 1].trim()) && lines[i + 1].includes('-')) {
       flush();
@@ -1290,6 +1305,7 @@ function _chatExportStyle() {
     '.ex-meta{font-size:12px;color:#666;margin:0 0 14px}.ex-src{margin-top:18px;font-size:12px;color:#555}' +
     'table{border-collapse:collapse;width:100%;margin:10px 0}th,td{border:1px solid #bbb;padding:6px 9px;font-size:12px;text-align:left;vertical-align:top}th{background:#f2f2f2}' +
     'hr{border:none;border-top:1px solid #ddd;margin:14px 0}code{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}' +
+    'pre{background:#f4f4f4;padding:10px 12px;border-radius:6px;overflow-x:auto;margin:8px 0}pre code{display:block;background:none;padding:0;white-space:pre;font-size:12px;line-height:1.5}' +
     'ul,ol{margin:6px 0 6px 4px;padding-left:20px}li{margin:2px 0}a{color:#1a56db}' +
     '</style>';
 }
