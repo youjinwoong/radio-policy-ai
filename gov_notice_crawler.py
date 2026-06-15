@@ -256,8 +256,20 @@ OPINION_LIST = OPINION_BASE + '/gcom/ogLmPp'
 
 OPINION_KEYWORDS = [
     '전파', '주파수', '전기통신', '방송통신', '무선', '전자파',
-    '적합성평가', '정보통신망', '이동통신', '기간통신', '위성',
+    '적합성평가', '정보통신', '이동통신', '기간통신', '위성',
+    '단말장치', '기지국', '스펙트럼',
 ]
+
+# 소관부처 기반 보강: 제명에 키워드가 없어도 통신·방송 규제기관 소관이면 포함
+OPINION_DEPTS = ['방송미디어통신위원회', '방송통신위원회']
+# 과기정통부는 과학·우주·우정 잡음이 섞이므로 통신계열 힌트가 있을 때만 포함
+OPINION_DEPT_HINT = [
+    '통신', '방송', '전파', '무선', '주파수', '전자파',
+    '단말', '기지국', '네트워크', '인터넷', '클라우드', '데이터센터', '스펙트럼',
+]
+# 부처 기반 매칭에서 제외할 잡음(직제·정원 등 조직 개편)
+OPINION_DEPT_EXCLUDE = ['직제', '소속기관', '정원', '청사']
+OPINION_MAX_PAGES = 20
 
 
 def _parse_opinion_date(s: str) -> str:
@@ -412,60 +424,104 @@ def _notify_opinion_items(new_items: list):
             print('  [이메일 오류] %s' % e)
 
 
+def _opinion_match(title: str, dept: str) -> list:
+    """입법예고 1건이 전파·통신 관심사인지 판정. 매칭 근거 리스트 반환(없으면 빈 리스트)."""
+    d = dept or ''
+    raw = title or ''
+    # 직제·소속기관·정원 등 조직 개편은 제명 키워드와 무관하게 우선 제외
+    # (예: "과학기술정보통신부와 그 소속기관 직제" — 부처명의 '정보통신' 오탐 차단)
+    if any(x in raw for x in OPINION_DEPT_EXCLUDE):
+        return []
+    # 제명 앞 "○○부/처/청/위원회 소관" 접두사 제거 — 소관 부처명(과학기술정보'통신'부 등)이
+    # 제명에 섞여 키워드를 오탐하는 것 방지 (예: "과기정통부 소관 비상대비에 관한 법률")
+    t = re.sub(r'^[가-힣·]+(?:부|처|청|위원회|위)\s*소관\s*', '', raw)
+    # ① 제명 키워드 직접 매칭
+    matched = [k for k in OPINION_KEYWORDS if k in t]
+    if matched:
+        return matched
+    # ② 방송·통신 규제기관 소관은 제명 키워드가 없어도 포함
+    if any(dep in d for dep in OPINION_DEPTS):
+        return ['소관:방송통신위']
+    # ③ 과기정통부는 통신계열 힌트가 있을 때만(과학·우주·우정 잡음 배제)
+    if '과학기술정보통신부' in d and any(h in t for h in OPINION_DEPT_HINT):
+        return ['소관:과기정통부']
+    return []
+
+
 def crawl_opinion_lawmaking() -> list:
+    """진행 중 입법예고 전체 목록을 페이지 단위로 훑어 전파·통신 관련만 수집.
+    (기존 lsNm 제명 검색은 제명에 키워드가 그대로 든 경우만 잡혀 누락이 많아 폐지)"""
     collected = {}
 
-    for kw in OPINION_KEYWORDS:
+    page = 1
+    while page <= OPINION_MAX_PAGES:
         try:
             res = fetch_with_retry(
-                OPINION_LIST + '?lsNm=' + kw + '&isOgYn=Y&opYn=Y',
+                OPINION_LIST + '?isOgYn=Y&opYn=Y&pageIndex=%d' % page,
                 timeout=20,
             )
-            soup = BeautifulSoup(res.text, 'html.parser')
-            rows = soup.select('table tbody tr')
-            found_kw = 0
-
-            for row in rows:
-                tds = row.find_all('td')
-                if len(tds) < 5:
-                    continue
-                a_tag = tds[1].find('a')
-                if not a_tag:
-                    continue
-                title = a_tag.get_text(strip=True)
-                if not title:
-                    continue
-                href = a_tag.get('href', '')
-                if href.startswith('/'):
-                    href = OPINION_BASE + href
-                elif not href.startswith('http'):
-                    href = OPINION_BASE + '/gcom/' + href
-                if not href:
-                    continue
-
-                dept = tds[2].get_text(strip=True)
-                period = tds[4].get_text(strip=True)
-
-                if href in collected:
-                    collected[href]['keywords'].add(kw)
-                else:
-                    collected[href] = {
-                        'title': title, 'dept': dept,
-                        'period': period, 'keywords': {kw},
-                    }
-                    found_kw += 1
-
-            print('[입법예고] "%s": %d행 → %d건 신규' % (kw, len(rows), found_kw))
-            time.sleep(1)
-
         except Exception as e:
-            print('[입법예고 오류] "%s": %s' % (kw, e))
+            print('[입법예고 오류] %d페이지: %s' % (page, e))
+            break
+
+        soup = BeautifulSoup(res.text, 'html.parser')
+        rows = soup.select('table tbody tr')
+        page_rows = 0
+
+        for row in rows:
+            tds = row.find_all('td')
+            if len(tds) < 5:
+                continue
+            a_tag = tds[1].find('a')
+            if not a_tag:
+                continue
+            title = a_tag.get_text(strip=True)
+            if not title:
+                continue
+            page_rows += 1
+
+            href = a_tag.get('href', '')
+            if href.startswith('/'):
+                href = OPINION_BASE + href
+            elif not href.startswith('http'):
+                href = OPINION_BASE + '/gcom/' + href
+            if not href:
+                continue
+
+            dept = tds[2].get_text(strip=True)
+            period = tds[4].get_text(strip=True)
+
+            matched = _opinion_match(title, dept)
+            if not matched:
+                continue
+
+            if href in collected:
+                collected[href]['keywords'].update(matched)
+            else:
+                collected[href] = {
+                    'title': title, 'dept': dept,
+                    'period': period, 'keywords': set(matched),
+                }
+
+        print('[입법예고] %d페이지: %d행 스캔, 누적 매칭 %d건' % (page, page_rows, len(collected)))
+        if page_rows == 0:
+            break
+        page += 1
+        time.sleep(1)
 
     print('[입법예고 합계] %d건 수집' % len(collected))
     if collected:
+        try:
+            base_rows = sb.table('law_amendments').select('law_id') \
+                .like('law_id', 'lsAnc_op_%').limit(1).execute().data
+            is_baseline = len(base_rows) == 0   # 첫 실행이면 알림 폭주 방지(저장만)
+        except Exception:
+            is_baseline = False  # 알 수 없으면 보수적으로 알림 진행
         new_items = _save_opinion_to_law_amendments(collected)
-        if new_items:
+        if new_items and not is_baseline:
             _notify_opinion_items(new_items)
+        elif new_items:
+            print('[입법예고] 첫 실행 베이스라인 %d건 저장(알림 생략)' % len(new_items))
 
     return []
 
