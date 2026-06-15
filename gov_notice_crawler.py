@@ -30,11 +30,17 @@ except ImportError:
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 
+try:
+    import anthropic
+except ImportError:
+    anthropic = None
+
 SUPABASE_URL       = os.environ['SUPABASE_URL']
 SUPABASE_KEY       = os.environ['SUPABASE_SERVICE_KEY']
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID   = os.environ.get('TELEGRAM_CHAT_ID', '')
 RESEND_API_KEY     = os.environ.get('RESEND_API_KEY', '')
+ANTHROPIC_API_KEY  = os.environ.get('ANTHROPIC_API_KEY', '')
 
 KST = timezone(timedelta(hours=9))
 sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -448,6 +454,100 @@ def _opinion_match(title: str, dept: str) -> list:
     return []
 
 
+def _fetch_opinion_reason(href: str):
+    """입법예고 상세에서 개정이유+주요내용 텍스트 추출.
+    반환: 본문(str) / '' (정상응답·본문 마커 없음) / None (호출 실패 → NULL 유지·재시도)."""
+    if not href:
+        return None
+    try:
+        res = fetch_with_retry(href, timeout=20)
+        soup = BeautifulSoup(res.text, 'html.parser')
+    except Exception as e:
+        print('  [입법예고 상세 오류] %s' % str(e)[:80])
+        return None
+    full = soup.get_text('\n', strip=True)
+    # "개정이유/제정이유" 헤더부터 "의견제출/그 밖의 사항" 직전까지가 핵심 본문
+    m = re.search(r'(제\s*·?\s*개정이유|개정이유|제정이유)', full)
+    if not m:
+        return ''  # 본문 마커 없음 — 추출 불가(재시도 방지로 '' 저장)
+    body = full[m.start():]
+    for end_kw in ('의견제출', '그 밖의 사항', '그밖의 사항'):
+        idx = body.find(end_kw)
+        if idx > 0:
+            body = body[:idx]
+            break
+    body = re.sub(r'\s+', ' ', body).strip()
+    return body[:2000]
+
+
+def _summarize_opinion(law_nm: str, reason: str) -> str:
+    """개정이유·주요내용을 Haiku로 1~2문장 요약. 실패·키없음 시 '' 반환."""
+    if not ANTHROPIC_API_KEY or anthropic is None:
+        return ''
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=200,
+            messages=[{
+                'role': 'user',
+                'content': (
+                    '다음은 「%s」 입법예고의 개정이유·주요내용입니다. '
+                    '무엇을 바꾸려는지 핵심만 1~2문장(100자 이내) 한국어 평서문으로 요약하세요. '
+                    '제목·머리기호 없이 문장만 출력.\n\n%s' % (law_nm, reason[:2000])
+                ),
+            }],
+        )
+        out = re.sub(r'^[#\-*◇\s]+', '', resp.content[0].text or '').strip()
+        return out if len(out) >= 6 else ''
+    except Exception as e:
+        print('  [입법예고 요약 오류] %s' % e)
+        return ''
+
+
+def backfill_opinion_summaries(limit: int = 30):
+    """summary가 비어 있는 입법예고(lsAnc) 행을 상세 본문 → Haiku 요약으로 채움.
+    멱등: 호출/요약 실패 시 NULL 유지(다음 실행 재시도), 본문 없으면 ''로 표시(재시도 방지)."""
+    if not ANTHROPIC_API_KEY or anthropic is None:
+        print('[입법예고 요약] ANTHROPIC_API_KEY 미설정 — 요약 생략')
+        return
+    try:
+        rows = (sb.table('law_amendments')
+                .select('id,law_nm,link_url,summary')
+                .like('law_id', 'lsAnc_op_%')
+                .is_('summary', 'null')
+                .limit(limit)
+                .execute().data) or []
+    except Exception as e:
+        print('[입법예고 요약] 대상 조회 오류: %s' % e)
+        return
+    if not rows:
+        return
+    print('[입법예고 요약] summary NULL 대상 %d건' % len(rows))
+    done = empty = failed = 0
+    for r in rows:
+        reason = _fetch_opinion_reason(r.get('link_url') or '')
+        if reason is None:
+            failed += 1            # 호출 실패 → NULL 유지(재시도)
+            time.sleep(0.3)
+            continue
+        if reason == '':
+            sb.table('law_amendments').update({'summary': ''}).eq('id', r['id']).execute()
+            empty += 1
+            time.sleep(0.1)
+            continue
+        s = _summarize_opinion(r.get('law_nm', ''), reason)
+        if not s:
+            failed += 1            # 요약 실패 → NULL 유지(재시도)
+            time.sleep(0.2)
+            continue
+        sb.table('law_amendments').update({'summary': s}).eq('id', r['id']).execute()
+        done += 1
+        print('  ok %s -> %s' % ((r.get('law_nm') or '')[:30], s[:50]))
+        time.sleep(0.15)
+    print('[입법예고 요약] 완료 - 요약 %d / 내용없음 %d / 실패(NULL유지) %d' % (done, empty, failed))
+
+
 def crawl_opinion_lawmaking() -> list:
     """진행 중 입법예고 전체 목록을 페이지 단위로 훑어 전파·통신 관련만 수집.
     (기존 lsNm 제명 검색은 제명에 키워드가 그대로 든 경우만 잡혀 누락이 많아 폐지)"""
@@ -522,6 +622,9 @@ def crawl_opinion_lawmaking() -> list:
             _notify_opinion_items(new_items)
         elif new_items:
             print('[입법예고] 첫 실행 베이스라인 %d건 저장(알림 생략)' % len(new_items))
+
+    # 신규 저장분 + 이전에 못 채운 행의 요약(주요내용) 채우기
+    backfill_opinion_summaries()
 
     return []
 
