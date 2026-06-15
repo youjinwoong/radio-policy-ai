@@ -865,7 +865,7 @@ async function loadCustomFileList() {
   try {
     var { data: rows } = await sb
       .from('document_chunks')
-      .select('doc_name, created_at')
+      .select('doc_name, created_at, file_path')
       .eq('doc_category', '추가지식')
       .order('created_at', { ascending: false })
       .limit(3000);
@@ -884,9 +884,10 @@ async function loadCustomFileList() {
     var map = {};
     rows.forEach(function(r) {
       var m = map[r.doc_name];
-      if (!m) { m = map[r.doc_name] = { doc_name: r.doc_name, chunks: 0, created_at: r.created_at }; }
+      if (!m) { m = map[r.doc_name] = { doc_name: r.doc_name, chunks: 0, created_at: r.created_at, file_path: null }; }
       m.chunks++;
       if (r.created_at < m.created_at) m.created_at = r.created_at; // 최초 업로드 시각
+      if (!m.file_path && r.file_path) m.file_path = r.file_path; // 원본 파일 경로 (있으면 다운로드)
     });
     return Object.keys(map).map(function(n) {
       var m = map[n];
@@ -900,13 +901,35 @@ async function loadCustomFileList() {
   }
 }
 
+async function onDownloadCustomFile(filePath, downloadName) {
+  if (!sb || !filePath) return;
+  try {
+    var { data, error } = await sb.storage.from('uploads')
+      .createSignedUrl(filePath, 60, { download: downloadName || true });
+    if (error || !data || !data.signedUrl) throw new Error(error ? error.message : '다운로드 링크 생성 실패');
+    window.open(data.signedUrl, '_blank');
+  } catch(e) {
+    alert('다운로드 실패: ' + e.message);
+  }
+}
+
 async function onDeleteCustomFile(docName, btn) {
   if (!confirm('업로드 파일 "' + docName + '"의 모든 청크를 삭제하시겠습니까?')) return;
   if (btn) btn.disabled = true;
   try {
+    // 원본 파일 보관 경로 조회 → Storage 객체도 함께 삭제
+    var paths = [];
+    try {
+      var { data: fp } = await sb.from('document_chunks')
+        .select('file_path')
+        .eq('doc_category', '추가지식').eq('doc_name', docName)
+        .not('file_path', 'is', null).limit(1);
+      (fp || []).forEach(function(r) { if (r.file_path) paths.push(r.file_path); });
+    } catch(_) {}
     var { error } = await sb.from('document_chunks').delete()
       .eq('doc_category', '추가지식').eq('doc_name', docName);
     if (error) throw new Error(error.message);
+    if (paths.length) { try { await sb.storage.from('uploads').remove(paths); } catch(_) {} }
     renderCustomKnowledgeList((document.getElementById('ck-list-search') || {}).value || '');
   } catch(e) {
     alert('삭제 실패: ' + e.message);
@@ -3626,11 +3649,17 @@ async function renderCustomKnowledgeList(filterText) {
         var statusBadge = pending
           ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 6px">임베딩 대기</span>'
           : '<span style="font-size:10px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px">임베딩 완료</span>';
+        // 원본 파일이 보관돼 있으면(file_path) 파일명 클릭 시 다운로드
+        var hasFile = !!item.file_path;
+        var pathAttr = hasFile ? item.file_path.replace(/"/g, '&quot;') : '';
+        var nameHtml = hasFile
+          ? '<a href="#" data-path="' + pathAttr + '" data-name="' + attrEsc + '" onclick="onDownloadCustomFile(this.getAttribute(\'data-path\'),this.getAttribute(\'data-name\'));return false;" style="font-size:12px;font-weight:600;color:var(--accent);text-decoration:none;cursor:pointer" title="원본 파일 다운로드">' + nameEsc + ' <i class="ti ti-download" style="font-size:11px"></i></a>'
+          : '<span style="font-size:12px;font-weight:600;color:var(--text-primary)" title="원본 파일 미보관 — 텍스트만 저장됨">' + nameEsc + '</span>';
         return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border-light)">' +
           '<div style="flex:1;min-width:0">' +
             '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
               '<span style="font-size:10px;background:#6366f1;color:#fff;border-radius:4px;padding:1px 6px">📎 파일</span>' +
-              '<span style="font-size:12px;font-weight:600;color:var(--text-primary)">' + nameEsc + '</span>' +
+              nameHtml +
             '</div>' +
             '<div style="font-size:11px;color:var(--text-tertiary)">' + fdate + ' · 청크 ' + item.chunks + '개 · ' + statusBadge + '</div>' +
           '</div>' +
@@ -3956,6 +3985,22 @@ async function doPdfUpload() {
         throw new Error(file.name + ': 지원하지 않는 형식입니다. PDF, MD, Word(docx), PPTX만 가능합니다.');
       }
 
+      // 1-b. 추가지식: 원본 파일을 Storage(uploads)에 보관 → 목록에서 클릭 다운로드
+      var thisFilePath = null;
+      if (_pdfUploadCtx === 'custom') {
+        try {
+          var keyBase = file.name.replace(/\.[^.]+$/, '')
+            .replace(/[^\x00-\x7F]/g, '')      // 비ASCII 제거 (Storage 키 안전)
+            .replace(/[^\w.\-]/g, '_') || 'file';
+          thisFilePath = 'custom/' + Date.now() + '_' + keyBase + '.' + ext;
+          var up = await sb.storage.from('uploads').upload(thisFilePath, file, {
+            upsert: true,
+            contentType: file.type || undefined
+          });
+          if (up.error) { console.warn('원본 파일 보관 실패:', up.error.message); thisFilePath = null; }
+        } catch(se) { console.warn('원본 파일 보관 예외:', se); thisFilePath = null; }
+      }
+
       // 2. 보도자료 MD 파일: ## YYMMDD 기준으로 보도자료별 청킹
       var allRows = [];
       if (_pdfUploadCtx === 'press' && ext === 'md') {
@@ -3970,7 +4015,8 @@ async function doPdfUpload() {
               doc_name: thisDocName,
               doc_category: category,
               chunk_index: allRows.length,
-              content: secChunks[ci]
+              content: secChunks[ci],
+              file_path: thisFilePath
             });
           }
         }
@@ -3983,7 +4029,7 @@ async function doPdfUpload() {
         var chunks = _chunkText(text);
         if (chunks.length === 0) throw new Error(file.name + ': 청킹 결과가 없습니다.');
         allRows = chunks.map(function(c, i) {
-          return { doc_name: thisDocName, doc_category: category, chunk_index: i, content: c };
+          return { doc_name: thisDocName, doc_category: category, chunk_index: i, content: c, file_path: thisFilePath };
         });
       }
 
