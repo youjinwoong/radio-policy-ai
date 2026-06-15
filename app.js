@@ -892,7 +892,7 @@ function searchPressReleases(query) {
   });
 }
 
-async function callClaude(userText) {
+async function callClaude(userText, onDelta) {
   const { claudeKey } = getConfig();
   if (!claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다. 설정 탭에서 입력해주세요.');
 
@@ -942,6 +942,10 @@ async function callClaude(userText) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 16384,
+      // ★ 스트리밍 필수: 웹검색+긴 답변은 응답이 2분 이상 걸려, 비스트리밍 시
+      //   ~120초 idle 구간에 브라우저·사내망 프록시가 연결을 끊어 "Failed to fetch"가 났음.
+      //   토큰을 실시간 수신하면 연결이 idle가 아니게 되어 끊김이 사라짐. (stream 제거 금지)
+      stream: true,
       system: systemWithRag,
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
       messages: chatHistory
@@ -954,22 +958,56 @@ async function callClaude(userText) {
     throw new Error(err.error?.message || 'API 오류 (HTTP ' + res.status + ')');
   }
 
-  const data = await res.json();
-  // 웹 검색 사용 시 content가 여러 블록(server_tool_use / web_search_tool_result / text)으로 구성됨
+  // ── SSE 스트림 파싱: text_delta 누적 + 웹검색 인용(citations_delta) 수집 ──
   var aiText = '';
   var cited = [];
   var seenUrl = new Set();
-  (data.content || []).forEach(function(block) {
-    if (block.type === 'text') {
-      aiText += block.text;
-      (block.citations || []).forEach(function(c) {
-        if (c.url && !seenUrl.has(c.url)) {
-          seenUrl.add(c.url);
-          cited.push({ url: c.url, title: c.title || c.url });
+  var stopReason = null;
+  function addCitation(c) {
+    if (c && c.url && !seenUrl.has(c.url)) { seenUrl.add(c.url); cited.push({ url: c.url, title: c.title || c.url }); }
+  }
+
+  try {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    var buf = '';
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      var events = buf.split(/\r?\n\r?\n/);
+      buf = events.pop();   // 마지막 미완성 조각은 다음 청크와 합침
+      for (var ei = 0; ei < events.length; ei++) {
+        var lines = events[ei].split(/\r?\n/);
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li];
+          if (line.indexOf('data:') !== 0) continue;
+          var payload = line.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          var evt;
+          try { evt = JSON.parse(payload); } catch(e) { continue; }
+          if (evt.type === 'content_block_delta' && evt.delta) {
+            if (evt.delta.type === 'text_delta' && evt.delta.text) {
+              aiText += evt.delta.text;
+              if (typeof onDelta === 'function') onDelta(aiText);
+            } else if (evt.delta.type === 'citations_delta' && evt.delta.citation) {
+              addCitation(evt.delta.citation);
+            }
+          } else if (evt.type === 'content_block_start' && evt.content_block) {
+            (evt.content_block.citations || []).forEach(addCitation);
+          } else if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) {
+            stopReason = evt.delta.stop_reason;
+          } else if (evt.type === 'error') {
+            throw new Error((evt.error && evt.error.message) || '스트리밍 오류');
+          }
         }
-      });
+      }
     }
-  });
+  } catch(streamErr) {
+    chatHistory.pop();
+    throw streamErr;
+  }
+
   chatHistory.push({ role: 'assistant', content: aiText });
   // 웹 검색 출처 표시
   if (cited.length > 0) {
@@ -978,7 +1016,7 @@ async function callClaude(userText) {
     }).join('\n');
   }
   // 길이 제한으로 잘린 경우 안내 (히스토리에는 원문만 저장 → "계속" 입력 시 이어서 생성)
-  if (data.stop_reason === 'max_tokens') {
+  if (stopReason === 'max_tokens') {
     aiText += '\n\n---\n\n> ⚠️ 답변이 길이 제한으로 잘렸습니다. **"계속"**이라고 입력하면 이어서 답변합니다.';
   }
   return aiText;
@@ -1219,11 +1257,25 @@ async function sendChat() {
 
   appendMsg('user', text);
   const loader = appendLoading();
+  const chatArea = document.getElementById('chat-area');
 
   try {
-    const answer = await callClaude(text);
-    loader.remove();
-    const msgEl = appendMsg('ai', answer);
+    // 스트리밍: 첫 토큰 도착 시 로더 제거하고 답변 말풍선을 실시간 갱신(렌더 쓰로틀)
+    let streamEl = null;
+    let lastRender = 0;
+    const onDelta = function(partial) {
+      if (!streamEl) { loader.remove(); streamEl = appendMsg('ai', ''); }
+      const now = Date.now();
+      if (now - lastRender < 120) return;
+      lastRender = now;
+      streamEl.innerHTML = '<div class="msg-name">전파정책 전문가 AI</div>' + renderMd(partial);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    };
+    const answer = await callClaude(text, onDelta);
+    if (!streamEl) { loader.remove(); streamEl = appendMsg('ai', ''); }
+    const msgEl = streamEl;
+    msgEl.innerHTML = '<div class="msg-name">전파정책 전문가 AI</div>' + renderMd(answer);
+    chatArea.scrollTop = chatArea.scrollHeight;
 
     // RAG 출처 표시
     if (lastRagSources && lastRagSources.length > 0) {
