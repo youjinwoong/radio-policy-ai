@@ -858,6 +858,62 @@ async function deleteCustomKnowledge(id) {
   if (error) throw new Error(error.message);
 }
 
+// 추가 지식 탭 "파일 업로드"분 — document_chunks(doc_category='추가지식')를
+// doc_name 기준으로 묶어 목록에 함께 표시 (custom_knowledge와 별개 경로)
+async function loadCustomFileList() {
+  if (!sb) return [];
+  try {
+    var { data: rows } = await sb
+      .from('document_chunks')
+      .select('doc_name, created_at')
+      .eq('doc_category', '추가지식')
+      .order('created_at', { ascending: false })
+      .limit(3000);
+    if (!rows || rows.length === 0) return [];
+    // 임베딩 완료된 청크 doc_name별 개수 (vector 본문은 받지 않고 not-null만 카운트)
+    var { data: embRows } = await sb
+      .from('document_chunks')
+      .select('doc_name')
+      .eq('doc_category', '추가지식')
+      .not('embedding', 'is', null)
+      .limit(3000);
+    var embCount = {};
+    (embRows || []).forEach(function(r) {
+      embCount[r.doc_name] = (embCount[r.doc_name] || 0) + 1;
+    });
+    var map = {};
+    rows.forEach(function(r) {
+      var m = map[r.doc_name];
+      if (!m) { m = map[r.doc_name] = { doc_name: r.doc_name, chunks: 0, created_at: r.created_at }; }
+      m.chunks++;
+      if (r.created_at < m.created_at) m.created_at = r.created_at; // 최초 업로드 시각
+    });
+    return Object.keys(map).map(function(n) {
+      var m = map[n];
+      m.embedded = embCount[n] || 0;
+      m._type = 'file';
+      return m;
+    });
+  } catch(e) {
+    console.warn('업로드 파일 목록 로드 실패:', e);
+    return [];
+  }
+}
+
+async function onDeleteCustomFile(docName, btn) {
+  if (!confirm('업로드 파일 "' + docName + '"의 모든 청크를 삭제하시겠습니까?')) return;
+  if (btn) btn.disabled = true;
+  try {
+    var { error } = await sb.from('document_chunks').delete()
+      .eq('doc_category', '추가지식').eq('doc_name', docName);
+    if (error) throw new Error(error.message);
+    renderCustomKnowledgeList((document.getElementById('ck-list-search') || {}).value || '');
+  } catch(e) {
+    alert('삭제 실패: ' + e.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
 // ── 보도자료 질의 판별·검색 (0313a8f에서 복원 — 08d29f1에서 유실) ──
 function isPressQuery(query) {
   return /보도자료|보도|발표|공지|공고|과기정통부|국립전파연구원|전파연구원/.test(query);
@@ -3545,11 +3601,16 @@ async function renderCustomKnowledgeList(filterText) {
   if (!listEl) return;
   listEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary);font-size:12px"><i class="ti ti-loader"></i> 불러오는 중...</div>';
   try {
-    var items = await loadCustomKnowledgeList();
+    var ckItems = await loadCustomKnowledgeList();
+    var fileItems = await loadCustomFileList();
+    var items = ckItems.concat(fileItems).sort(function(a, b) {
+      return (b.created_at || '').localeCompare(a.created_at || '');
+    });
     if (filterText) {
       var q = filterText.toLowerCase();
       items = items.filter(function(i) {
-        return i.title.toLowerCase().includes(q) || (i.tags || []).join(' ').toLowerCase().includes(q);
+        var name = (i._type === 'file' ? i.doc_name : i.title) || '';
+        return name.toLowerCase().includes(q) || (i.tags || []).join(' ').toLowerCase().includes(q);
       });
     }
     if (items.length === 0) {
@@ -3557,6 +3618,25 @@ async function renderCustomKnowledgeList(filterText) {
       return;
     }
     listEl.innerHTML = items.map(function(item) {
+      if (item._type === 'file') {
+        var fdate = (item.created_at || '').slice(0, 10);
+        var pending = item.embedded < item.chunks;
+        var nameEsc = chEsc(item.doc_name);
+        var attrEsc = nameEsc.replace(/"/g, '&quot;');
+        var statusBadge = pending
+          ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 6px">임베딩 대기</span>'
+          : '<span style="font-size:10px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px">임베딩 완료</span>';
+        return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border-light)">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
+              '<span style="font-size:10px;background:#6366f1;color:#fff;border-radius:4px;padding:1px 6px">📎 파일</span>' +
+              '<span style="font-size:12px;font-weight:600;color:var(--text-primary)">' + nameEsc + '</span>' +
+            '</div>' +
+            '<div style="font-size:11px;color:var(--text-tertiary)">' + fdate + ' · 청크 ' + item.chunks + '개 · ' + statusBadge + '</div>' +
+          '</div>' +
+          '<button data-doc="' + attrEsc + '" onclick="onDeleteCustomFile(this.getAttribute(\'data-doc\'),this)" style="background:none;border:none;color:var(--text-tertiary);cursor:pointer;font-size:13px;padding:2px 4px" title="파일 삭제"><i class="ti ti-trash"></i></button>' +
+        '</div>';
+      }
       var tagsHtml = (item.tags || []).map(function(t) {
         return '<span style="background:var(--bg-tertiary);border-radius:4px;padding:1px 6px;font-size:10px;color:var(--text-secondary)">' + t + '</span>';
       }).join(' ');
