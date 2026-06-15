@@ -2,10 +2,10 @@ name: 전파정책 일일 자동 크롤링
 
 on:
   schedule:
-    - cron: '9 0-11 * * *'      # 09~20 KST 매시간 :09 (GitHub 스케줄 드롭 대비 이중화)
-    - cron: '39 0-11 * * *'     # 09~20 KST 매시간 :39
-    - cron: '9 13,18,22 * * *'  # 22시, 03시, 07시 KST :09
-    - cron: '39 13,18,22 * * *' # 22시, 03시, 07시 KST :39
+    - cron: '17 0-11 * * *'     # 09~20 KST 매시간 :17 (GitHub 스케줄 드롭 대비 이중화, 혼잡대 회피)
+    - cron: '47 0-11 * * *'     # 09~20 KST 매시간 :47
+    - cron: '17 13,18,22 * * *' # 22시, 03시, 07시 KST :17
+    - cron: '47 13,18,22 * * *' # 22시, 03시, 07시 KST :47
     - cron: '5 23 * * *'        # 08:05 KST — 크롤링 + 모닝 브리핑 백업 (브리핑 백업 조건과 연동, 유지)
   workflow_dispatch:             # GitHub에서 수동 실행 버튼
 
@@ -64,5 +64,4 @@ jobs:
             echo "[경고] morning_briefing.py 실패 — 텔레그램 경고 발송"
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d text="⚠️ 모닝 브리핑 백업 실행 실패 (daily_crawl) — Actions 로그 확인 필요" > /dev/null || true
-          fi
+              -d text="⚠️ 모닝 브리핑 백업 실행 실패 (daily_crawl) — Actions 로그 확인 필요" > /dev/null || 
