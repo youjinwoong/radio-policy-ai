@@ -390,7 +390,7 @@ def fetch_new_law_announcements() -> list:
     cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
     try:
         resp = sb.table('law_amendments') \
-            .select('law_nm,ann_type,public_dt,enf_dt,link_url,matched_keywords') \
+            .select('law_nm,ann_type,public_dt,enf_dt,link_url,matched_keywords,summary') \
             .eq('law_type', 'lsAnc') \
             .gte('created_at', cutoff) \
             .execute()
@@ -418,8 +418,11 @@ def _format_law_anc_section(items: list) -> str:
         public_dt = _fmt_dt(it.get('public_dt', ''))
         enf_dt = _fmt_dt(it.get('enf_dt', ''))
         link = it.get('link_url', '')
+        summary = (it.get('summary') or '').strip()
         lines.append(f'🔴 [입법예고] {law_nm}')
         lines.append(f'  → {ann_type} | 예고: {public_dt}~{enf_dt}')
+        if summary:
+            lines.append(f'  → {summary}')
         if link:
             lines.append(f'  🔗 {link}')
     return '\n'.join(lines)
