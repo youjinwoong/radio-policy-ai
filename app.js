@@ -2988,7 +2988,7 @@ async function loadBriefing() {
 
     listEl.innerHTML = data.map(function(b, idx) {
       const d = new Date(b.briefing_date).toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit'});
-      const isToday = b.briefing_date === new Date().toISOString().slice(0,10);
+      const isToday = b.briefing_date === new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0,10);
       const parsed = allParsed[idx];
       const contentHtml = parsed.html;
       const urgentCount = parsed.urgentCount;
