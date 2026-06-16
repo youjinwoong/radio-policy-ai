@@ -2840,11 +2840,22 @@ function parseBriefingContent(rawContent, briefingIdx) {
       output.push('<div style="height:4px"></div>');
       continue;
     }
-    // 일반 텍스트
+    // 일반 텍스트 / 느슨한 줄 (입법예고 📢·🔴·→·🔗 블록 포함)
     if (rawItemLines.length > 0) {
       rawItemLines.push(line);
+    } else if (!trimmed) {
+      output.push('<div style="height:4px"></div>');
+    } else if (/^🔗\s*\S/.test(trimmed)) {
+      var looseUrl = trimmed.replace(/^🔗\s*/, '').trim();
+      output.push('<div style="padding-left:18px;font-size:12px;margin-top:2px"><a href="' + esc(looseUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">🔗 원문 보기</a></div>');
+    } else if (/^→\s/.test(trimmed)) {
+      output.push('<div style="font-size:12px;color:var(--text-secondary);padding-left:18px;line-height:1.6;margin-top:2px">' + mdBold(esc(trimmed)) + '</div>');
+    } else if (/^📢/.test(trimmed)) {
+      output.push('<div style="font-weight:700;font-size:13px;color:var(--accent);margin:14px 0 6px">' + mdBold(esc(trimmed)) + '</div>');
+    } else if (/^🔴/.test(trimmed)) {
+      output.push('<div style="font-weight:600;font-size:13px;line-height:1.6;margin-top:2px">' + mdBold(esc(trimmed)) + '</div>');
     } else {
-      output.push(trimmed ? '<div style="font-size:13px;line-height:1.8">' + mdBold(esc(line)) + '</div>' : '<div style="height:4px"></div>');
+      output.push('<div style="font-size:13px;line-height:1.8">' + mdBold(esc(line)) + '</div>');
     }
   }
   flushItem();
