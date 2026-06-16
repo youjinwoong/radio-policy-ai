@@ -64,13 +64,16 @@ try:
         if h >= 14:
             problems.append("뉴스 수집이 %.1f시간째 멈춤" % h)
 
-    today_kst = datetime.datetime.now(KST).date().isoformat()
-    br = http_get_json(
-        SUPABASE_URL + "/rest/v1/daily_briefings?select=briefing_date&briefing_date=eq." + today_kst,
-        sb_headers,
-    )
-    if not br:
-        problems.append("오늘(%s) 모닝 브리핑 미생성" % today_kst)
+    now_kst = datetime.datetime.now(KST)
+    # 브리핑은 06:05 생성 → KST 09시 이후에만 '미생성'을 이상으로 판정(새벽 오탐 방지)
+    if now_kst.hour >= 9:
+        today_kst = now_kst.date().isoformat()
+        br = http_get_json(
+            SUPABASE_URL + "/rest/v1/daily_briefings?select=briefing_date&briefing_date=eq." + today_kst,
+            sb_headers,
+        )
+        if not br:
+            problems.append("오늘(%s) 모닝 브리핑 미생성" % today_kst)
 except Exception as e:  # 접속 불가 = Supabase 다운 의심
     problems.append("⛔ Supabase 접속 불가: %s" % e)
 
