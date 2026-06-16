@@ -1,0 +1,35 @@
+name: 헬스 워치독 (외부 감시 — Supabase 독립)
+
+# 파이프라인이 조용히 멈추는 것을 잡는 외부 감시견.
+# GitHub Actions에서 돌므로 Supabase와 독립 → Supabase 전체 다운도 잡는다.
+# Supabase pg_cron(jobid 13)이 KST 21:35에 백업 dispatch하여 GitHub cron 드롭을 보완.
+on:
+  schedule:
+    - cron: '30 12 * * *'   # KST 21:30 — 하루 크롤·브리핑이 다 끝난 뒤 점검
+  workflow_dispatch:
+
+permissions:
+  actions: read           # 다른 워크플로우의 실행 이력(heartbeat) 조회용
+  contents: read
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 워치독 실행
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+        run: python health_watchdog.py
