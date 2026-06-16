@@ -411,7 +411,7 @@ def _fmt_dt(dt: str) -> str:
 
 def _format_law_anc_section(items: list) -> str:
     """신규 입법예고 브리핑 섹션 (🔴 → 이메일에서 빨간 박스로 렌더링)"""
-    lines = [f'📢 [신규 입법예고] {len(items)}건 — 즉시 확인 필요']
+    lines = [f'📢 [신규 입법예고] {len(items)}건 — 확인 필요']
     for it in items:
         law_nm = it.get('law_nm', '')
         ann_type = it.get('ann_type', '입법예고')

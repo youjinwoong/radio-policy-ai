@@ -2820,7 +2820,7 @@ function parseBriefingContent(rawContent, briefingIdx) {
     // 제목 헤더 (📡)
     if (/^📡/.test(line)) {
       flushItem();
-      output.push('<div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:12px">' + esc(line) + '</div>');
+      output.push('<div style="font-size:15px;font-weight:700;color:var(--accent);margin:22px 0 12px;padding-top:14px;border-top:1px solid var(--border, #e5e7eb)">' + esc(line) + '</div>');
       continue;
     }
     // bullet 항목 시작
