@@ -40,6 +40,8 @@ TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID   = os.environ.get('TELEGRAM_CHAT_ID', '')
 ANTHROPIC_API_KEY  = os.environ.get('ANTHROPIC_API_KEY', '')
 RESEND_API_KEY     = os.environ.get('RESEND_API_KEY', '')
+NAVER_CLIENT_ID    = os.environ.get('NAVER_CLIENT_ID', '')
+NAVER_CLIENT_SECRET = os.environ.get('NAVER_CLIENT_SECRET', '')
 
 # ── 초기화 ─────────────────────────────────────────────
 sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -327,36 +329,85 @@ def parse_date(date_str: str) -> str:
 #  크롤러 — 네이버 뉴스 검색 (1순위)
 # ═══════════════════════════════════════════════════════
 
+_NAVER_PRESS_DOMAINS = {
+    'yna.co.kr': '연합뉴스', 'newsis.com': '뉴시스', 'etnews.com': '전자신문',
+    'dt.co.kr': '디지털타임스', 'ddaily.co.kr': '디지털데일리', 'zdnet.co.kr': 'ZDNet Korea',
+    'inews24.com': '아이뉴스24', 'bloter.net': '블로터', 'mk.co.kr': '매일경제',
+    'mt.co.kr': '머니투데이', 'hankyung.com': '한국경제', 'sedaily.com': '서울경제',
+    'chosun.com': '조선일보', 'joongang.co.kr': '중앙일보', 'donga.com': '동아일보',
+    'hani.co.kr': '한겨레', 'khan.co.kr': '경향신문',
+}
+
+
+def _strip_html_tags(s: str) -> str:
+    import html as _html
+    s = re.sub(r'<[^>]+>', '', s or '')
+    return _html.unescape(s).strip()
+
+
+def _naver_pubdate_to_iso(pubdate: str) -> str:
+    """네이버 API pubDate(RFC 2822, '... +0900') → KST ISO 8601."""
+    if not pubdate:
+        return ''
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(pubdate).astimezone(KST).isoformat()
+    except Exception:
+        return ''
+
+
+def _domain_source(url: str) -> str:
+    """원문 URL 도메인 → 언론사명(매핑) 또는 도메인 본체."""
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(url).hostname or '').lower()
+        if host.startswith('www.'):
+            host = host[4:]
+        for dom, name in _NAVER_PRESS_DOMAINS.items():
+            if host == dom or host.endswith('.' + dom):
+                return name
+        parts = host.split('.')
+        # 한국형 2단계 TLD(co.kr·go.kr·or.kr 등)는 본체가 parts[-3]
+        if len(parts) >= 3 and parts[-1] == 'kr' and parts[-2] in ('co', 'go', 'or', 'ne', 're', 'pe'):
+            return parts[-3]
+        return parts[-2] if len(parts) >= 2 else (host or '네이버뉴스')
+    except Exception:
+        return '네이버뉴스'
+
+
 def crawl_naver_news() -> tuple:
-    """네이버 뉴스 검색으로 키워드별 기사 수집.
-    n.news.naver.com URL 우선 확보 → 본문 수집률 극대화.
+    """네이버 뉴스 검색 OpenAPI로 키워드별 기사 수집.
+    구 HTML 스크래핑(ul.list_news li.bx / a.news_tit)은 네이버 검색 구조 변경/해외 IP 차단으로
+    0건 회귀해 폐지 → 공식 OpenAPI(JSON, IP·HTML 변경에 안전)로 전환.
+    NAVER_CLIENT_ID/SECRET 미설정·오류 시 빈 결과 반환 → 호출부가 Google RSS로 폴백.
     반환: (items: list, fail_count: int)
     """
+    if not (NAVER_CLIENT_ID and NAVER_CLIENT_SECRET):
+        print('[네이버 뉴스] NAVER_CLIENT_ID/SECRET 미설정 — 건너뜀 (Google RSS 폴백)')
+        return [], 0
+
     items = []
     seen_urls: set = set()
     seen_titles: set = set()
     fail_count = 0
+    api_headers = {
+        'X-Naver-Client-Id': NAVER_CLIENT_ID,
+        'X-Naver-Client-Secret': NAVER_CLIENT_SECRET,
+    }
 
     for kw in NEWS_SEARCH_KEYWORDS:
-        url = (
-            'https://search.naver.com/search.naver'
-            f'?where=news&query={requests.utils.quote(kw)}&sort=1'
-        )
         try:
-            res = requests.get(url, headers=HEADERS, timeout=10)
+            res = requests.get(
+                'https://openapi.naver.com/v1/search/news.json',
+                headers=api_headers,
+                params={'query': kw, 'display': 30, 'sort': 'date'},
+                timeout=10,
+            )
             res.raise_for_status()
-            soup = BeautifulSoup(res.text, 'html.parser')
+            articles = (res.json() or {}).get('items', [])
 
-            # 네이버 뉴스 검색 결과 파싱
-            articles = soup.select('ul.list_news li.bx')
-            if not articles:
-                articles = soup.select('ul.list_news > li')
-
-            for art in articles[:8]:
-                title_tag = art.select_one('a.news_tit')
-                if not title_tag:
-                    continue
-                title = title_tag.get_text(strip=True)
+            for art in articles:
+                title = _strip_html_tags(art.get('title', ''))
                 if not title or len(title) < 8:
                     continue
                 is_personnel = is_ministry_personnel_news(title)
@@ -368,40 +419,27 @@ def crawl_naver_news() -> tuple:
                     continue
                 seen_titles.add(title)
 
-                # n.news.naver.com URL 우선, 없으면 원문 URL
-                href = title_tag.get('href', '')
-                naver_link = art.select_one('a.info[href*="n.news.naver.com"]')
-                if naver_link:
-                    href = naver_link.get('href', href)
+                # n.news.naver.com(link) 우선 — 본문 수집률↑, 없으면 원문
+                naver_link = art.get('link', '') or ''
+                origin = art.get('originallink', '') or ''
+                href = naver_link if 'naver.com' in naver_link else (origin or naver_link)
                 if not href or href in seen_urls:
                     continue
                 seen_urls.add(href)
 
-                # 언론사명
-                press_tag = art.select_one('a.info.press, a.press')
-                source = press_tag.get_text(strip=True) if press_tag else '네이버뉴스'
-
-                # 날짜 (span.info 중 날짜 형식 포함된 것)
-                date_str = ''
-                for span in art.select('span.info'):
-                    text = span.get_text(strip=True)
-                    if any(c in text for c in ['분 전', '시간 전', '일 전', '어제', '.']):
-                        date_str = text
-                        break
-
                 items.append({
                     'title':        title,
-                    'source':       source,
+                    'source':       _domain_source(origin or naver_link),
                     'category':     detect_category(title),
                     'url':          href,
                     'is_read':      False,
-                    'published_at': parse_date(date_str),
+                    'published_at': _naver_pubdate_to_iso(art.get('pubDate', '')),
                     'content':      None,
                 })
         except Exception as e:
-            print(f'[네이버 뉴스 오류] {kw}: {e}')
+            print(f'[네이버 뉴스 오류] {kw}: {str(e)[:80]}')
             fail_count += 1
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     print(f'[네이버 뉴스] {len(items)}건 수집 (실패 키워드 {fail_count}개)')
     return items, fail_count
