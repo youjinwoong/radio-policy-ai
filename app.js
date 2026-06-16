@@ -2742,20 +2742,23 @@ function classifyBriefingItemImportance(text) {
 }
 
 // 비뉴스 섹션(주목 포인트·기술 용어 등) bullet 항목 렌더링
+// 마크다운 굵게(**...**) → <strong> (esc 이후 적용 — 우리가 넣는 안전한 태그)
+function mdBold(s) { return (s || '').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'); }
+
 function renderPlainBulletItem(block) {
   var lines = block.split('\n');
   var out = '';
   for (var i = 0; i < lines.length; i++) {
     var l = lines[i];
     if (/^• /.test(l)) {
-      out += '<div style="font-size:13px;line-height:1.8;padding-left:2px">• ' + l.replace(/^• /, '') + '</div>';
+      out += '<div style="font-size:13px;line-height:1.8;padding-left:2px">• ' + mdBold(l.replace(/^• /, '')) + '</div>';
     } else if (/^  → /.test(l)) {
-      out += '<div style="font-size:12px;color:var(--text-secondary);padding-left:16px;line-height:1.6">→ ' + l.replace(/^  → /, '') + '</div>';
+      out += '<div style="font-size:12px;color:var(--text-secondary);padding-left:16px;line-height:1.6">→ ' + mdBold(l.replace(/^  → /, '')) + '</div>';
     } else if (/^  🔗 /.test(l)) {
       var url = l.replace(/^  🔗 /, '').trim();
       out += '<div style="padding-left:16px;font-size:12px;margin-top:2px"><a href="' + url + '" target="_blank" style="color:var(--accent);text-decoration:none">🔗 원문 보기</a></div>';
     } else if (l.trim()) {
-      out += '<div style="font-size:13px;line-height:1.8">' + l + '</div>';
+      out += '<div style="font-size:13px;line-height:1.8">' + mdBold(l) + '</div>';
     }
   }
   return '<div style="margin-bottom:6px">' + out + '</div>';
@@ -2804,14 +2807,14 @@ function parseBriefingContent(rawContent, briefingIdx) {
   }
 
   for (var li = 0; li < rawLines.length; li++) {
-    var line = rawLines[li];
+    var line = rawLines[li].replace(/^\s*#{1,6}\s+/, '');  // 마크다운 헤더 기호(#, ##) 제거
     var trimmed = line.trim();
 
     // 섹션 헤더 [주요 뉴스], [주목 포인트], [기술 용어] 등
     if (/^\[.+\]$/.test(trimmed)) {
       flushItem();
       currentSection = /뉴스|news/i.test(trimmed) ? 'news' : 'other';
-      output.push('<div style="font-weight:600;font-size:12px;color:var(--text-secondary);margin:14px 0 8px;letter-spacing:0.04em">' + esc(trimmed) + '</div>');
+      output.push('<div style="font-weight:600;font-size:12px;color:var(--text-secondary);margin:14px 0 8px;letter-spacing:0.04em">' + mdBold(esc(trimmed)) + '</div>');
       continue;
     }
     // 제목 헤더 (📡)
@@ -2841,7 +2844,7 @@ function parseBriefingContent(rawContent, briefingIdx) {
     if (rawItemLines.length > 0) {
       rawItemLines.push(line);
     } else {
-      output.push(trimmed ? '<div style="font-size:13px;line-height:1.8">' + esc(line) + '</div>' : '<div style="height:4px"></div>');
+      output.push(trimmed ? '<div style="font-size:13px;line-height:1.8">' + mdBold(esc(line)) + '</div>' : '<div style="height:4px"></div>');
     }
   }
   flushItem();
@@ -2870,9 +2873,9 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
     }
   }
 
-  var titleHtml = '<span data-news-title="1" style="font-weight:500;font-size:13px;line-height:1.6">' + titleLine + '</span>';
+  var titleHtml = '<span data-news-title="1" style="font-weight:500;font-size:13px;line-height:1.6">' + mdBold(titleLine) + '</span>';
   var summaryHtml = summaryLines.map(function(s) {
-    return '<div style="font-size:12px;color:var(--text-secondary);padding-left:4px;margin-top:3px;line-height:1.6">→ ' + s + '</div>';
+    return '<div style="font-size:12px;color:var(--text-secondary);padding-left:4px;margin-top:3px;line-height:1.6">→ ' + mdBold(s) + '</div>';
   }).join('');
   var linkHtml = linkUrl
     ? '<div style="margin-top:6px"><a href="' + linkUrl + '" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none">🔗 원문 보기</a></div>'
@@ -2891,7 +2894,7 @@ function renderBriefingNewsItem(block, importance, briefingIdx, itemIdx) {
       + linkHtml
       + '<div id="' + analysisId + '" data-briefing-analysis="1" style="margin-top:10px;padding:10px 12px;background:rgba(239,68,68,0.06);border-radius:8px;border:1px solid rgba(239,68,68,0.2)">'
       +   (storedAnalysis
-          ? '<div style="font-size:12px;color:var(--text-primary);line-height:1.7"><span style="font-weight:700">⚠️ SKT 영향 분석</span> ' + storedAnalysis + '</div>'
+          ? '<div style="font-size:12px;color:var(--text-primary);line-height:1.7"><span style="font-weight:700">⚠️ SKT 영향 분석</span> ' + mdBold(storedAnalysis) + '</div>'
           : '<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary)">'
             + '<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>'
             + 'AI 영향도 분석 중...'
