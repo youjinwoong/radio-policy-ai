@@ -3081,21 +3081,55 @@ function toggleBriefing(id) {
 // ════════════════════════════════════════════
 //  관리자 인증 (AI 페르소나 보호)
 // ════════════════════════════════════════════
-const ADMIN_PWD = 'skt2026!';  // ← 비밀번호 변경 시 이 값을 수정하세요
+// 관리자 비밀번호는 평문 대신 SHA-256 해시로만 보관 (공개 소스에서 비번 노출 방지).
+// 비밀번호 변경 시: 브라우저 콘솔에서 아래 한 줄을 실행해 새 해시를 만들고 이 값을 교체하세요.
+//   crypto.subtle.digest('SHA-256', new TextEncoder().encode('새비밀번호')).then(b=>console.log([...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')))
+const ADMIN_PWD_HASH = '164eab12762d42b09780eba6401d395a945355e42fc95a60b42ac509891cfa7e';
+const ADMIN_MAX_ATTEMPTS = 5;          // 연속 실패 허용 횟수
+const ADMIN_LOCKOUT_MS = 60 * 1000;    // 초과 시 입력 잠금 시간(60초)
 
-function checkAdminPwd() {
-  var input = document.getElementById('admin-pwd-input').value;
+async function _sha256Hex(str) {
+  var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2, '0'); }).join('');
+}
+
+async function checkAdminPwd() {
+  var inputEl = document.getElementById('admin-pwd-input');
   var errEl = document.getElementById('admin-pwd-error');
-  if (input === ADMIN_PWD) {
+  var input = inputEl.value;
+  var now = Date.now();
+
+  // 잠금 상태면 차단하고 남은 시간 안내
+  var lockUntil = parseInt(sessionStorage.getItem('admin_lock_until') || '0', 10);
+  if (lockUntil > now) {
+    var sec = Math.ceil((lockUntil - now) / 1000);
+    if (errEl) { errEl.textContent = '시도 횟수를 초과했습니다. ' + sec + '초 후 다시 시도하세요.'; errEl.style.display = 'block'; }
+    inputEl.value = '';
+    return;
+  }
+
+  var hash = await _sha256Hex(input);
+  if (hash === ADMIN_PWD_HASH) {
     sessionStorage.setItem('admin_auth', '1');
+    sessionStorage.removeItem('admin_fail_count');
+    sessionStorage.removeItem('admin_lock_until');
     document.getElementById('settings-locked').style.display = 'none';
     document.getElementById('settings-unlocked').style.display = 'block';
     document.getElementById('system-prompt-display').value = SYSTEM_PROMPT;
     loadSettingsFields();
     if (errEl) errEl.style.display = 'none';
+    inputEl.value = '';
   } else {
-    if (errEl) errEl.style.display = 'block';
-    document.getElementById('admin-pwd-input').value = '';
+    var fails = parseInt(sessionStorage.getItem('admin_fail_count') || '0', 10) + 1;
+    inputEl.value = '';
+    if (fails >= ADMIN_MAX_ATTEMPTS) {
+      sessionStorage.setItem('admin_lock_until', String(now + ADMIN_LOCKOUT_MS));
+      sessionStorage.setItem('admin_fail_count', '0');
+      if (errEl) { errEl.textContent = ADMIN_MAX_ATTEMPTS + '회 연속 실패 — ' + (ADMIN_LOCKOUT_MS / 1000) + '초간 입력이 잠깁니다.'; errEl.style.display = 'block'; }
+    } else {
+      sessionStorage.setItem('admin_fail_count', String(fails));
+      if (errEl) { errEl.textContent = '비밀번호가 올바르지 않습니다. (남은 시도 ' + (ADMIN_MAX_ATTEMPTS - fails) + '회)'; errEl.style.display = 'block'; }
+    }
   }
 }
 
