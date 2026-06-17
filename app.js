@@ -4614,6 +4614,7 @@ function renderLawTrack(items) {
 var lastReportDraftText = '';
 var lastReportDraftReq = '';
 var lastReportDraftSources = [];
+var lastReportFinal = '';       // 사용자가 채택·교정한 최종본 (편집-diff 학습용)
 var _reportPickedFile = null;   // 등록 화면에서 선택한 파일(텍스트 추출 전)
 
 // 탭 전환 (초안 생성 / 내 보고서 관리)
@@ -4752,43 +4753,64 @@ function refreshStyleStatus(count) {
   }
 }
 
-// 스타일 가이드 증류 (Haiku) — feedback_rules 패턴 / 단일 행 캐시
+// 스타일 가이드 증류 (Haiku) — 기준 예시 + 편집-diff(빨간펜) + 부정 피드백
+//  재증류 트리거: 강제 / 규칙 없음 / 샘플 +2편 / 피드백 +2건 (피드백이 자동 학습 연료)
 async function distillReportStyle(force) {
   if (!sb) return '';
-  var saved = (await sb.from('report_style_rules').select('rules,sample_count').eq('id',1).maybeSingle()).data;
+  var saved = (await sb.from('report_style_rules').select('rules,sample_count,feedback_count').eq('id',1).maybeSingle()).data || {};
   var cnt = (await sb.from('report_samples').select('id', { count:'exact', head:true })).count || 0;
-  if (cnt < 2) return (saved && saved.rules) || '';
-  // 마지막 증류 이후 +2편 이상일 때만 재증류 (force=수동 버튼)
-  if (!force && saved && saved.rules && (cnt - (saved.sample_count || 0) < 2)) return saved.rules;
+  var fbCount = (await sb.from('report_feedback').select('id', { count:'exact', head:true })).count || 0;
+  if (cnt < 2) return saved.rules || '';   // 구조 학습엔 기본 샘플 2편 이상 필요
+  var sampleDelta = cnt - (saved.sample_count || 0);
+  var fbDelta = fbCount - (saved.feedback_count || 0);
+  if (!force && saved.rules && sampleDelta < 2 && fbDelta < 2) return saved.rules;
+
   var samples = (await sb.from('report_samples').select('title,report_type,content')
     .order('created_at', { ascending:false }).limit(8)).data || [];
-  if (samples.length === 0) return (saved && saved.rules) || '';
   var joined = samples.map(function(r,i){
-    return '### 예시 ' + (i+1) + ' [' + (r.report_type||'기타') + '] ' + r.title + '\n' + (r.content||'').slice(0,2500);
+    return '### 예시 ' + (i+1) + ' [' + (r.report_type||'기타') + '] ' + r.title + '\n' + (r.content||'').slice(0,2200);
   }).join('\n\n');
+
+  // ── 빨간펜 학습: 최근 피드백(초안→최종본 차이 / 부정 평가) ──
+  var fb = (await sb.from('report_feedback').select('request,draft,final,rating')
+    .order('created_at', { ascending:false }).limit(12)).data || [];
+  var corrections = fb.filter(function(f){ return f.final && f.final.trim(); }).slice(0,4);
+  var negatives = fb.filter(function(f){ return f.rating === -1 && !(f.final && f.final.trim()); }).slice(0,3);
+  var corrBlock = corrections.map(function(f,i){
+    return '〔교정 ' + (i+1) + '〕 요청: ' + (f.request||'').slice(0,120) +
+      '\n[AI 초안 발췌]\n' + (f.draft||'').slice(0,1200) +
+      '\n[사용자 최종본 발췌]\n' + (f.final||'').slice(0,1200);
+  }).join('\n\n');
+  var negBlock = negatives.map(function(f,i){
+    return '〔불만족 초안 ' + (i+1) + '〕 ' + (f.draft||'').slice(0,700);
+  }).join('\n\n');
+
   var claudeKey = getConfig().claudeKey;
-  if (!claudeKey) return (saved && saved.rules) || '';
+  if (!claudeKey) return saved.rules || '';
+  var userMsg =
+    '다음 자료로 "보고서 작성 규칙"을 만들어줘. 8~14줄, 지시문 형태로만 출력(설명 금지).\n\n' +
+    '[A. 기준 예시 보고서 — 기본 구조·톤]\n' + (joined || '(없음)') +
+    (corrBlock ? '\n\n[B. 사용자 교정 사례 — 초안을 사용자가 이렇게 고쳤음. 이 변화(구조 이동·표현 교체·길이·어미 등)를 규칙에 "반드시 반영"으로 명시]\n' + corrBlock : '') +
+    (negBlock ? '\n\n[C. 사용자가 별로라고 평가한 초안 — 이런 패턴은 "피하라"로 명시]\n' + negBlock : '') +
+    '\n\n항목: ① 전체 구조(섹션 순서/제목 방식) ② 문단·문장 톤(격식/길이/어미) ③ 자주 쓰는 표현·머리말 ④ 도입·결론 처리 ⑤ 위 교정에서 드러난 사용자 선호(최우선).';
   try {
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers:{ 'x-api-key':claudeKey, 'anthropic-version':'2023-06-01', 'content-type':'application/json', 'anthropic-dangerous-direct-browser-access':'true' },
       body: JSON.stringify({
-        model:'claude-haiku-4-5-20251001', max_tokens:700,
-        system:'당신은 문서 편집 전문가입니다. 아래 보고서들에서 공통된 형식·구조·톤을 일반화해 재사용 가능한 작성 규칙으로 정리합니다.',
-        messages:[{ role:'user', content:
-          '다음 보고서들의 공통 형식을 추출해 "보고서 작성 규칙"으로 정리해줘. ' +
-          '항목: ① 전체 구조(섹션 순서/제목 방식) ② 문단·문장 톤(격식/길이/어미) ' +
-          '③ 자주 쓰는 표현·머리말 ④ 도입·결론 처리 방식. 8~12줄, 지시문 형태로만 출력:\n\n' + joined }]
+        model:'claude-haiku-4-5-20251001', max_tokens:800,
+        system:'당신은 문서 편집 전문가입니다. 기준 예시의 공통 형식을 잡되, 사용자의 교정 사례(초안→최종본 차이)에서 드러난 선호를 최우선으로 반영해 재사용 가능한 작성 규칙으로 일반화합니다.',
+        messages:[{ role:'user', content: userMsg }]
       })
     });
-    if (!res.ok) return (saved && saved.rules) || '';
+    if (!res.ok) return saved.rules || '';
     var data = await res.json();
     var rules = (data.content && data.content[0] && data.content[0].text) || '';
     if (rules) {
-      await sb.from('report_style_rules').upsert({ id:1, rules:rules, sample_count:cnt, updated_at:new Date().toISOString() });
+      await sb.from('report_style_rules').upsert({ id:1, rules:rules, sample_count:cnt, feedback_count:fbCount, updated_at:new Date().toISOString() });
     }
-    return rules || (saved && saved.rules) || '';
-  } catch(e) { console.warn('스타일 증류 실패:', e); return (saved && saved.rules) || ''; }
+    return rules || saved.rules || '';
+  } catch(e) { console.warn('스타일 증류 실패:', e); return saved.rules || ''; }
 }
 
 // 수동 "스타일 재학습" 버튼
@@ -4924,6 +4946,10 @@ async function onGenerateDraft() {
   if (outEl) outEl.innerHTML = '<div style="color:var(--text-secondary);font-size:12px">내 보고서 형식 + 법령·자료를 결합해 초안을 작성 중입니다... (웹검색 포함 시 1~2분 소요, 실시간 표시)</div>';
   lastReportDraftReq = userText;
   lastReportDraftText = '';
+  lastReportFinal = '';
+  var editArea = document.getElementById('report-edit-area'); if (editArea) editArea.style.display = 'none';
+  var promoBtn = document.getElementById('report-promote-btn'); if (promoBtn) promoBtn.style.display = 'none';
+  var noteEl = document.getElementById('report-feedback-note'); if (noteEl) noteEl.textContent = '';
   try {
     var text = await callReportDraft(userText, reportType, function(partial){
       lastReportDraftText = partial;
@@ -4964,15 +4990,75 @@ function exportReportDraftDoc() {
   setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
 }
 
-// (v2 준비) 피드백 기록 — report_feedback
+// 👍/👎 — 약한 신호. 임계 도달 시 자동 재증류에 반영됨
 async function submitReportFeedback(rating) {
-  if (!lastReportDraftText) return;
-  if (!sb) return;
+  if (!lastReportDraftText || !sb) return;
   await sb.from('report_feedback').insert({
     request: lastReportDraftReq, draft: lastReportDraftText, rating: rating
   });
   var fb = document.getElementById('report-feedback-note');
-  if (fb) { fb.textContent = rating > 0 ? '👍 피드백 저장됨 — 감사합니다.' : '👎 피드백 저장됨 — 다음 초안 개선에 참고합니다.'; }
+  if (fb) { fb.textContent = rating > 0 ? '👍 피드백 저장됨 — 감사합니다.' : '👎 피드백 저장됨 — 다음 초안 개선에 반영합니다.'; }
+  // 부정 평가 등이 임계(+2건) 넘으면 자동 재학습
+  try {
+    var rules = await distillReportStyle(false);
+    var box = document.getElementById('report-style-rules-box');
+    if (box && rules && box.style.display === 'block') box.textContent = rules;
+  } catch(e) { /* 자동 학습 실패는 조용히 무시 */ }
+}
+
+// ── v3 빨간펜 학습: 초안을 고쳐 "최종본 채택" → 초안↔최종본 차이를 학습 ──
+function startEditDraft() {
+  if (!lastReportDraftText) { alert('먼저 초안을 생성하세요.'); return; }
+  var area = document.getElementById('report-edit-area');
+  var ta = document.getElementById('report-final-input');
+  if (ta) ta.value = lastReportDraftText;   // 초안 원문(마크다운 평문)을 그대로 편집
+  if (area) area.style.display = 'block';
+  var promo = document.getElementById('report-promote-btn'); if (promo) promo.style.display = 'none';
+  if (ta) { ta.focus(); ta.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
+}
+
+function cancelEditDraft() {
+  var area = document.getElementById('report-edit-area');
+  if (area) area.style.display = 'none';
+}
+
+async function saveReportFinal() {
+  if (!sb) { alert('Supabase 연결이 필요합니다.'); return; }
+  var ta = document.getElementById('report-final-input');
+  var finalText = (ta && ta.value || '').trim();
+  if (finalText.replace(/\s/g,'').length < 30) { alert('최종본 내용이 너무 짧습니다.'); return; }
+  lastReportFinal = finalText;
+  var btn = document.getElementById('report-final-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '저장 중...'; }
+  await sb.from('report_feedback').insert({
+    request: lastReportDraftReq, draft: lastReportDraftText, final: finalText, rating: 1
+  });
+  var note = document.getElementById('report-feedback-note');
+  if (note) note.textContent = '✅ 최종본 저장됨 — 초안과의 차이를 학습합니다.';
+  // 자동 재증류(임계 도달 시) + 스타일 박스 갱신
+  try {
+    var rules = await distillReportStyle(false);
+    var box = document.getElementById('report-style-rules-box');
+    if (box && rules) { box.style.display = 'block'; box.textContent = rules; }
+  } catch(e) { console.warn('재학습 실패:', e); }
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> 최종본 채택'; }
+  cancelEditDraft();
+  var promo = document.getElementById('report-promote-btn'); if (promo) promo.style.display = 'inline-flex';
+}
+
+// 채택한 최종본을 예시 보고서(report_samples)로 승격 (선택)
+async function promoteFinalToSample() {
+  if (!lastReportFinal) { alert('먼저 최종본을 채택하세요.'); return; }
+  var title = (lastReportDraftReq || '채택 보고서').replace(/\s+/g,' ').trim().slice(0,40);
+  var type = ((document.getElementById('report-gen-type') || {}).value) || '';
+  if (type === '전체') type = '';
+  var ok = await addReportSample(title, type, lastReportFinal, '');
+  if (ok) {
+    var note = document.getElementById('report-feedback-note');
+    if (note) note.textContent = '📌 예시 보고서로 추가됨 — PC에서 backfill_report_embeddings.py 실행 시 의미검색에 반영됩니다.';
+    try { await distillReportStyle(false); } catch(e) {}
+    var promo = document.getElementById('report-promote-btn'); if (promo) promo.style.display = 'none';
+  }
 }
 
 // ════════════════════════════════════════════
