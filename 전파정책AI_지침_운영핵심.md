@@ -1,0 +1,256 @@
+# 전파정책 AI 프로젝트 — Claude Project 지침 (운영 핵심)
+
+## 지침 관리 규칙
+
+- **지침 변경 시 변경분 요약이 아니라, 변경이 반영된 전체 지침 텍스트를 제공할 것** (사용자가 그대로 복사해 Project 설정에 붙여넣을 수 있도록).
+- **이 프로젝트는 문서를 둘로 운용한다:**
+  - ① **이 지침** = 운영 핵심 (시스템 구조·DB 스키마·"하지 말아야 할 것" 가드레일 + 각 규칙의 한 줄 이유·작업 패턴). 매 작업마다 항상 적용.
+  - ② **배경·역사 지식 문서** = `전파정책AI_배경역사.md` (repo 폴더 보관, Cowork에서 직접 참조). 각 결정의 상세 배경·과거 사고 경위·날짜·커밋 해시 등 긴 서술.
+- **지침을 업데이트할 때는 반드시 `전파정책AI_배경역사.md`도 함께 갱신하고, 두 문서의 전체 텍스트를 모두 제공할 것.**
+  - 새 규칙/가드레일 → 지침엔 "규칙 + 한 줄 이유", 배경역사 문서엔 상세 경위.
+  - 지침의 한 줄 이유와 배경역사 문서의 상세 설명이 같은 사건을 가리키도록 어긋남 없이 유지.
+
+## 프로젝트 개요
+
+SKT Comm센터 기술정책팀의 전파·통신 정책 모니터링 자동화 시스템.
+- 대시보드: https://youjinwoong.github.io/radio-policy-ai/
+- GitHub: https://github.com/youjinwoong/radio-policy-ai
+- 담당자: 유진웅 (you.jinwoong@gmail.com)
+
+## 로컬 파일 위치
+
+```
+C:\Users\SKTelecom\Desktop\frequence\radio-policy-ai\
+├── crawler.py                  # 메인 크롤러(GitHub Actions 매시간) — 네이버 검색 OpenAPI(키 없으면 Google RSS 폴백), Haiku 긴급도 분류(피드백 학습), fetch_article_body 본문 수집
+├── morning_briefing.py         # 모닝 브리핑 생성·발송(06:00 KST) — 🔴=DB 긴급도, SKT 영향 분석, 신규 입법예고 📢 섹션
+├── refetch_content.py          # 본문 재수집·요약·15일 초과 정리(Windows 스케줄러, 한국 IP)
+├── gov_notice_crawler.py       # 정부 고시(RRA·MSIT·KCC)→news_feed + 입법예고(opinion.lawmaking.go.kr)→law_amendments(lsAnc) (17:00, 한국 IP)
+├── law_crawler.py              # 법제처 DRF API 법령·고시 모니터링(11:00 KST). 엔드포인트 www.law.go.kr/DRF/lawSearch.do, OC=radiopolicyai
+├── assembly_crawler.py         # 국회 법안 모니터링(열린국회정보 API, 22대)
+├── upload_law_pdf.py           # PDF/MD/PPTX→document_chunks RAG 업로드(조문 헤더 청킹)
+├── backfill_embeddings.py      # Voyage 임베딩 백필(document_chunks NULL만)
+├── backfill_report_embeddings.py # 보고서 샘플 임베딩 백필(report_samples NULL만) — 신규 보고서 등록·채택본 승격 후 실행
+├── resend_briefing.py / send_briefing.py  # 브리핑 재발송·발송 단독
+├── health_watchdog.py          # 외부 헬스 워치독(GitHub Actions, Supabase 독립)
+├── system_prompt.js            # 대시보드 AI 자문 시스템 프롬프트(위임 관계 검증·핵심 조문 참조)
+├── index.html / app.js         # 대시보드 프론트엔드(GitHub Pages). AI 자문·보고서 초안 모두 SSE 스트리밍(stream:true) — 비스트리밍 복귀 금지
+├── run_gov_crawler.bat / run_briefing_backup.bat / setup_*.ps1  # 배치·스케줄러 등록
+└── .github/workflows/          # daily_crawl·morning_briefing·law_crawl·assembly_crawl·backfill·cleanup·health_watchdog
+```
+
+## Supabase DB
+
+- **Project ID**: zwkjedumfuhodckmtxxn / **URL**: https://zwkjedumfuhodckmtxxn.supabase.co / **Region**: ap-northeast-1(도쿄)
+
+### 주요 테이블
+
+| 테이블 | 설명 |
+|---|---|
+| news_feed | 뉴스 본문·요약·긴급도(15일 유지). locked=true면 자동삭제 제외+AI 자문 상시 참조. 내부값 긴급/보통/참고 |
+| deleted_news | 삭제 기사 url·title 블록리스트(재수집 방지). 영구 |
+| importance_feedback | 긴급도 수동 수정 내역(news_id당 1행). 분류 학습 데이터. 영구 |
+| feedback_rules | 피드백 증류 규칙 캐시(단일 행 id=1). 20건↑ 증류, 10건마다 재증류 |
+| daily_briefings | 일일 브리핑 원문("⚠️ SKT 영향 분석:" 포함). 긴급도 수정 시 🔴 자동 동기화 |
+| law_amendments | 법령·고시·입법예고. law_type: law/bylaw/rules/admrul/lsAnc. lsAnc는 law_id=`lsAnc_op_{md5}` |
+| assembly_bills | 국회 법안. bill_id(UNIQUE)·법안명·단계·소관위·제안일·링크 |
+| document_chunks | 법령·고시·보도자료 RAG 청크. embedding(vector 1024, HNSW), article_no=조항번호+제목. file_path=업로드 원본 Storage 경로 |
+| custom_knowledge | 팀 추가 지식(수동 입력). AI 자문 키워드 매칭 참조 |
+| chat_logs | AI 자문 이력. 삭제 가능 |
+| report_samples | 보고서 초안 제안 — 내 보고서 전문(형식·톤 학습용, 청킹 안 함). embedding(vector 1024, HNSW). report_type=정책검토/규제영향/동향보고/기타 |
+| report_style_rules | 보고서 스타일 가이드 캐시(단일 행 id=1). sample_count·feedback_count로 자동 재증류 임계(+2) 추적 |
+| report_feedback | 보고서 피드백 — request·draft·final(채택·교정본)·rating(1/-1). 편집-diff 학습 데이터. 영구 |
+| report_directives | "항상 적용" 영구 지시 — 모든 초안 시스템 프롬프트에 최우선 주입. 관리 탭에서 삭제 가능 |
+
+### Edge Function · RPC
+
+| 이름 | 역할 |
+|---|---|
+| voyage-embed (Edge) | 질의 임베딩(voyage-4-lite). VOYAGE_API_KEY는 Supabase Secrets(브라우저 노출 금지) |
+| list_kb_documents (RPC) | 지식 베이스 문서 목록(doc_name 그룹핑) |
+| search_chunks_trgm / match_chunks_semantic (RPC) | trgm / pgvector 시맨틱 검색 |
+| match_report_samples (RPC) | 보고서 샘플 시맨틱 검색(코사인). filter_type으로 유형 한정 |
+
+### Storage
+
+- **uploads (private)**: 추가지식·보고서 원본 보관. anon insert/select/delete. 다운로드는 createSignedUrl(60초). public화 금지.
+
+### RLS
+
+- document_chunks·report_samples·report_style_rules·report_feedback·report_directives: RLS 활성 + anon select/insert/update/delete 정책. custom_knowledge·feedback_rules·news_feed: RLS 비활성.
+
+### pg_cron 스케줄 잡 (DB 내부 스케줄러, UTC 기준 / KST=UTC+9). `select * from cron.job`로 조회.
+
+| jobid | jobname | UTC | KST | 역할 |
+|---|---|---|---|---|
+| 1 | briefing-health-check | `0 1 * * *` | 10:00 | 브리핑 상태 점검(경고 전용) |
+| 2 | news-feed-cleanup | `0 15 * * *` | 00:00 | 뉴스 정리 |
+| 9 | crawl-trigger-hourly | `47 * * * *` | 매시 :47 | 뉴스 크롤러 트리거(주 트리거) → daily_crawl.yml dispatch |
+| 10 | assembly-crawl-trigger | `30 1 * * *` | 10:30 | 국회 크롤러 백업 트리거 |
+| 11 | law-crawl-trigger | `30 2 * * *` | 11:30 | 법령·입법예고 크롤러 백업 트리거 |
+| 8 | briefing-trigger-0605 | `5 21 * * *` | 06:05 | 모닝 브리핑 자동 트리거(없으면 dispatch) |
+| 7 | briefing-trigger-0620 | `20 21 * * *` | 06:20 | 위 백업 재시도 |
+| 12 | news-health-check | `0 12 * * *` | 21:00 | 무음 실패 알람(내부) check_news_health() |
+| 13 | watchdog-trigger | `35 12 * * *` | 21:35 | 외부 워치독 백업 dispatch |
+
+- 공용 디스패치 함수 `dispatch_github_workflow(p_workflow)` + `trigger_briefing_if_missing()`. 인증: GitHub PAT을 Supabase Vault `github_pat`에 저장. 텔레그램 토큰은 Vault `telegram_bot_token`.
+- ⚠️ PAT 만료/회수 시 모든 트리거가 조용히 멈춤 → Vault `github_pat` 갱신. (설계 배경·드롭 경위는 배경역사 문서 참조)
+
+## 보고서 초안 제안 (자문 메뉴)
+
+내 보고서 **형식·톤** + 법령·자료(RAG) **내용 근거**로 보고서 초안 생성. 핵심: 내용은 RAG에서, 형식·톤은 내 보고서에서.
+
+- 메뉴: [자문] › 보고서 초안 제안 (탭2 — 초안 생성 / 내 보고서 관리)
+- 생성: claude-sonnet-4-6, stream:true, web_search 3회 (callReportDraft). 증류: claude-haiku-4-5 (distillReportStyle).
+- **개인화 학습 채널 3종** (쓸수록 내 톤 수렴):
+  1. **말로 지시(onReviseDraft)** — `이번만`(다회 대화식 즉석 수정, 기억 안 함) / `항상 적용`(report_directives 영구 저장→모든 초안 최우선 주입, 관리 탭에서 삭제)
+  2. **빨간펜(편집-diff)** — "고쳐서 최종본 채택"(saveReportFinal→report_feedback.final). 초안↔최종본 차이를 증류에 "반드시 반영". 채택본은 "예시 보고서로 추가"로 승격(선택)
+  3. **👍/👎(submitReportFeedback)** — 약한 신호. 👎는 "피하라" 패턴으로 증류 반영
+- **자동 재증류**: sample_count·feedback_count로 추적, 임계(샘플+2 또는 피드백+2) 도달 시 자동. 수동은 "스타일 재학습" 버튼. 구조 학습엔 샘플 2편 이상 필요.
+- **파일 등록**: drag&drop / 클릭 (PDF·docx·pptx·md·txt, 브라우저 파서). **임베딩**: 등록·승격 후 PC에서 `python backfill_report_embeddings.py`(NULL만). 그 전엔 유형/최신순 폴백("임베딩 대기").
+- **내보내기**: exportReportDraftDoc(마크다운→HTML→.doc).
+- 보안: 원문은 Supabase(private)에만. 생성 시 예시·스타일·지시가 Anthropic API로 전송됨(학습엔 미사용). 민감 수치는 마스킹·형식 위주 등록 권장.
+
+## RAG 3중 하이브리드 검색
+
+```
+질문 → ① expandQueryKeywords(Haiku 용어 확장) → ② 키워드 ilike + search_chunks_trgm
+     → ③ voyage-embed → match_chunks_semantic → 하이브리드 랭킹 → 상위 청크 투입
+응답: callClaude가 stream:true(SSE)로 토큰 실시간 수신 (비스트리밍 시 ~120초 idle 끊김 "Failed to fetch")
+인용: buildRagContext()가 조항(번호+제목)·고시번호·시행일 표시. article_no에 조문 제목 포함.
+임베딩 백필: 신규 업로드 후 PC에서 python backfill_embeddings.py (NULL만). 그 전엔 "임베딩 대기" 배지.
+```
+
+## 대시보드 (GitHub Pages)
+
+- URL: https://youjinwoong.github.io/radio-policy-ai/
+- **수정 배포 시 index.html 캐시 버스터 `app.js?v=` 갱신 필수 (현재 `app.js?v=20260617h`)**
+- 아이콘은 Tabler Icons webfont(ti ti-*) — 존재하는 이름만(없으면 빈칸 렌더).
+- 메뉴: [모니터링] 보도자료·뉴스 / Daily Briefing / 기술 용어 · [자문] AI 자문 / 보고서 초안 제안 · [법안 동향] 국회 법안 / 행정부 입법예고·법령 개정 / 법령 DIFF 분석 · [지식 베이스] 국내 법령·고시 / ITU-R / 정부 보도자료 / 추가 지식 입력 / 설정
+- 뉴스 중요도: 화면 라벨 "🔴 중요/🟡 보통/🟢 참고", 내부값·DB·코드는 '긴급/보통/참고'. 수정 시 news_feed 갱신+importance_feedback 기록+당일 브리핑 🔴 동기화. 잠금=15일 삭제 제외, 삭제=영구+deleted_news 기록.
+
+## 알림 채널
+
+```
+매일 06:00 KST     | 텔레그램(분석 제외)·이메일(분석 포함) | you.jinwoong@gmail.com / TG 344506450
+긴급 기사 즉시     | 텔레그램·이메일
+신규 입법예고 즉시 | 텔레그램(건별)·이메일(Resend 묶음)  (gov_notice_crawler 17:00)
+법령·고시 신규/개정| 텔레그램  (첫 실행 베이스라인은 생략)
+국회 법안 단계변경 | 텔레그램
+```
+
+## 표준 작업 패턴
+
+```bash
+# 본문 수집 의존성(PC 최초 1회): pip install trafilatura
+
+# 코드 수정 후 배포 (캐시 버스터 갱신 필수). git add는 항상 파일명 지정 (-A/. 금지)
+git add [파일명] && git commit -m "설명" && git push origin main
+# 원격 검증: git show HEAD:index.html | findstr "app.js?v="
+
+# Cowork 샌드박스 마운트가 stale/절단될 수 있음(파일별 제각각) → 샌드박스에서 커밋 금지.
+#   파일은 Edit/Write로 실제 디스크 반영됨(Read로 확인). 변경 함수는 outputs에 떼어 node --check로 문법 검증.
+#   커밋·푸시는 PC 터미널에서. 여러 세션이 같은 repo 동시 커밋 금지(stale 되돌림 위험).
+
+# 크롤러 수동 실행
+python crawler.py            # 뉴스("[네이버 뉴스] N건 수집" N>0 확인). NAVER_CLIENT_ID/SECRET 필요
+python law_crawler.py        # 법령·고시(LAW_OC_KEY)
+python assembly_crawler.py   # 국회 법안(ASSEMBLY_API_KEY)
+python gov_notice_crawler.py # 정부 고시·입법예고(한국 IP). "[입법예고] N페이지:M행 스캔, 누적 매칭 K건"
+python refetch_content.py    # 본문 재수집(한국 IP, trafilatura)
+python resend_briefing.py [날짜]              # 브리핑 재발송
+python upload_law_pdf.py 파일 "문서명" 고시    # 법령/고시/ITU-R 업로드
+python backfill_embeddings.py                 # 임베딩 백필(document_chunks)
+python backfill_report_embeddings.py          # 보고서 샘플 임베딩 백필(report_samples)
+```
+
+## 점검 체크리스트 (요약 — 상세 경위는 배경역사 문서)
+
+- **브리핑 미수신**: Actions(morning_briefing.yml) 확인→실패 시 "Run workflow" / 성공인데 미수신→`resend_briefing.py` / 09:40 후도 미수신→`briefing_backup_log.txt`.
+- **뉴스 미축적**: daily_crawl.yml 로그 "[네이버 뉴스] N건". N=0→NAVER 키 누락·만료(폴백만 돔) / N>0인데 신규0→cron 드롭, "Run workflow".
+- **입법예고 미수집**: DB law_type='lsAnc' 건수·MAX(created_at) 확인. `gov_notice_crawler.py` 로그. PC 의존(17:00).
+- **AI 자문 "Failed to fetch"**: 무거운 질문 2분+ idle 끊김 → stream:true로 해결됨. 사내망 프록시·확장프로그램·F12 네트워크 확인.
+- **보고서 초안 미생성·학습**: Claude 키 / report_samples 2편↑·"스타일 재학습" / embedding NULL→`backfill_report_embeddings.py` / report_directives 행 / 임계 +2건.
+
+## 하지 말아야 할 것 (규칙 + 한 줄 이유 / 상세는 배경역사 문서)
+
+- **API 키 하드코딩 금지(공개 repo)** — .env·GitHub/Supabase Secrets에만. (Voyage 키 유출 사례)
+- **gov_notice_crawler.py를 GitHub Actions로 옮기지 말 것** — 정부 사이트 해외 IP 차단·입법예고 한국 IP 필요.
+- **입법예고 수집을 lsNm(제명) 키워드 검색으로 되돌리지 말 것** — 관련 예고 통째 누락. 전체목록 스캔+소관부처 보강이 정답.
+- **입법예고 매칭의 "○○부 소관" 접두사 제거를 빼지 말 것** — 부처명 '정보통신' 글자 오탐 차단.
+- **입법예고 요약 생성(backfill_opinion_summaries)·브리핑 summary 표시 제거 금지** — lsAnc는 gov_notice_crawler가 요약 단독 담당.
+- **Daily Briefing "오늘" 배지를 UTC로 되돌리지 말 것** — KST 자정~09시 오판. KST(+9h) 유지.
+- **parseBriefingContent 마크다운 처리·📢 블록 스타일링·🔗 링크화 제거 금지** — 기호 노출·링크 미클릭 문제 해결책.
+- **crawl_naver_news를 HTML 스크래핑으로 되돌리지 말 것** — 0건 회귀(에러 없이) 사고. 공식 OpenAPI가 정답.
+- **Supabase 신규 프로젝트 생성 제안 금지** — 무료 슬롯 2개 모두 사용 중.
+- **Sonnet으로 긴급도 분류 업그레이드 제안 금지** — Haiku+피드백 학습으로 충분.
+- **Cowork 예약 태스크로 크롤러 재등록 금지** — 중복 실행.
+- **news_feed 수동 정리 시 `AND locked=false` 필수.**
+- **deleted_news·importance_feedback·feedback_rules 비우지 말 것** — 재수집 방지·학습용 영구.
+- **report_samples·report_feedback·report_directives·report_style_rules 비우지 말 것** — 보고서 형식·개인화 학습 데이터(비우면 초기화).
+- **보고서 개인화 채널(말로 지시·빨간펜·👍/👎·자동 재증류)을 단일 채널로 축소 금지** — "쓸수록 내 톤" 핵심.
+- **callReportDraft·callClaude를 비스트리밍으로 되돌리지 말 것** — 2분+ 응답 idle 끊김 "Failed to fetch". stream:true 유지.
+- **보고서 등록을 청킹하지 말 것** — 형식 학습용이라 전문 통째 보관(법령은 청킹, 보고서는 반대).
+- **브리핑 Haiku에 긴급(🔴) 판정 재위임 금지** — 🔴는 news_feed 긴급도 단일 기준.
+- **영향도 분석이 긴급도를 덮어쓰게 하지 말 것** — 담당자 수정 되돌리던 버그 원인.
+- **같은 법령·고시 구버전을 지식 베이스에 남기지 말 것** — 구버전 조문 인용 위험.
+- **여러 세션이 같은 repo 동시 커밋 금지** — stale 마운트로 작업 되돌림 사고(f37fd0b).
+- **pg_cron 트리거 잡·`dispatch_github_workflow`·`trigger_briefing_if_missing`·Vault `github_pat` 삭제 금지** — GitHub cron 드롭 보완 핵심(Supabase가 주 트리거).
+- **같은 문서를 다른 카테고리로 중복 업로드 금지** — 청크 중복→검색 노이즈.
+- **fetch_article_body의 rra.go.kr trafilatura 우선 분기 제거 금지** — 'article' 셀렉터 네비 오탐.
+- **DH_KEY_TOO_SMALL 자동 재시도(_http_get)를 rra.go.kr 전용으로 되돌리지 말 것** — 도메인 무관 우회.
+- **law_crawler 엔드포인트를 open.law.go.kr/LSO/...로 되돌리지 말 것** — 정식은 www.law.go.kr/DRF/lawSearch.do.
+- **법령/국회 키워드에 '혼신' 재추가 금지** — '이혼신고' 오탐. '전파간섭'으로 유지.
+- **daily_crawl.yml 스케줄을 예전 다중 슬롯으로 되돌리지 말 것** — `17 * * * *`(백업)+Supabase :47(주 트리거)로 단순화.
+- **GitHub 크롤 백업 슬롯(:17)을 정시·15분 단위로 옮기지 말 것** — 혼잡대 드롭↑.
+- **모닝 브리핑 cron을 23~00 UTC(08~09 KST)로 되돌리지 말 것** — 최혼잡 드롭. 21 UTC대(06시 KST) 유지.
+- **추가 지식 "파일 업로드"를 custom_knowledge로 보내지 말 것** — 파일은 document_chunks(추가지식)로.
+- **추가 지식 "저장된 목록" 파일 병합 표시(loadCustomFileList) 제거 금지.**
+- **추가지식 원본 Storage 보관·file_path 기록 제거 금지** — 다운로드 근거.
+- **uploads 버킷 public 전환 금지** — private+createSignedUrl.
+- **대시보드 업로드 모달 DOCX·드래그앤드롭·전포맷 분기 제거 금지** — 공용.
+
+## 알려진 제약사항
+
+1. 이메일 수신: Resend 도메인 미인증 → you.jinwoong@gmail.com만.
+2. 본문 수집: PC 꺼지면 RSS 요약만 → refetch_content.py 보완. trafilatura 로컬 필수(`pip install trafilatura`).
+3. Supabase 슬롯 2개 모두 사용 중. Wine Cellar 7일 미접속 시 정지 위험.
+4. 스포츠 기사 오탐: EXCLUDE_KEYWORDS+피드백 관리.
+5. 신규 업로드 문서·보고서: backfill 전까지 시맨틱 미적용("임베딩 대기"). 보고서는 backfill_report_embeddings.py(PC 의존).
+6. 15일 초과 삭제·입법예고 수집은 PC 의존(로컬 스케줄러).
+7. 무선국 자기적합확인(전파법 제24조②, 2026.10.22 시행): 시행령 위임 미반영 — 개정 공포 시 PDF 업로드.
+8. 일부 고시는 시행 전 개정본만 보유(적합성평가 2025-56호 등).
+9. ITU-R 탭은 정적 목록.
+10. 일부 사이트 SSL/봇 차단으로 본문 수집 불가(403·SSLV3·CERTIFICATE) — 정상 baseline.
+11. GitHub cron 드롭·지연(best-effort) — Supabase pg_cron이 주 트리거, 그래도 누락 시 "Run workflow"·PC 보완.
+12. 대시보드 업로드는 텍스트 기반 PDF만(스캔본 불가).
+13. AI 자문·보고서 초안 무거운 질문은 2분+ 소요(스트리밍이라 정상).
+
+## 외부 서비스·키
+
+| 항목 | 용도 | 비고 |
+|---|---|---|
+| GitHub Actions+Pages | 자동화+호스팅 | 무료 |
+| Supabase | DB+Edge(voyage-embed)+Storage | 무료 500MB×2, Storage 1GB |
+| Voyage AI | 임베딩(voyage-4-lite, 1024) | 무료 2억 토큰 |
+| Anthropic API | AI 자문·보고서 초안(sonnet stream)+긴급도/요약/스타일증류(Haiku) | 키는 app_config(claude_key) |
+| Resend | 이메일 | 100/일 |
+| Telegram Bot | 알림 | 무제한 |
+| trafilatura(pip) | 본문 추출 | 로컬 설치 |
+| pdf.js·mammoth·JSZip(CDN) | 브라우저 파일 파싱 | 보고서 등록·지식 업로드 공용 |
+| 법제처 DRF | 법령·고시 | LAW_OC_KEY=radiopolicyai |
+| opinion.lawmaking.go.kr | 입법예고 | 로컬 수집, 키 불필요 |
+| 열린국회정보 API | 국회 법안 | ASSEMBLY_API_KEY |
+| 네이버 검색 OpenAPI | 뉴스 1순위 | NAVER_CLIENT_ID·SECRET, 일 25,000회 |
+
+### GitHub Secrets
+```
+SUPABASE_URL, SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY,
+EMAIL_FROM, EMAIL_PASSWORD, EMAIL_TO, RESEND_API_KEY,
+TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LAW_OC_KEY(=radiopolicyai),
+ASSEMBLY_API_KEY, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET
+※ 로컬은 동일 키를 .env에(.gitignore 등록). backfill_report_embeddings.py는 SUPABASE_URL·SERVICE_KEY·VOYAGE_API_KEY만.
+```
+
+---
+
+※ 이 지침은 운영 핵심만 담는다. 각 결정의 상세 배경·과거 사고 경위·날짜·커밋 해시는 `전파정책AI_배경역사.md` 참조.
