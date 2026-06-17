@@ -28,6 +28,7 @@
     <div class="nav-group">
       <div class="nav-label">자문</div>
       <div class="nav-item" onclick="go('chat',this)"><i class="ti ti-message-circle"></i>AI 자문</div>
+      <div class="nav-item" onclick="go('reportdraft',this)"><i class="ti ti-file-text"></i>보고서 초안 제안</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">법안 동향 모니터링</div>
@@ -112,6 +113,100 @@
           </div>
         </div>
       </div>
+
+      <!-- 보고서 초안 제안 -->
+      <div class="panel" id="panel-reportdraft">
+        <div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:0.5px solid var(--border-light);padding-bottom:10px">
+          <button id="rtab-gen" class="btn btn-primary active" onclick="switchReportTab('gen')" style="font-size:12px"><i class="ti ti-sparkles"></i> 초안 생성</button>
+          <button id="rtab-manage" class="btn" onclick="switchReportTab('manage')" style="font-size:12px"><i class="ti ti-folder"></i> 내 보고서 관리</button>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-tertiary);align-self:center">내용은 법령·자료(RAG)에서, 형식·톤은 내 보고서에서</span>
+        </div>
+
+        <!-- 초안 생성 탭 -->
+        <div id="report-tab-gen">
+          <div style="display:flex;flex-direction:column;gap:10px;max-width:760px">
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">어떤 보고서를 만들까요? <span style="color:#dc2626">*</span></div>
+              <textarea id="report-req-input" rows="3" placeholder="예: 주파수 재할당 관련 정책검토 보고서 초안 만들어줘"
+                style="width:100%;box-sizing:border-box;padding:10px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none;resize:vertical;line-height:1.6"></textarea>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+              <div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">참고할 보고서 유형</div>
+                <select id="report-gen-type" style="padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none">
+                  <option value="전체">전체</option>
+                  <option value="정책검토">정책검토</option>
+                  <option value="규제영향">규제영향</option>
+                  <option value="동향보고">동향보고</option>
+                  <option value="기타">기타</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" id="report-gen-btn" onclick="onGenerateDraft()" style="min-width:120px"><i class="ti ti-sparkles"></i> 초안 생성</button>
+            </div>
+            <div id="report-draft-output" style="margin-top:8px;padding:16px;border:0.5px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-secondary);font-size:13px;line-height:1.7;color:var(--text-primary);min-height:80px">
+              <div style="color:var(--text-tertiary);font-size:12px">요청을 입력하고 [초안 생성]을 누르면, 등록된 내 보고서 형식과 법령·자료 근거를 합쳐 초안을 작성합니다.</div>
+            </div>
+            <div id="report-draft-actions" style="display:none;gap:8px;align-items:center">
+              <button class="btn" onclick="exportReportDraftDoc()" style="font-size:12px"><i class="ti ti-file-download"></i> DOCX로 내보내기</button>
+              <button class="btn" onclick="submitReportFeedback(1)" style="font-size:12px">👍</button>
+              <button class="btn" onclick="submitReportFeedback(-1)" style="font-size:12px">👎</button>
+              <span id="report-feedback-note" style="font-size:11px;color:var(--text-muted)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 내 보고서 관리 탭 -->
+        <div id="report-tab-manage" style="display:none">
+          <div style="display:flex;flex-direction:column;gap:12px;max-width:720px">
+            <div style="font-size:12px;color:var(--text-secondary);line-height:1.6">
+              내 기존 보고서를 등록하면 그 <b>구조·톤·표현</b>을 학습해 초안에 반영합니다. (전문 그대로 보관 — 형식 학습용)
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">제목 <span style="color:#dc2626">*</span></div>
+              <input id="report-sample-title" type="text" placeholder="예: 3.5GHz 재할당 정책검토 보고서"
+                style="width:100%;box-sizing:border-box;padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none"/>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">유형</div>
+                <select id="report-sample-type" style="padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none">
+                  <option value="정책검토">정책검토</option>
+                  <option value="규제영향">규제영향</option>
+                  <option value="동향보고">동향보고</option>
+                  <option value="기타">기타</option>
+                </select>
+              </div>
+              <div style="flex:1;min-width:220px">
+                <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">파일에서 불러오기 <span style="color:var(--text-tertiary)">(PDF·Word·PPTX·MD·TXT)</span></div>
+                <input id="report-file-input" type="file" accept=".pdf,.docx,.pptx,.md,.txt" onchange="onReportFileSelect(this)"
+                  style="font-size:12px;color:var(--text-secondary)"/>
+                <span id="report-file-label" style="font-size:11px;color:var(--text-muted);margin-left:6px"></span>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">보고서 본문 <span style="color:#dc2626">*</span> <span style="color:var(--text-tertiary)">(파일에서 불러오거나 직접 붙여넣기)</span></div>
+              <textarea id="report-sample-content" rows="8" placeholder="보고서 전문을 붙여넣으세요. 형식·흐름 학습에 사용됩니다."
+                style="width:100%;box-sizing:border-box;padding:10px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none;resize:vertical;line-height:1.6"></textarea>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">한 줄 요약 <span style="color:var(--text-tertiary)">(선택 · 검색 보조)</span></div>
+              <input id="report-sample-summary" type="text" placeholder="예: 3.5GHz 재할당 대가·조건 검토"
+                style="width:100%;box-sizing:border-box;padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none"/>
+            </div>
+            <div style="display:flex;justify-content:flex-end">
+              <button class="btn btn-primary" id="report-save-btn" onclick="onSaveReportSample()" style="min-width:120px"><i class="ti ti-device-floppy"></i> 보고서 등록</button>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding-top:10px;border-top:0.5px solid var(--border-light)">
+              <span style="font-size:12px;font-weight:600;color:var(--text-primary)">등록된 보고서</span>
+              <span id="report-style-status" style="font-size:11px;color:var(--text-muted)"></span>
+              <button class="btn" id="report-relearn-btn" onclick="onRelearnStyle()" style="margin-left:auto;font-size:11px"><i class="ti ti-refresh"></i> 스타일 재학습</button>
+            </div>
+            <div id="report-style-rules-box" style="display:none;white-space:pre-wrap;font-size:11px;color:var(--text-secondary);background:var(--bg-tertiary,#f6f7f9);border:0.5px solid var(--border-light);border-radius:var(--radius-md);padding:10px;line-height:1.6"></div>
+            <div id="report-sample-list"></div>
+          </div>
+        </div>
+      </div><!-- panel-reportdraft -->
 
       <!-- 법령 DIFF 분석 -->
       <div class="panel" id="panel-diff">
@@ -728,6 +823,6 @@
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260617d"></script>
+<script src="app.js?v=20260617e"></script>
 </body>
 </html>

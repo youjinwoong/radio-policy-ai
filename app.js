@@ -3360,15 +3360,16 @@ function go(page, navEl, sourceType) {
 
   // 상단 바 제목 업데이트
   var newsTitle = currentNewsSourceType === 'gov' ? '정부 보도자료·공지사항' : (currentNewsSourceType === 'media' ? '뉴스' : '보도자료·뉴스');
-  var titles = {home:'대시보드', chat:'AI 자문', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:newsTitle, briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정'};
+  var titles = {home:'대시보드', chat:'AI 자문', reportdraft:'보고서 초안 제안', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:newsTitle, briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-more', chat:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', diff:'bn-monitor', settings:'bn-more'};
+  var pageTobn = {home:'bn-more', chat:'bn-chat', reportdraft:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', diff:'bn-monitor', settings:'bn-more'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
+  if (page === 'reportdraft') loadReportSamples();
   if (page === 'briefing') loadBriefing();
   if (page === 'settings') loadSettingsUI();
   if (page === 'press') loadPressFromSupabase();
@@ -4603,6 +4604,375 @@ function renderLawTrack(items) {
     + filtered.length + '건 표시 (전체 ' + items.length + '건)</div>';
 
   listEl.innerHTML = html;
+}
+
+// ════════════════════════════════════════════
+//  보고서 초안 제안 — 내 보고서(형식·톤) + RAG(내용) 결합
+//  데이터: report_samples / report_style_rules / report_feedback (Supabase)
+//  재사용: searchKeywords·buildRagContext·getQueryEmbedding·파서·callClaude SSE 패턴
+// ════════════════════════════════════════════
+var lastReportDraftText = '';
+var lastReportDraftReq = '';
+var lastReportDraftSources = [];
+var _reportPickedFile = null;   // 등록 화면에서 선택한 파일(텍스트 추출 전)
+
+// 탭 전환 (초안 생성 / 내 보고서 관리)
+function switchReportTab(tab) {
+  var genT = document.getElementById('report-tab-gen');
+  var mngT = document.getElementById('report-tab-manage');
+  var genB = document.getElementById('rtab-gen');
+  var mngB = document.getElementById('rtab-manage');
+  var isGen = (tab === 'gen');
+  if (genT) genT.style.display = isGen ? 'block' : 'none';
+  if (mngT) mngT.style.display = isGen ? 'none' : 'block';
+  if (genB) { genB.classList.toggle('btn-primary', isGen); genB.classList.toggle('active', isGen); }
+  if (mngB) { mngB.classList.toggle('btn-primary', !isGen); mngB.classList.toggle('active', !isGen); }
+  if (!isGen) loadReportSamples();
+}
+
+// 보고서 샘플 1건 저장 (전문 보관, 청킹 안 함)
+async function addReportSample(title, reportType, content, summary) {
+  if (!sb) { alert('Supabase 연결이 필요합니다.'); return false; }
+  var ins = await sb.from('report_samples').insert({
+    title: title, report_type: reportType || null,
+    content: content, summary: summary || null
+  });
+  if (ins.error) { alert('저장 실패: ' + ins.error.message); return false; }
+  return true;
+}
+
+// 등록 화면: 파일 선택 → 텍스트 추출해 내용란 채움 (기존 파서 재사용)
+async function onReportFileSelect(input) {
+  var files = Array.from(input.files || []);
+  if (files.length === 0) return;
+  var file = files[0];
+  var ext = (file.name.split('.').pop() || '').toLowerCase();
+  var labelEl = document.getElementById('report-file-label');
+  if (labelEl) labelEl.textContent = file.name + ' 추출 중...';
+  try {
+    var text = '';
+    if (ext === 'pdf') text = await _extractPdfText(file);
+    else if (ext === 'md' || ext === 'txt') text = await _extractMdText(file);
+    else if (ext === 'pptx') text = await _extractPptxText(file);
+    else if (ext === 'docx') text = await _extractDocxText(file);
+    else { alert('지원 형식: PDF · Word(docx) · PPTX · MD · TXT'); if (labelEl) labelEl.textContent=''; return; }
+    if (!text || text.replace(/\s/g,'').length < 30) {
+      alert('텍스트를 충분히 추출하지 못했습니다(스캔 PDF·빈 파일일 수 있음). 내용을 직접 붙여넣어 주세요.');
+      if (labelEl) labelEl.textContent = '';
+      return;
+    }
+    var contentEl = document.getElementById('report-sample-content');
+    if (contentEl) contentEl.value = text;
+    var titleEl = document.getElementById('report-sample-title');
+    if (titleEl && !titleEl.value) titleEl.value = file.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ');
+    if (labelEl) labelEl.textContent = file.name + ' · ' + text.length.toLocaleString() + '자 추출됨';
+  } catch(e) {
+    alert('파일 추출 실패: ' + (e.message || e));
+    if (labelEl) labelEl.textContent = '';
+  }
+}
+
+// 등록 버튼
+async function onSaveReportSample() {
+  var title = (document.getElementById('report-sample-title') || {}).value || '';
+  var type = (document.getElementById('report-sample-type') || {}).value || '';
+  var content = (document.getElementById('report-sample-content') || {}).value || '';
+  var summary = (document.getElementById('report-sample-summary') || {}).value || '';
+  title = title.trim(); content = content.trim(); summary = summary.trim();
+  if (!title) { alert('제목을 입력하세요.'); return; }
+  if (content.replace(/\s/g,'').length < 50) { alert('보고서 본문이 너무 짧습니다(형식 학습용 전문 필요).'); return; }
+  var btn = document.getElementById('report-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '저장 중...'; }
+  var ok = await addReportSample(title, type, content, summary);
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> 보고서 등록'; }
+  if (ok) {
+    ['report-sample-title','report-sample-content','report-sample-summary'].forEach(function(id){
+      var el = document.getElementById(id); if (el) el.value='';
+    });
+    var labelEl = document.getElementById('report-file-label'); if (labelEl) labelEl.textContent='';
+    var fi = document.getElementById('report-file-input'); if (fi) fi.value='';
+    alert('✅ 보고서가 등록되었습니다.\n\n의미(시맨틱) 검색을 적용하려면 PC에서 다음을 1회 실행하세요:\n  python backfill_report_embeddings.py\n(실행 전에도 키워드·유형 필터로는 즉시 사용됩니다.)');
+    loadReportSamples();
+  }
+}
+
+async function onDeleteReportSample(id) {
+  if (!confirm('이 보고서 샘플을 삭제할까요?')) return;
+  var del = await sb.from('report_samples').delete().eq('id', id);
+  if (del.error) { alert('삭제 실패: ' + del.error.message); return; }
+  loadReportSamples();
+}
+
+// 등록된 보고서 목록 렌더 (+ 임베딩 대기 배지)
+async function loadReportSamples() {
+  var listEl = document.getElementById('report-sample-list');
+  if (!listEl || !sb) return;
+  listEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary);font-size:12px">불러오는 중...</div>';
+  var rows = (await sb.from('report_samples')
+    .select('id,title,report_type,summary,created_at')
+    .order('created_at', { ascending:false }).limit(100)).data || [];
+  // 임베딩 대기(embedding NULL) id 집합
+  var pend = (await sb.from('report_samples').select('id').is('embedding','null').limit(200)).data || [];
+  var pendSet = new Set(pend.map(function(r){ return r.id; }));
+  // 스타일 학습 상태 갱신
+  refreshStyleStatus(rows.length);
+  if (rows.length === 0) {
+    listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">등록된 보고서가 없습니다. 위에서 내 보고서를 등록하면 그 형식·톤으로 초안을 만들어 줍니다.</div>';
+    return;
+  }
+  listEl.innerHTML = rows.map(function(r) {
+    var pending = pendSet.has(r.id);
+    var badge = pending
+      ? '<span style="font-size:10px;background:#fef3c7;color:#b45309;padding:1px 7px;border-radius:99px">임베딩 대기</span>'
+      : '<span style="font-size:10px;background:#dcfce7;color:#16a34a;padding:1px 7px;border-radius:99px">임베딩 완료</span>';
+    var dt = (r.created_at || '').slice(0,10);
+    return '<div class="card" style="margin-bottom:8px;cursor:default">'
+      + '<div style="display:flex;align-items:flex-start;gap:8px">'
+      + '<div style="flex:1">'
+      + '<div style="font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.4">' + escHtml(r.title) + '</div>'
+      + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:3px">'
+      + (r.report_type ? '<span style="font-size:10px;background:var(--bg-tertiary,#eef);color:var(--text-secondary);padding:1px 7px;border-radius:99px">' + escHtml(r.report_type) + '</span>' : '')
+      + badge
+      + '<span style="font-size:10px;color:var(--text-muted)">' + dt + '</span>'
+      + '</div>'
+      + (r.summary ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:3px;line-height:1.45">' + escHtml(r.summary) + '</div>' : '')
+      + '</div>'
+      + '<button class="btn" style="font-size:11px;padding:3px 8px;flex-shrink:0" onclick="onDeleteReportSample(' + r.id + ')"><i class="ti ti-trash"></i></button>'
+      + '</div></div>';
+  }).join('');
+}
+
+function refreshStyleStatus(count) {
+  var el = document.getElementById('report-style-status');
+  if (!el) return;
+  if (count < 2) {
+    el.textContent = '보고서 2편 이상 등록하면 공통 형식을 학습합니다. (현재 ' + count + '편)';
+  } else {
+    el.textContent = '등록 ' + count + '편 · [스타일 재학습]으로 형식 규칙을 갱신할 수 있습니다.';
+  }
+}
+
+// 스타일 가이드 증류 (Haiku) — feedback_rules 패턴 / 단일 행 캐시
+async function distillReportStyle(force) {
+  if (!sb) return '';
+  var saved = (await sb.from('report_style_rules').select('rules,sample_count').eq('id',1).maybeSingle()).data;
+  var cnt = (await sb.from('report_samples').select('id', { count:'exact', head:true })).count || 0;
+  if (cnt < 2) return (saved && saved.rules) || '';
+  // 마지막 증류 이후 +2편 이상일 때만 재증류 (force=수동 버튼)
+  if (!force && saved && saved.rules && (cnt - (saved.sample_count || 0) < 2)) return saved.rules;
+  var samples = (await sb.from('report_samples').select('title,report_type,content')
+    .order('created_at', { ascending:false }).limit(8)).data || [];
+  if (samples.length === 0) return (saved && saved.rules) || '';
+  var joined = samples.map(function(r,i){
+    return '### 예시 ' + (i+1) + ' [' + (r.report_type||'기타') + '] ' + r.title + '\n' + (r.content||'').slice(0,2500);
+  }).join('\n\n');
+  var claudeKey = getConfig().claudeKey;
+  if (!claudeKey) return (saved && saved.rules) || '';
+  try {
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{ 'x-api-key':claudeKey, 'anthropic-version':'2023-06-01', 'content-type':'application/json', 'anthropic-dangerous-direct-browser-access':'true' },
+      body: JSON.stringify({
+        model:'claude-haiku-4-5-20251001', max_tokens:700,
+        system:'당신은 문서 편집 전문가입니다. 아래 보고서들에서 공통된 형식·구조·톤을 일반화해 재사용 가능한 작성 규칙으로 정리합니다.',
+        messages:[{ role:'user', content:
+          '다음 보고서들의 공통 형식을 추출해 "보고서 작성 규칙"으로 정리해줘. ' +
+          '항목: ① 전체 구조(섹션 순서/제목 방식) ② 문단·문장 톤(격식/길이/어미) ' +
+          '③ 자주 쓰는 표현·머리말 ④ 도입·결론 처리 방식. 8~12줄, 지시문 형태로만 출력:\n\n' + joined }]
+      })
+    });
+    if (!res.ok) return (saved && saved.rules) || '';
+    var data = await res.json();
+    var rules = (data.content && data.content[0] && data.content[0].text) || '';
+    if (rules) {
+      await sb.from('report_style_rules').upsert({ id:1, rules:rules, sample_count:cnt, updated_at:new Date().toISOString() });
+    }
+    return rules || (saved && saved.rules) || '';
+  } catch(e) { console.warn('스타일 증류 실패:', e); return (saved && saved.rules) || ''; }
+}
+
+// 수동 "스타일 재학습" 버튼
+async function onRelearnStyle() {
+  var claudeKey = getConfig().claudeKey;
+  if (!claudeKey) { alert('Claude API 키가 설정되지 않았습니다.'); return; }
+  var btn = document.getElementById('report-relearn-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 학습 중...'; }
+  var rules = await distillReportStyle(true);
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-refresh"></i> 스타일 재학습'; }
+  var box = document.getElementById('report-style-rules-box');
+  if (box) {
+    box.style.display = rules ? 'block' : 'none';
+    box.textContent = rules || '';
+  }
+  if (!rules) alert('학습할 규칙을 생성하지 못했습니다. 보고서가 2편 이상인지 확인하세요.');
+}
+
+// 핵심: 초안 생성 (형식=내 보고서, 내용=RAG) — callClaude SSE 패턴 복제
+async function callReportDraft(userText, reportType, onDelta) {
+  var claudeKey = getConfig().claudeKey;
+  if (!claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다.');
+
+  // ① 형식: 스타일 가이드 + 유사 샘플 1~2편
+  var styleRules = await distillReportStyle(false);
+  var emb = await getQueryEmbedding(userText);
+  var samples = [];
+  if (emb) {
+    samples = (await sb.rpc('match_report_samples',
+      { query_embedding: emb, match_count: 2, filter_type: reportType || null })).data || [];
+  }
+  // 임베딩 없거나 결과 없으면 유형/최신순 폴백
+  if (samples.length === 0) {
+    var q = sb.from('report_samples').select('title,report_type,content').order('created_at',{ascending:false}).limit(2);
+    if (reportType) q = q.eq('report_type', reportType);
+    samples = (await q).data || [];
+  }
+  var sampleBlock = samples.map(function(s,i){
+    return '[예시 보고서 ' + (i+1) + ' · ' + (s.report_type||'기타') + ' · ' + s.title + ']\n' + (s.content||'').slice(0,3000);
+  }).join('\n\n---\n\n');
+
+  // ② 내용: 기존 RAG(법령·고시·뉴스) 재사용
+  var ragChunks = await searchKeywords(userText, false);
+  var ragContext = buildRagContext(ragChunks);
+
+  // 참고 출처 기록
+  lastReportDraftSources = samples.map(function(s){ return '내 보고서: ' + s.title; })
+    .concat((ragChunks||[]).map(function(c){ return c.doc_name; }));
+
+  // ③ 시스템 프롬프트 조합
+  var system =
+    '당신은 사용자의 기존 보고서 스타일을 그대로 재현하는 전파·통신 정책 보고서 작성 도우미입니다.\n' +
+    '아래 [예시 보고서]의 구조·톤·표현을 충실히 따르고, 내용 근거는 [법령·자료]에서 인용하세요.\n' +
+    '확정 사실/해석/추정/의견을 구분하고, 단정 대신 검토의견 톤을 유지하세요. 법령 인용은 조항+핵심내용을 함께 적습니다.\n\n' +
+    '[보고서 작성 규칙(내 스타일)]\n' + (styleRules || '(아직 학습된 규칙 없음 — 예시를 직접 모방)') +
+    '\n\n[예시 보고서 — 형식·톤의 기준]\n' + (sampleBlock || '(등록된 예시 없음 — 표준 정책보고서 형식 사용)') +
+    ragContext;
+
+  var messages = [{ role:'user', content: '다음 주제로 보고서 초안을 작성해줘:\n' + userText }];
+
+  var res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{ 'x-api-key':claudeKey, 'anthropic-version':'2023-06-01', 'content-type':'application/json', 'anthropic-dangerous-direct-browser-access':'true' },
+    body: JSON.stringify({
+      model:'claude-sonnet-4-6', max_tokens:16384, stream:true,
+      system: system,
+      tools:[{ type:'web_search_20250305', name:'web_search', max_uses:3 }],
+      messages: messages
+    })
+  });
+  if (!res.ok) {
+    var err = await res.json().catch(function(){ return {}; });
+    throw new Error((err.error && err.error.message) || 'API 오류 (HTTP ' + res.status + ')');
+  }
+
+  // ── SSE 파싱 (callClaude와 동일 로직) ──
+  var aiText = '';
+  var cited = [];
+  var seenUrl = new Set();
+  function addCitation(c){ if (c && c.url && !seenUrl.has(c.url)) { seenUrl.add(c.url); cited.push({ url:c.url, title:c.title||c.url }); } }
+  var reader = res.body.getReader();
+  var decoder = new TextDecoder('utf-8');
+  var buf = '';
+  while (true) {
+    var chunk = await reader.read();
+    if (chunk.done) break;
+    buf += decoder.decode(chunk.value, { stream:true });
+    var events = buf.split(/\r?\n\r?\n/);
+    buf = events.pop();
+    for (var ei=0; ei<events.length; ei++) {
+      var lines = events[ei].split(/\r?\n/);
+      for (var li=0; li<lines.length; li++) {
+        var line = lines[li];
+        if (line.indexOf('data:') !== 0) continue;
+        var payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        var evt; try { evt = JSON.parse(payload); } catch(e) { continue; }
+        if (evt.type === 'content_block_delta' && evt.delta) {
+          if (evt.delta.type === 'text_delta' && evt.delta.text) {
+            aiText += evt.delta.text;
+            if (typeof onDelta === 'function') onDelta(aiText);
+          } else if (evt.delta.type === 'citations_delta' && evt.delta.citation) {
+            addCitation(evt.delta.citation);
+          }
+        } else if (evt.type === 'content_block_start' && evt.content_block) {
+          (evt.content_block.citations || []).forEach(addCitation);
+        } else if (evt.type === 'error') {
+          throw new Error((evt.error && evt.error.message) || '스트리밍 오류');
+        }
+      }
+    }
+  }
+  if (cited.length > 0) {
+    cited.slice(0,5).forEach(function(c){ lastReportDraftSources.push(c.title); });
+  }
+  return aiText;
+}
+
+// 초안 생성 UI 오케스트레이션
+async function onGenerateDraft() {
+  var reqEl = document.getElementById('report-req-input');
+  var typeEl = document.getElementById('report-gen-type');
+  var outEl = document.getElementById('report-draft-output');
+  var actionsEl = document.getElementById('report-draft-actions');
+  var btn = document.getElementById('report-gen-btn');
+  var userText = (reqEl && reqEl.value || '').trim();
+  if (!userText) { alert('어떤 보고서를 만들지 입력하세요. 예: 주파수 재할당 관련 정책검토 보고서 초안 만들어줘'); return; }
+  if (!getConfig().claudeKey) { alert('Claude API 키가 설정되지 않았습니다.'); return; }
+  var reportType = (typeEl && typeEl.value) || '';
+  if (reportType === '전체') reportType = '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 생성 중...'; }
+  if (actionsEl) actionsEl.style.display = 'none';
+  if (outEl) outEl.innerHTML = '<div style="color:var(--text-secondary);font-size:12px">내 보고서 형식 + 법령·자료를 결합해 초안을 작성 중입니다... (웹검색 포함 시 1~2분 소요, 실시간 표시)</div>';
+  lastReportDraftReq = userText;
+  lastReportDraftText = '';
+  try {
+    var text = await callReportDraft(userText, reportType, function(partial){
+      lastReportDraftText = partial;
+      if (outEl) outEl.innerHTML = renderMd(partial);
+    });
+    lastReportDraftText = text;
+    if (outEl) {
+      var srcHtml = '';
+      if (lastReportDraftSources.length > 0) {
+        var uniq = lastReportDraftSources.filter(function(v,i,a){ return a.indexOf(v)===i; }).slice(0,10);
+        srcHtml = '<div style="margin-top:14px;padding-top:10px;border-top:0.5px solid var(--border-light);font-size:11px;color:var(--text-muted)">참고: ' + uniq.map(escHtml).join(' · ') + '</div>';
+      }
+      outEl.innerHTML = renderMd(text) + srcHtml;
+    }
+    if (actionsEl) actionsEl.style.display = 'flex';
+  } catch(e) {
+    if (outEl) outEl.innerHTML = '<div style="color:#dc2626;font-size:12px">생성 실패: ' + escHtml(e.message || String(e)) + '</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> 초안 생성'; }
+  }
+}
+
+// DOCX(간편) 내보내기 — HTML→Blob(.doc)
+function exportReportDraftDoc() {
+  if (!lastReportDraftText) { alert('먼저 초안을 생성하세요.'); return; }
+  var bodyHtml = renderMd(lastReportDraftText);
+  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">'
+    + '<head><meta charset="utf-8"><title>보고서 초안</title></head>'
+    + '<body style="font-family:맑은 고딕,Malgun Gothic,sans-serif;font-size:11pt;line-height:1.7">'
+    + bodyHtml + '</body></html>';
+  var blob = new Blob(['﻿', html], { type:'application/msword' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  var fname = (lastReportDraftReq || '보고서초안').replace(/[\\/:*?"<>|]/g,'').slice(0,30);
+  a.href = url; a.download = fname + '_초안.doc';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+}
+
+// (v2 준비) 피드백 기록 — report_feedback
+async function submitReportFeedback(rating) {
+  if (!lastReportDraftText) return;
+  if (!sb) return;
+  await sb.from('report_feedback').insert({
+    request: lastReportDraftReq, draft: lastReportDraftText, rating: rating
+  });
+  var fb = document.getElementById('report-feedback-note');
+  if (fb) { fb.textContent = rating > 0 ? '👍 피드백 저장됨 — 감사합니다.' : '👎 피드백 저장됨 — 다음 초안 개선에 참고합니다.'; }
 }
 
 // ════════════════════════════════════════════
