@@ -4642,11 +4642,35 @@ async function addReportSample(title, reportType, content, summary) {
   return true;
 }
 
-// 등록 화면: 파일 선택 → 텍스트 추출해 내용란 채움 (기존 파서 재사용)
+// 등록 화면: 파일 선택(클릭) → 공통 처리
 async function onReportFileSelect(input) {
   var files = Array.from(input.files || []);
   if (files.length === 0) return;
-  var file = files[0];
+  await _processReportFile(files[0]);
+}
+
+// 드래그앤드롭 핸들러
+function handleReportFileDragOver(ev) {
+  ev.preventDefault();
+  var dz = document.getElementById('report-drop-zone');
+  if (dz) dz.style.borderColor = 'var(--accent, #6366f1)';
+}
+function handleReportFileDragLeave(ev) {
+  ev.preventDefault();
+  var dz = document.getElementById('report-drop-zone');
+  if (dz) dz.style.borderColor = 'var(--border-mid)';
+}
+async function handleReportFileDrop(ev) {
+  ev.preventDefault();
+  var dz = document.getElementById('report-drop-zone');
+  if (dz) dz.style.borderColor = 'var(--border-mid)';
+  var files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || []);
+  if (files.length === 0) return;
+  await _processReportFile(files[0]);
+}
+
+// 파일 1건 → 텍스트 추출해 내용란 채움 (기존 파서 재사용 · 클릭/드롭 공용)
+async function _processReportFile(file) {
   var ext = (file.name.split('.').pop() || '').toLowerCase();
   var labelEl = document.getElementById('report-file-label');
   if (labelEl) labelEl.textContent = file.name + ' 추출 중...';
