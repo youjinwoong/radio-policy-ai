@@ -4741,6 +4741,7 @@ async function loadReportSamples() {
   var pendSet = new Set(pend.map(function(r){ return r.id; }));
   // 스타일 학습 상태 갱신
   refreshStyleStatus(rows.length);
+  loadReportDirectives();   // 항상 적용 지시 목록도 함께
   if (rows.length === 0) {
     listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px">등록된 보고서가 없습니다. 위에서 내 보고서를 등록하면 그 형식·톤으로 초안을 만들어 줍니다.</div>';
     return;
@@ -4854,7 +4855,9 @@ async function onRelearnStyle() {
 }
 
 // 핵심: 초안 생성 (형식=내 보고서, 내용=RAG) — callClaude SSE 패턴 복제
-async function callReportDraft(userText, reportType, onDelta) {
+//  opts.reviseInstruction: 기존 초안(opts.priorDraft)을 말로 수정하는 다회 대화 모드
+async function callReportDraft(userText, reportType, onDelta, opts) {
+  opts = opts || {};
   var claudeKey = getConfig().claudeKey;
   if (!claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다.');
 
@@ -4893,7 +4896,25 @@ async function callReportDraft(userText, reportType, onDelta) {
     '\n\n[예시 보고서 — 형식·톤의 기준]\n' + (sampleBlock || '(등록된 예시 없음 — 표준 정책보고서 형식 사용)') +
     ragContext;
 
-  var messages = [{ role:'user', content: '다음 주제로 보고서 초안을 작성해줘:\n' + userText }];
+  // 항상 적용할 사용자 지시(영구) 주입 — 최우선
+  try {
+    var directives = (await sb.from('report_directives').select('directive').order('created_at',{ascending:true})).data || [];
+    if (directives.length) {
+      system += '\n\n[항상 반영할 사용자 지시 — 최우선]\n' + directives.map(function(d,i){ return (i+1) + '. ' + d.directive; }).join('\n');
+    }
+  } catch(e) { /* 지시 없음 무시 */ }
+
+  // 메시지: 신규 작성 vs 기존 초안 말로 수정(다회 대화)
+  var messages;
+  if (opts.reviseInstruction) {
+    messages = [
+      { role:'user', content: '다음 주제로 보고서 초안을 작성해줘:\n' + userText },
+      { role:'assistant', content: opts.priorDraft || lastReportDraftText || '' },
+      { role:'user', content: '위 초안을 아래 지시대로 수정해서, 전체 보고서를 완성본으로 다시 출력해줘(설명 없이 보고서 본문만):\n' + opts.reviseInstruction }
+    ];
+  } else {
+    messages = [{ role:'user', content: '다음 주제로 보고서 초안을 작성해줘:\n' + userText }];
+  }
 
   var res = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST',
@@ -4973,6 +4994,7 @@ async function onGenerateDraft() {
   lastReportFinal = '';
   var editArea = document.getElementById('report-edit-area'); if (editArea) editArea.style.display = 'none';
   var promoBtn = document.getElementById('report-promote-btn'); if (promoBtn) promoBtn.style.display = 'none';
+  var reviseRow = document.getElementById('report-revise-row'); if (reviseRow) reviseRow.style.display = 'none';
   var noteEl = document.getElementById('report-feedback-note'); if (noteEl) noteEl.textContent = '';
   try {
     var text = await callReportDraft(userText, reportType, function(partial){
@@ -4989,11 +5011,87 @@ async function onGenerateDraft() {
       outEl.innerHTML = renderMd(text) + srcHtml;
     }
     if (actionsEl) actionsEl.style.display = 'flex';
+    if (reviseRow) reviseRow.style.display = 'flex';
   } catch(e) {
     if (outEl) outEl.innerHTML = '<div style="color:#dc2626;font-size:12px">생성 실패: ' + escHtml(e.message || String(e)) + '</div>';
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> 초안 생성'; }
   }
+}
+
+// 말로 지시해서 고치기 — scope: 'once'(이번만) / 'always'(영구 지시 저장)
+async function onReviseDraft(scope) {
+  if (!lastReportDraftText) { alert('먼저 초안을 생성하세요.'); return; }
+  var inp = document.getElementById('report-revise-input');
+  var instruction = (inp && inp.value || '').trim();
+  if (!instruction) { alert('어떻게 고칠지 입력하세요. 예: 결론을 앞으로 빼고 3문단으로 줄여줘'); return; }
+  if (!getConfig().claudeKey) { alert('Claude API 키가 설정되지 않았습니다.'); return; }
+  var outEl = document.getElementById('report-draft-output');
+  var actionsEl = document.getElementById('report-draft-actions');
+  var reviseRow = document.getElementById('report-revise-row');
+  var onceBtn = document.getElementById('report-revise-once-btn');
+  var alwaysBtn = document.getElementById('report-revise-always-btn');
+  var note = document.getElementById('report-feedback-note');
+  var reportType = ((document.getElementById('report-gen-type') || {}).value) || '';
+  if (reportType === '전체') reportType = '';
+  if (onceBtn) onceBtn.disabled = true;
+  if (alwaysBtn) alwaysBtn.disabled = true;
+  // '항상 적용'이면 영구 지시로 저장 (이후 모든 초안에 주입)
+  if (scope === 'always') {
+    try {
+      await sb.from('report_directives').insert({ directive: instruction });
+      if (note) note.textContent = '📌 "항상 적용" 지시로 저장됨 — 이후 모든 초안에 반영됩니다.';
+      loadReportDirectives();
+    } catch(e) { console.warn('지시 저장 실패:', e); }
+  }
+  var prior = lastReportDraftText;
+  if (actionsEl) actionsEl.style.display = 'none';
+  if (outEl) outEl.innerHTML = '<div style="color:var(--text-secondary);font-size:12px">지시대로 초안을 수정 중입니다... (실시간 표시)</div>';
+  try {
+    var text = await callReportDraft(lastReportDraftReq, reportType, function(partial){
+      lastReportDraftText = partial;
+      if (outEl) outEl.innerHTML = renderMd(partial);
+    }, { reviseInstruction: instruction, priorDraft: prior });
+    lastReportDraftText = text;
+    if (outEl) {
+      var srcHtml = '';
+      if (lastReportDraftSources.length > 0) {
+        var uniq = lastReportDraftSources.filter(function(v,i,a){ return a.indexOf(v)===i; }).slice(0,10);
+        srcHtml = '<div style="margin-top:14px;padding-top:10px;border-top:0.5px solid var(--border-light);font-size:11px;color:var(--text-muted)">참고: ' + uniq.map(escHtml).join(' · ') + '</div>';
+      }
+      outEl.innerHTML = renderMd(text) + srcHtml;
+    }
+    if (inp) inp.value = '';
+    if (actionsEl) actionsEl.style.display = 'flex';
+    if (note && scope !== 'always') note.textContent = '✏️ 지시대로 수정했습니다. 이어서 더 고치거나 채택하세요.';
+  } catch(e) {
+    if (outEl) outEl.innerHTML = '<div style="color:#dc2626;font-size:12px">수정 실패: ' + escHtml(e.message || String(e)) + '</div>';
+    if (actionsEl) actionsEl.style.display = 'flex';
+  } finally {
+    if (onceBtn) onceBtn.disabled = false;
+    if (alwaysBtn) alwaysBtn.disabled = false;
+  }
+}
+
+// 영구 지시 목록 렌더 / 삭제
+async function loadReportDirectives() {
+  var el = document.getElementById('report-directives-list');
+  if (!el || !sb) return;
+  var rows = (await sb.from('report_directives').select('id,directive,created_at')
+    .order('created_at', { ascending:false }).limit(50)).data || [];
+  if (rows.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div style="font-size:11px;color:var(--text-secondary);margin:6px 0 4px">항상 적용 중인 지시 (' + rows.length + ')</div>' +
+    rows.map(function(r){
+      return '<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--bg-secondary);border:0.5px solid var(--border-light);border-radius:var(--radius-md);margin-bottom:4px">'
+        + '<span style="flex:1;font-size:11px;color:var(--text-primary)">📌 ' + escHtml(r.directive) + '</span>'
+        + '<button class="btn" style="font-size:10px;padding:2px 6px" onclick="onDeleteDirective(' + r.id + ')">삭제</button>'
+        + '</div>';
+    }).join('');
+}
+async function onDeleteDirective(id) {
+  if (!sb) return;
+  await sb.from('report_directives').delete().eq('id', id);
+  loadReportDirectives();
 }
 
 // DOCX(간편) 내보내기 — HTML→Blob(.doc)
