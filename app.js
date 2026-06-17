@@ -2340,7 +2340,7 @@ async function loadKbDocs(force) {
     var etc = { title: '기타 법령·고시', items: [] };
     rows.forEach(function(r) {
       var p = _kbParseName(r.doc_name);
-      var item = { p: p, chunks: r.chunks, embedded: r.embedded > 0 };
+      var item = { p: p, chunks: r.chunks, embedded: r.embedded > 0, approved: r.approved !== false };
       for (var i = 0; i < groups.length; i++) {
         if (groups[i].re.test(p.clean)) { groups[i].items.push(item); return; }
       }
@@ -2355,6 +2355,9 @@ async function loadKbDocs(force) {
         var badge = it.embedded
           ? ''
           : '<span class="badge" style="background:rgba(245,158,11,.12);color:#b45309" title="backfill_embeddings.py 실행 전 — 키워드 검색만 가능">임베딩 대기</span>';
+        if (!it.approved) {
+          badge += '<span class="badge" style="background:rgba(220,38,38,.12);color:#b91c1c" title="설정에서 승인 전 — AI 자문 미반영">승인 대기</span>';
+        }
         var dupTag = it.p.dup ? ' <span style="font-size:10px;color:var(--text-tertiary)">(중복본)</span>' : '';
         return '<div class="file-item"><div class="file-icon fi-purple"><i class="ti ti-file-text"></i></div>' +
           '<div style="flex:1;min-width:0"><div class="file-name">' + it.p.clean + dupTag + '</div>' +
@@ -3148,6 +3151,69 @@ function loadSettingsFields() {
   if (cfg.sbUrl) document.getElementById('inp-sb-url').value = cfg.sbUrl;
   if (cfg.sbKey) document.getElementById('inp-sb-key').value = cfg.sbKey;
   if (cfg.claudeKey) document.getElementById('inp-claude-key').value = cfg.claudeKey;
+  loadPendingApprovals();
+}
+
+// ── 지식베이스 승인 대기 (업로드 파일 게이트) ──
+var _pendingDocs = [];
+
+async function loadPendingApprovals() {
+  var listEl = document.getElementById('pending-approval-list');
+  var badgeEl = document.getElementById('pending-count-badge');
+  if (!listEl) return;
+  if (!sb) {
+    listEl.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-secondary);font-size:12px">Supabase 연결 후 표시됩니다.</div>';
+    if (badgeEl) badgeEl.textContent = '';
+    return;
+  }
+  listEl.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-secondary);font-size:12px">불러오는 중...</div>';
+  try {
+    var resp = await sb.rpc('list_kb_documents');
+    if (resp.error) throw resp.error;
+    _pendingDocs = (resp.data || []).filter(function(r){ return r.approved === false; });
+    if (badgeEl) badgeEl.textContent = _pendingDocs.length ? _pendingDocs.length + '건' : '';
+    if (_pendingDocs.length === 0) {
+      listEl.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-secondary);font-size:12px">승인 대기 중인 문서가 없습니다.</div>';
+      return;
+    }
+    listEl.innerHTML = _pendingDocs.map(function(r, i){
+      return '<div class="file-item" style="margin-bottom:6px">'
+        + '<div class="file-icon" style="background:rgba(245,158,11,.15);color:#b45309"><i class="ti ti-file-alert"></i></div>'
+        + '<div style="flex:1;min-width:0"><div class="file-name">' + escHtml(r.doc_name) + '</div>'
+        + '<div class="file-size">' + escHtml(r.doc_category || '') + ' · ' + r.chunks + '청크</div></div>'
+        + '<button class="btn btn-primary" style="font-size:11px;padding:3px 10px" onclick="approveDoc(' + i + ')"><i class="ti ti-check"></i>승인</button>'
+        + '<button class="btn" style="font-size:11px;padding:3px 10px;color:#791F1F;margin-left:6px" onclick="rejectDoc(' + i + ')"><i class="ti ti-trash"></i>삭제</button>'
+        + '</div>';
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="padding:14px;color:var(--text-secondary);font-size:12px">목록 조회 실패: ' + escHtml(e.message || String(e)) + '</div>';
+  }
+}
+
+async function approveDoc(idx) {
+  var doc = _pendingDocs[idx];
+  if (!doc || !sb) return;
+  var res = await sb.from('document_chunks').update({ is_approved: true }).eq('doc_name', doc.doc_name);
+  if (res.error) { alert('승인 실패: ' + res.error.message); return; }
+  _kbDocsLoaded = false;   // KB 목록 재조회 유도
+  await loadPendingApprovals();
+}
+
+async function rejectDoc(idx) {
+  var doc = _pendingDocs[idx];
+  if (!doc || !sb) return;
+  if (!confirm('"' + doc.doc_name + '" 문서를 삭제할까요?\n청크가 모두 제거되며 되돌릴 수 없습니다.')) return;
+  // 원본 파일(Storage uploads) 정리
+  try {
+    var fp = await sb.from('document_chunks').select('file_path').eq('doc_name', doc.doc_name).not('file_path', 'is', null).limit(1);
+    if (fp.data && fp.data[0] && fp.data[0].file_path) {
+      await sb.storage.from('uploads').remove([fp.data[0].file_path]);
+    }
+  } catch(se) { console.warn('원본 파일 삭제 실패:', se); }
+  var res = await sb.from('document_chunks').delete().eq('doc_name', doc.doc_name);
+  if (res.error) { alert('삭제 실패: ' + res.error.message); return; }
+  _kbDocsLoaded = false;
+  await loadPendingApprovals();
 }
 
 function loadSettingsUI() {
@@ -4092,8 +4158,11 @@ async function doPdfUpload() {
         );
         var chunks = _chunkText(text);
         if (chunks.length === 0) throw new Error(file.name + ': 청킹 결과가 없습니다.');
+        // 업로드 파일은 '승인 대기'(is_approved=false)로 저장 → 설정에서 승인해야 AI가 참조.
+        // (보도자료는 별도 흐름이라 승인 게이트 제외)
+        var approvedFlag = (_pdfUploadCtx === 'press');
         allRows = chunks.map(function(c, i) {
-          return { doc_name: thisDocName, doc_category: category, chunk_index: i, content: c, file_path: thisFilePath };
+          return { doc_name: thisDocName, doc_category: category, chunk_index: i, content: c, file_path: thisFilePath, is_approved: approvedFlag };
         });
       }
 
@@ -4152,9 +4221,12 @@ async function doPdfUpload() {
     _setPdfProgress(100, '완료!');
     setTimeout(function() {
       closePdfUpload();
+      var pendingNote = (_pdfUploadCtx === 'press')
+        ? ''
+        : '\n\n⏳ 승인 대기 상태로 등록되었습니다. 설정 → 승인 대기 문서에서 승인해야 AI 자문에 반영됩니다.';
       var msg = totalFiles === 1
-        ? '✅ "' + (docName || files[0].name.replace(/\.[^.]+$/, '')) + '" 업로드 완료!\n' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.'
-        : '✅ ' + totalFiles + '개 파일 업로드 완료!\n총 ' + totalChunks + '개 청크가 AI 자문 지식베이스에 추가되었습니다.';
+        ? '✅ "' + (docName || files[0].name.replace(/\.[^.]+$/, '')) + '" 업로드 완료!\n' + totalChunks + '개 청크가 등록되었습니다.' + pendingNote
+        : '✅ ' + totalFiles + '개 파일 업로드 완료!\n총 ' + totalChunks + '개 청크가 등록되었습니다.' + pendingNote;
       alert(msg);
     }, 400);
 
