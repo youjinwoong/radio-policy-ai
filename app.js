@@ -3090,6 +3090,7 @@ function toggleBriefing(id) {
 const ADMIN_PWD_HASH = '164eab12762d42b09780eba6401d395a945355e42fc95a60b42ac509891cfa7e';
 const ADMIN_MAX_ATTEMPTS = 5;          // 연속 실패 허용 횟수
 const ADMIN_LOCKOUT_MS = 60 * 1000;    // 초과 시 입력 잠금 시간(60초)
+var _adminPwd = '';                    // 잠금 해제 시 메모리에만 보관(소스/저장소에는 없음) — 승인·삭제 RPC 서버검증용
 
 async function _sha256Hex(str) {
   var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -3114,6 +3115,7 @@ async function checkAdminPwd() {
   var hash = await _sha256Hex(input);
   if (hash === ADMIN_PWD_HASH) {
     sessionStorage.setItem('admin_auth', '1');
+    _adminPwd = input;   // 승인·삭제 RPC 서버검증용 (메모리에만)
     sessionStorage.removeItem('admin_fail_count');
     sessionStorage.removeItem('admin_lock_until');
     document.getElementById('settings-locked').style.display = 'none';
@@ -3138,6 +3140,7 @@ async function checkAdminPwd() {
 
 function lockAdmin() {
   sessionStorage.removeItem('admin_auth');
+  _adminPwd = '';
   document.getElementById('settings-locked').style.display = 'flex';
   document.getElementById('settings-unlocked').style.display = 'none';
   document.getElementById('admin-pwd-input').value = '';
@@ -3190,11 +3193,31 @@ async function loadPendingApprovals() {
   }
 }
 
+// 잠금 해제 후 새로고침 등으로 메모리 비번이 비면 다시 입력받음
+function _ensureAdminPwd() {
+  if (_adminPwd) return _adminPwd;
+  var p = prompt('보안 확인을 위해 관리자 비밀번호를 다시 입력하세요:');
+  if (p) _adminPwd = p;
+  return _adminPwd;
+}
+
+function _handleAdminRpcError(err, action) {
+  if (err && /AUTH_FAILED/.test(err.message || '')) {
+    _adminPwd = '';
+    alert('비밀번호 인증에 실패했습니다. 다시 시도해주세요.');
+  } else {
+    alert(action + ' 실패: ' + (err && err.message ? err.message : err));
+  }
+}
+
 async function approveDoc(idx) {
   var doc = _pendingDocs[idx];
   if (!doc || !sb) return;
-  var res = await sb.from('document_chunks').update({ is_approved: true }).eq('doc_name', doc.doc_name);
-  if (res.error) { alert('승인 실패: ' + res.error.message); return; }
+  var pwd = _ensureAdminPwd();
+  if (!pwd) return;
+  // RLS로 직접 UPDATE가 막히므로 서버 검증 RPC로 처리
+  var res = await sb.rpc('admin_set_kb_approval', { p_doc_name: doc.doc_name, p_approved: true, p_pwd: pwd });
+  if (res.error) { _handleAdminRpcError(res.error, '승인'); return; }
   _kbDocsLoaded = false;   // KB 목록 재조회 유도
   await loadPendingApprovals();
 }
@@ -3203,15 +3226,18 @@ async function rejectDoc(idx) {
   var doc = _pendingDocs[idx];
   if (!doc || !sb) return;
   if (!confirm('"' + doc.doc_name + '" 문서를 삭제할까요?\n청크가 모두 제거되며 되돌릴 수 없습니다.')) return;
-  // 원본 파일(Storage uploads) 정리
+  var pwd = _ensureAdminPwd();
+  if (!pwd) return;
+  // 원본 파일(Storage uploads) 정리 (best-effort)
   try {
     var fp = await sb.from('document_chunks').select('file_path').eq('doc_name', doc.doc_name).not('file_path', 'is', null).limit(1);
     if (fp.data && fp.data[0] && fp.data[0].file_path) {
       await sb.storage.from('uploads').remove([fp.data[0].file_path]);
     }
   } catch(se) { console.warn('원본 파일 삭제 실패:', se); }
-  var res = await sb.from('document_chunks').delete().eq('doc_name', doc.doc_name);
-  if (res.error) { alert('삭제 실패: ' + res.error.message); return; }
+  // RLS로 직접 DELETE가 막히므로 서버 검증 RPC로 처리
+  var res = await sb.rpc('admin_delete_kb_document', { p_doc_name: doc.doc_name, p_pwd: pwd });
+  if (res.error) { _handleAdminRpcError(res.error, '삭제'); return; }
   _kbDocsLoaded = false;
   await loadPendingApprovals();
 }
