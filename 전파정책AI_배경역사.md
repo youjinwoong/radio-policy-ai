@@ -216,6 +216,11 @@ HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검
 
 **사이드바 스크롤 수정(커밋 fe59bd8)**: 운영 상태 메뉴 추가로 항목이 늘면서, 화면(창)이 짧을 때 사이드바 하단의 설정·운영 상태가 잘려 보임(`.sidebar`가 flex column인데 `overflow` 미설정이라 넘침이 스크롤 안 됨). → `.sidebar`에 `overflow-y:auto; min-height:0` 추가. 이때 styles.css는 캐시버스터가 없어 `styles.css?v=20260620a` 신설(이후 CSS 수정 시 갱신 필요).
 
+**PC 크롤러 heartbeat 확장(커밋 0e9c9d6, app.js?v=20260620b)**: "입법예고 최근 수집 4일 전 = 정상인가?" 질문에서 출발. 그 표시는 '마지막 새 항목'이지 '크롤러 실행 시각'이 아니라 모호 → 뉴스 크롤러처럼 PC 크롤러에도 heartbeat 추가.
+  - `gov_notice_crawler.py` 끝에 `last_gov_notice_run`, `refetch_content.py` 끝(할 일 없음 조기 return 포함)에 `last_refetch_run` upsert(실패 무시).
+  - 운영 상태 탭: '입법예고·정부고시 크롤러(heartbeat)'(✅ <25h, 매일 17:00) + '└ 입법예고 최근 새 항목'(마지막 lsAnc) + '본문 수집(refetch heartbeat)' 행으로 분리 → "PC 꺼져 안 돎" vs "새 예고 드물어 없음"을 구분.
+  - 참고: lsAnc는 전체 1~2건 수준으로 드묾(전파·통신 입법예고 자체가 드뭄) → '최근 새 항목' 간격이 큰 건 정상. 검증 시 gov_notice 실행에서 신규 입법예고 1건(전기통신사업법 시행령) 수집 + heartbeat 정상 기록 확인.
+
 ---
 
 ## 부록 — 보고서 초안 제안 데이터 흐름
