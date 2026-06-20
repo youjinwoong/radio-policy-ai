@@ -20,7 +20,8 @@ try:
 except ImportError:
     pass
 
-from supabase import create_client, Client
+from supabase import Client
+from sb_client import make_client
 
 # ── 환경변수 ─────────────────────────────────────────────────
 SUPABASE_URL        = os.environ['SUPABASE_URL']
@@ -29,7 +30,7 @@ ASSEMBLY_API_KEY    = os.environ.get('ASSEMBLY_API_KEY', '')
 TELEGRAM_BOT_TOKEN  = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID    = os.environ.get('TELEGRAM_CHAT_ID', '')
 
-sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb: Client = make_client(SUPABASE_URL, SUPABASE_KEY)
 KST = timezone(timedelta(hours=9))
 
 # ── 모니터링 설정 ─────────────────────────────────────────────

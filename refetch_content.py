@@ -10,7 +10,7 @@
 import os, sys, time, requests
 from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
-from supabase import create_client
+from sb_client import make_client
 
 # .env 파일 자동 로딩 (로컬 실행 시)
 try:
@@ -81,7 +81,7 @@ def resolve_url(url: str) -> str:
 
 def main():
     regen_all = "--all" in sys.argv
-    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+    sb = make_client(SUPABASE_URL, SUPABASE_KEY)
 
     # ── 15일 초과 기사 일괄 정리 (locked=true 기사는 보존) ──────────
     try:

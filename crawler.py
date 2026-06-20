@@ -25,7 +25,8 @@ import requests
 import ssl
 from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
-from supabase import create_client, Client
+from supabase import Client
+from sb_client import make_client
 import anthropic
 
 # ── 환경변수 ────────────────────────────────────────────
@@ -44,7 +45,7 @@ NAVER_CLIENT_ID    = os.environ.get('NAVER_CLIENT_ID', '')
 NAVER_CLIENT_SECRET = os.environ.get('NAVER_CLIENT_SECRET', '')
 
 # ── 초기화 ─────────────────────────────────────────────
-sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb: Client = make_client(SUPABASE_URL, SUPABASE_KEY)
 KST = timezone(timedelta(hours=9))
 HEADERS = {
     'User-Agent': (

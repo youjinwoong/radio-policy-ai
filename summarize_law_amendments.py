@@ -17,7 +17,8 @@ import time
 
 import requests
 import anthropic
-from supabase import create_client, Client
+from supabase import Client
+from sb_client import make_client
 
 try:
     from dotenv import load_dotenv
@@ -31,7 +32,7 @@ LAW_OC_KEY        = os.environ.get('LAW_OC_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 MAX_ROWS          = int(os.environ.get('SUMMARIZE_MAX', '1000'))
 
-sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb: Client = make_client(SUPABASE_URL, SUPABASE_KEY)
 DRF_SERVICE = 'http://www.law.go.kr/DRF/lawService.do'
 
 

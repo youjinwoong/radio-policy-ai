@@ -18,7 +18,8 @@ import time
 
 import requests
 import anthropic
-from supabase import create_client, Client
+from supabase import Client
+from sb_client import make_client
 
 try:
     from dotenv import load_dotenv
@@ -32,7 +33,7 @@ ASSEMBLY_API_KEY  = os.environ.get('ASSEMBLY_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 MAX_ROWS          = int(os.environ.get('SUMMARIZE_MAX', '1000'))
 
-sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb: Client = make_client(SUPABASE_URL, SUPABASE_KEY)
 API = 'https://open.assembly.go.kr/portal/openapi/BPMBILLSUMMARY'
 
 

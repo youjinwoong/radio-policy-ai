@@ -28,7 +28,8 @@ except ImportError:
 
 import requests
 import anthropic
-from supabase import create_client, Client
+from supabase import Client
+from sb_client import make_client
 
 # ── 환경변수 ──────────────────────────────────────────────
 SUPABASE_URL       = os.environ['SUPABASE_URL']
@@ -42,7 +43,7 @@ TELEGRAM_CHAT_ID   = os.environ.get('TELEGRAM_CHAT_ID', '')
 RESEND_API_KEY     = os.environ.get('RESEND_API_KEY', '')
 
 KST = timezone(timedelta(hours=9))
-sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb: Client = make_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ═══════════════════════════════════════════════════════

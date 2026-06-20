@@ -28,7 +28,8 @@ except ImportError:
     print('[curl_cffi] 미설치 — 일반 requests 사용')
 
 from bs4 import BeautifulSoup
-from supabase import create_client, Client
+from supabase import Client
+from sb_client import make_client
 
 try:
     import anthropic
@@ -43,7 +44,7 @@ RESEND_API_KEY     = os.environ.get('RESEND_API_KEY', '')
 ANTHROPIC_API_KEY  = os.environ.get('ANTHROPIC_API_KEY', '')
 
 KST = timezone(timedelta(hours=9))
-sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb: Client = make_client(SUPABASE_URL, SUPABASE_KEY)
 
 HEADERS = {
     'User-Agent': (

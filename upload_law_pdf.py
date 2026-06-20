@@ -98,7 +98,8 @@ def upload_to_supabase(doc_name: str, doc_category: str, chunks: list) -> bool:
         print("오류: .env 파일에 SUPABASE_URL, SUPABASE_SERVICE_KEY가 없습니다.")
         return False
 
-    client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    from sb_client import make_client
+    client = make_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     existing = client.table("document_chunks").select("id").eq("doc_name", doc_name).execute()
     if existing.data:

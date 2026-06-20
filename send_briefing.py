@@ -17,7 +17,7 @@ except ImportError:
     pass
 
 import requests
-from supabase import create_client
+from sb_client import make_client
 
 # ── 환경변수 ─────────────────────────────────────────
 SUPABASE_URL  = os.environ.get('SUPABASE_URL', '')
@@ -36,7 +36,7 @@ def get_today_briefing() -> str:
     if not SUPABASE_URL or not SUPABASE_KEY:
         print('[오류] SUPABASE_URL / SUPABASE_SERVICE_KEY 환경변수 미설정')
         return ''
-    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+    sb = make_client(SUPABASE_URL, SUPABASE_KEY)
     today = datetime.now(KST).strftime('%Y-%m-%d')
     try:
         resp = sb.table('daily_briefings').select('content').eq('briefing_date', today).execute()
