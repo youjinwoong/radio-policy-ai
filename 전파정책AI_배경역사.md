@@ -195,6 +195,27 @@
 
 ---
 
+## 16. 안정성·가시성 보강 3종 (2026-06-20, 커밋 998044c)
+
+HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검 번거로움)을 근본 해결하기 위해 추가.
+
+**① 빈 브리핑 방지 (morning_briefing.py)**: 본문(content) 확인 기사 0건이면 종료하던 것을 **요약(summary) → 제목(title) 순 폴백**(`fetch_items_fallback`)으로 변경. 폴백본은 맨 앞에 `⚠️ (본문 미확보 …` 접두사를 붙이고, `already_sent_today`가 이 접두사를 발견하면 '교체 허용'(False)을 반환 → PC가 나중에 본문을 채우면 **정식 본문본으로 자동 교체**(중복 발송 방지는 유지). 폴백 모드에선 SKT 영향분석(`add_urgent_analyses`) 생략(본문 빈약). 19·20일처럼 PC 꺼져 본문 미수집이어도 빈 브리핑이 안 나옴.
+  - ※ 네이버 OpenAPI 기사는 크롤 시 `content=None`이라 PC refetch 전엔 summary도 없을 수 있음 → 그땐 제목 기반 간이 브리핑.
+
+**② 워치독 '크롤러 인지'로 개선 (health_watchdog.py + check_news_health + system_health)**: 둘 다 "뉴스 DB 신선도"만 보고 경고하던 것을, **"크롤러가 실제로 성공했는지"까지 보고** '고장' vs '뉴스 없음(주말 등)'을 구분하도록 변경.
+  - `crawler.py`가 매 실행 끝에 `system_health(key='last_crawl_run')` heartbeat를 upsert(신규 0건이어도 기록, 실패해도 무시).
+  - 외부(health_watchdog.py): daily_crawl 최근 성공 <14h면 `crawl_running=true` → 뉴스 stale여도 30h 전까진 침묵(30h+면 'NAVER 키·필터 점검' 경고). daily_crawl은 ①에서 판정하므로 ② 루프에서 제외(중복 경고 방지).
+  - 내부(check_news_health): heartbeat <3h면 `crawler_ok` → 뉴스 stale 14h라도 침묵, 30h+면 경고. heartbeat 없거나 stale면 14h에서 경고(예전 동작=안전 폴백, 크롤러 미배포/미실행 시).
+  - 효과: 토요일 "26시간 멈춤" 같은 주말 오경보 제거, 진짜 고장(크롤러 미실행)일 때만 울림.
+
+**③ 운영 상태 대시보드 (설정 밑 탭, app.js `loadOpsStatus` + index.html `panel-opsstatus`)**: 사이드바 설정 바로 밑 "운영 상태"(`go('opsstatus')`). 크롤러 heartbeat·뉴스 마지막 입력·오늘 브리핑·입법예고·국회 법안·보관 건수를 ✅/⚠️로 표시. "뉴스 마지막 입력"은 `crawler_ok`면 stale여도 ✅(새 뉴스 없음=정상). 경고 받았을 때 1차 점검 화면. 캐시버스터 `app.js?v=20260620a`.
+
+**DB 변경(이미 적용)**: `system_health(key text pk, updated_at timestamptz, note text)` 테이블 + RLS·anon select 정책. `check_news_health()`를 heartbeat 인지 버전으로 교체. (마이그레이션: `create_system_health_table`, `smarter_check_news_health_heartbeat`)
+
+**검증**: 크롤 #210에서 heartbeat 기록 확인(`note=new=0 total=107`), 운영 상태 탭 라이브 렌더링 확인("뉴스 마지막 입력"이 1일+ stale여도 크롤러 정상이라 ✅).
+
+---
+
 ## 부록 — 보고서 초안 제안 데이터 흐름
 
 ```
