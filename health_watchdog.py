@@ -50,6 +50,35 @@ def hours_since(iso):
 
 problems = []
 
+# GitHub Actions 헤더 (워크플로우 성공 이력 조회용)
+gh_headers = {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "radiopolicy-watchdog",
+    "X-GitHub-Api-Version": "2022-11-28",
+}
+if GH_TOKEN:
+    gh_headers["Authorization"] = "Bearer " + GH_TOKEN
+
+
+def workflow_last_success_hours(wf):
+    """워크플로우의 마지막 '성공' 실행 이후 경과 시간(시간). 알 수 없으면 None."""
+    try:
+        data = http_get_json(
+            "https://api.github.com/repos/%s/actions/workflows/%s/runs?status=success&per_page=1" % (REPO, wf),
+            gh_headers,
+        )
+        runs = data.get("workflow_runs", [])
+        if not runs:
+            return None
+        return hours_since(runs[0]["created_at"])
+    except Exception:
+        return None
+
+
+# 크롤러가 '실제로 도는지' 먼저 확인 → '새 뉴스 없음'과 '크롤러 고장'을 구분(주말 오경보 방지)
+crawl_h = workflow_last_success_hours("daily_crawl.yml")
+crawl_running = (crawl_h is not None and crawl_h < 14)
+
 # ── ① Supabase 데이터 신선도 (접속 실패 시 그 자체가 경고) ──
 sb_headers = {"apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY}
 try:
@@ -61,8 +90,16 @@ try:
         problems.append("news_feed가 비어 있음")
     else:
         h = hours_since(rows[0]["created_at"])
-        if h >= 14:
-            problems.append("뉴스 수집이 %.1f시간째 멈춤" % h)
+        if h >= 14 and not crawl_running:
+            # 뉴스도 멈췄고 크롤러도 미성공 → 진짜 고장
+            problems.append("뉴스 %.1f시간째 미입력 + 크롤러도 미성공 → 크롤러/트리거 점검" % h)
+        elif h >= 30 and crawl_running:
+            # 크롤러는 정상인데 30h+ 새 뉴스 0건 → NAVER 키·필터 등 '조용한 실패' 의심
+            problems.append("크롤러는 정상인데 %.1f시간째 새 뉴스 0건 → NAVER 키·필터 점검 권장" % h)
+        elif h >= 14:
+            # 크롤러는 도는데 새 뉴스만 없음(주말 등) → 정상으로 보고 경고 안 함
+            print("[워치독] 뉴스 %.1fh 미입력이나 크롤러 정상(%s) → 새 뉴스 없음으로 판단(경고 생략)"
+                  % (h, ("%.1fh 전 성공" % crawl_h) if crawl_h is not None else "상태불명"))
 
     now_kst = datetime.datetime.now(KST)
     # 브리핑은 06:05 생성 → KST 09시 이후에만 '미생성'을 이상으로 판정(새벽 오탐 방지)
@@ -78,36 +115,18 @@ except Exception as e:  # 접속 불가 = Supabase 다운 의심
     problems.append("⛔ Supabase 접속 불가: %s" % e)
 
 # ── ② GitHub Actions 워크플로우별 마지막 성공 실행(heartbeat) ──
-gh_headers = {
-    "Accept": "application/vnd.github+json",
-    "User-Agent": "radiopolicy-watchdog",
-    "X-GitHub-Api-Version": "2022-11-28",
-}
-if GH_TOKEN:
-    gh_headers["Authorization"] = "Bearer " + GH_TOKEN
-
-# 워크플로우 파일 : 마지막 성공 이후 허용 시간(시간)
+# daily_crawl은 위 ①에서 crawl_running으로 이미 판정 → 여기선 제외(중복 경고 방지)
 checks = {
-    "daily_crawl.yml": 14,        # 매시간 도므로 14h 이상 무성공이면 이상
     "morning_briefing.yml": 26,   # 하루 1회 → 26h
     "law_crawl.yml": 26,          # 하루 1회
     "assembly_crawl.yml": 26,     # 하루 1회
 }
 for wf, thresh in checks.items():
-    try:
-        data = http_get_json(
-            "https://api.github.com/repos/%s/actions/workflows/%s/runs?status=success&per_page=1" % (REPO, wf),
-            gh_headers,
-        )
-        runs = data.get("workflow_runs", [])
-        if not runs:
-            problems.append("%s 성공 실행 기록 없음" % wf)
-        else:
-            h = hours_since(runs[0]["created_at"])
-            if h >= thresh:
-                problems.append("%s 마지막 성공 %.1f시간 전 (임계 %dh)" % (wf, h, thresh))
-    except Exception as e:
-        problems.append("%s 실행 이력 확인 실패: %s" % (wf, e))
+    h = workflow_last_success_hours(wf)
+    if h is None:
+        problems.append("%s 성공 실행 기록 확인 실패" % wf)
+    elif h >= thresh:
+        problems.append("%s 마지막 성공 %.1f시간 전 (임계 %dh)" % (wf, h, thresh))
 
 # ── ③ 결과 → 텔레그램(이상 있을 때만, 정상이면 무음) ──
 if problems:

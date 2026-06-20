@@ -3348,6 +3348,88 @@ function updateStatusDots() {
 // ════════════════════════════════════════════
 //  Navigation
 // ════════════════════════════════════════════
+// ── 운영 상태 (설정 밑 탭) ───────────────────────────────
+function opsAgoText(iso) {
+  if (!iso) return '기록 없음';
+  var mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return '방금 전';
+  if (mins < 60) return mins + '분 전';
+  var hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + '시간 ' + (mins % 60) + '분 전';
+  return Math.floor(hrs / 24) + '일 ' + (hrs % 24) + '시간 전';
+}
+
+function opsRow(label, value, ok, hint) {
+  var color = ok === true ? '#16a34a' : (ok === false ? '#dc2626' : '#9ca3af');
+  var icon  = ok === true ? '✅' : (ok === false ? '⚠️' : '•');
+  return '<div style="display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid #f0f0f0">' +
+           '<span style="font-size:15px">' + icon + '</span>' +
+           '<div style="flex:1"><div style="font-weight:600;font-size:13px">' + label + '</div>' +
+           (hint ? '<div style="font-size:11px;color:#9ca3af">' + hint + '</div>' : '') +
+           '</div><div style="font-size:12px;color:' + color + ';font-weight:600;text-align:right">' + value + '</div></div>';
+}
+
+async function loadOpsStatus() {
+  var el = document.getElementById('ops-status-body');
+  if (!el) return;
+  if (!sb) { el.innerHTML = '<p style="color:#9ca3af">Supabase 연결 대기 중…</p>'; return; }
+  el.innerHTML = '<p style="color:#9ca3af">불러오는 중…</p>';
+  try {
+    var kstNow = new Date(Date.now() + 9 * 3600000);
+    var todayKst = kstNow.toISOString().slice(0, 10);
+    var kstHour = kstNow.getUTCHours();
+
+    var r = await Promise.all([
+      sb.from('news_feed').select('created_at').order('created_at', { ascending: false }).limit(1),
+      sb.from('system_health').select('updated_at,note').eq('key', 'last_crawl_run').limit(1),
+      sb.from('daily_briefings').select('briefing_date,created_at').order('created_at', { ascending: false }).limit(1),
+      sb.from('law_amendments').select('created_at').eq('law_type', 'lsAnc').order('created_at', { ascending: false }).limit(1),
+      sb.from('assembly_bills').select('created_at').order('created_at', { ascending: false }).limit(1),
+      sb.from('news_feed').select('*', { count: 'exact', head: true })
+    ]);
+
+    function first(x) { return (x && x.data && x.data[0]) ? x.data[0] : null; }
+    var lastNews  = first(r[0]) ? first(r[0]).created_at : null;
+    var crawlRow  = first(r[1]);
+    var lastCrawl = crawlRow ? crawlRow.updated_at : null;
+    var crawlNote = crawlRow ? (crawlRow.note || '') : '';
+    var briefRow  = first(r[2]);
+    var lastLaw   = first(r[3]) ? first(r[3]).created_at : null;
+    var lastBill  = first(r[4]) ? first(r[4]).created_at : null;
+    var newsCount = (typeof r[5].count === 'number') ? r[5].count : null;
+
+    function hoursAgo(iso) { return iso ? (Date.now() - new Date(iso).getTime()) / 3600000 : Infinity; }
+    var crawlerOk = hoursAgo(lastCrawl) < 1.5;
+    var newsH = hoursAgo(lastNews);
+    var briefOk = !!(briefRow && briefRow.briefing_date === todayKst);
+
+    var rows = '';
+    rows += opsRow('크롤러 실행 (heartbeat)', opsAgoText(lastCrawl),
+                   lastCrawl ? crawlerOk : null,
+                   crawlNote ? ('최근 결과: ' + crawlNote) : '매시간 자동 실행');
+    rows += opsRow('뉴스 마지막 입력', opsAgoText(lastNews),
+                   crawlerOk ? true : (newsH < 14 ? true : false),
+                   crawlerOk ? '크롤러 정상 — 새 기사 없으면 간격이 벌어져도 정상' : '크롤러 점검 필요할 수 있음');
+    rows += opsRow('오늘 모닝 브리핑',
+                   briefOk ? ('생성됨 (' + briefRow.briefing_date + ')') : '미생성',
+                   briefOk ? true : (kstHour < 9 ? null : false),
+                   '매일 06:00 KST');
+    rows += opsRow('입법예고 최근 수집', opsAgoText(lastLaw), null, 'PC 17:00 수집');
+    rows += opsRow('국회 법안 최근 갱신', opsAgoText(lastBill), null, '매일 10:00');
+    rows += opsRow('뉴스 보관 건수', (newsCount != null ? newsCount + '건' : '—'), null, '15일 유지');
+
+    el.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">' +
+        '<button class="btn" style="font-size:11px;padding:3px 10px" onclick="loadOpsStatus()"><i class="ti ti-refresh"></i> 새로고침</button>' +
+        '<span style="font-size:11px;color:#9ca3af;margin-left:auto">' + new Date().toLocaleString('ko-KR') + ' 기준</span>' +
+      '</div>' +
+      '<div style="background:#fff;border:1px solid #eee;border-radius:8px;padding:4px 14px">' + rows + '</div>' +
+      '<p style="font-size:11px;color:#9ca3af;margin-top:10px">※ ✅ 정상 · ⚠️ 점검 권장. "뉴스 마지막 입력"은 새 기사가 없으면 자연히 벌어집니다(크롤러가 정상이면 문제 아님).</p>';
+  } catch (e) {
+    el.innerHTML = '<p style="color:#dc2626">불러오기 실패: ' + (e && e.message ? e.message : e) + '</p>';
+  }
+}
+
 function go(page, navEl, sourceType) {
   document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
   document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
@@ -3360,12 +3442,12 @@ function go(page, navEl, sourceType) {
 
   // 상단 바 제목 업데이트
   var newsTitle = currentNewsSourceType === 'gov' ? '정부 보도자료·공지사항' : (currentNewsSourceType === 'media' ? '뉴스' : '보도자료·뉴스');
-  var titles = {home:'대시보드', chat:'AI 자문', reportdraft:'보고서 초안 제안', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:newsTitle, briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정'};
+  var titles = {home:'대시보드', chat:'AI 자문', reportdraft:'보고서 초안 제안', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:newsTitle, briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정', opsstatus:'운영 상태'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-more', chat:'bn-chat', reportdraft:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', diff:'bn-monitor', settings:'bn-more'};
+  var pageTobn = {home:'bn-more', chat:'bn-chat', reportdraft:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', diff:'bn-monitor', settings:'bn-more', opsstatus:'bn-more'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
@@ -3377,6 +3459,7 @@ function go(page, navEl, sourceType) {
   if (page === 'law') loadKbDocs();
   if (page === 'assembly') loadAssemblyBills();
   if (page === 'lawtrack') loadLawTrack();
+  if (page === 'opsstatus') loadOpsStatus();
 }
 
 function setBottomNav(activeId) {

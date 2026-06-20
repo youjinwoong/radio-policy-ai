@@ -45,6 +45,7 @@
     </div>
     <div class="nav-group">
       <div class="nav-item" onclick="go('settings',this)"><i class="ti ti-settings"></i>설정</div>
+      <div class="nav-item" onclick="go('opsstatus',this)"><i class="ti ti-activity"></i>운영 상태</div>
     </div>
     <div class="sidebar-bottom">
       <div class="version">v0.2 — 실제 연동</div>
@@ -650,6 +651,13 @@
         </div><!-- settings-unlocked -->
       </div><!-- panel-settings -->
 
+      <!-- 운영 상태 (설정 밑) -->
+      <div class="panel" id="panel-opsstatus">
+        <h2 style="margin:0 0 4px">운영 상태</h2>
+        <p style="color:#9ca3af;font-size:12px;margin:0 0 14px">크롤러·브리핑·트리거가 지금 정상인지 한눈에 — 경고를 받았을 때 여기부터 확인하세요.</p>
+        <div id="ops-status-body"><p style="color:#9ca3af">불러오는 중…</p></div>
+      </div>
+
       <!-- 행정부 입법예고·법령 개정 타임라인 -->
       <div class="panel" id="panel-lawtrack">
         <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
@@ -855,6 +863,6 @@
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260617h"></script>
+<script src="app.js?v=20260620a"></script>
 </body>
 </html>

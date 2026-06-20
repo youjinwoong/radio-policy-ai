@@ -69,6 +69,49 @@ def fetch_items_with_content() -> list:
         return []
 
 
+def fetch_items_fallback() -> tuple:
+    """본문 0건일 때 폴백: 요약(summary) → 제목(title) 순으로 사용해 '빈 브리핑' 방지.
+    generate_briefing이 그대로 동작하도록 사용 텍스트를 content 자리에 주입.
+    반환: (items, mode) — mode in {'요약','헤드라인',''}"""
+    cutoff = (datetime.now(KST) - timedelta(hours=24)).isoformat()
+    # 1순위: summary(요약)가 있는 기사
+    try:
+        resp = sb.table('news_feed') \
+            .select('id,title,source,url,published_at,summary,urgency') \
+            .gte('published_at', cutoff) \
+            .not_.is_('summary', 'null') \
+            .order('published_at', desc=True).limit(60).execute()
+        items = []
+        for it in (resp.data or []):
+            s = (it.get('summary') or '').strip()
+            if len(s) > 20:
+                it['content'] = s
+                items.append(it)
+        if items:
+            print(f'[폴백] 본문 없음 → 요약(summary) 기반 {len(items)}건')
+            return items, '요약'
+    except Exception as e:
+        print(f'[폴백/요약 오류] {e}')
+    # 2순위: 제목만이라도
+    try:
+        resp = sb.table('news_feed') \
+            .select('id,title,source,url,published_at,urgency') \
+            .gte('published_at', cutoff) \
+            .order('published_at', desc=True).limit(60).execute()
+        items = []
+        for it in (resp.data or []):
+            t = (it.get('title') or '').strip()
+            if len(t) > 5:
+                it['content'] = t
+                items.append(it)
+        if items:
+            print(f'[폴백] 요약도 없음 → 제목(headline) 기반 {len(items)}건')
+            return items, '헤드라인'
+    except Exception as e:
+        print(f'[폴백/제목 오류] {e}')
+    return [], ''
+
+
 # ═══════════════════════════════════════════════════════
 #  STEP 2 — 브리핑 생성
 # ═══════════════════════════════════════════════════════
@@ -433,13 +476,21 @@ def _format_law_anc_section(items: list) -> str:
 #  메인
 # ═══════════════════════════════════════════════════════
 
+_FALLBACK_PREFIX = '⚠️ (본문 미확보'
+
+
 def already_sent_today() -> bool:
-    """오늘 브리핑이 이미 발송됐으면 True — 중복 발송 방지"""
+    """오늘 브리핑이 이미 발송됐으면 True — 중복 발송 방지.
+    단, 기존 브리핑이 폴백(간이)본이면 정식 본문 브리핑으로 교체 허용(False)."""
     today_date = datetime.now(KST).strftime('%Y-%m-%d')
     try:
-        resp = sb.table('daily_briefings').select('briefing_date') \
+        resp = sb.table('daily_briefings').select('content') \
             .eq('briefing_date', today_date).execute()
         if resp.data:
+            existing = (resp.data[0].get('content') or '')
+            if _FALLBACK_PREFIX in existing:
+                print(f'[중복 방지] 오늘({today_date}) 브리핑은 폴백(간이)본 — 정식 본문본으로 교체 허용')
+                return False
             print(f'[중복 방지] 오늘({today_date}) 브리핑이 이미 생성·발송됨 — 건너뜀')
             return True
     except Exception as e:
@@ -462,13 +513,14 @@ def main():
 
     # 본문 확인된 기사 조회
     items = fetch_items_with_content()
+    fallback_mode = ''
     if not items:
-        print('[종료] 본문 확인된 기사 없음')
-        # 마지막 시도(09시 KST 이후)에도 기사가 없으면 조용히 끝내지 않고 텔레그램으로 알림
-        # (이전: 무알림 종료 → 브리핑이 왜 안 왔는지 알 수 없었음)
+        # 빈 브리핑 방지: 본문이 없으면 요약 → 제목 순으로 폴백
+        items, fallback_mode = fetch_items_fallback()
+    if not items:
+        print('[종료] 최근 24시간 내 수집된 기사 자체가 없음')
         if datetime.now(KST).hour >= 9:
-            send_telegram('⚠️ 오늘 모닝 브리핑 생략 — 최근 24시간 내 본문 확보된 기사가 없습니다.\n'
-                          '(PC가 꺼져 있어 refetch_content.py가 실행되지 않았을 가능성)')
+            send_telegram('⚠️ 오늘 모닝 브리핑 생략 — 최근 24시간 내 수집된 기사가 전혀 없습니다.')
         return
 
     # 신규 기술 용어 조회 (오늘 추가된 것)
@@ -489,13 +541,21 @@ def main():
         print('[종료] 브리핑 생성 실패')
         return
 
+    # 폴백(본문 미확보) 모드면 안내 문구 삽입 — already_sent_today가 이 접두사로 '교체 허용' 판단
+    if fallback_mode:
+        label = '요약' if fallback_mode == '요약' else '제목'
+        briefing_text = (f'{_FALLBACK_PREFIX} — 기사 {label} 기반 간이 브리핑입니다. '
+                         f'전체 본문은 PC 본문수집(refetch) 후 자동 갱신됩니다.)\n\n' + briefing_text)
+        print(f'[폴백] {fallback_mode} 기반 간이 브리핑 생성')
+
     # 신규 입법예고 섹션을 브리핑 앞에 삽입 (🔴 → 이메일 빨간 박스)
     if law_ancs:
         briefing_text = _format_law_anc_section(law_ancs) + '\n\n' + briefing_text
         print(f'[입법예고] {len(law_ancs)}건 브리핑 앞에 삽입')
 
-    # 긴급(DB 기준) 기사 SKT 영향 분석 — 저장본에 포함 (이메일·대시보드 공통)
-    briefing_text = add_urgent_analyses(items, briefing_text)
+    # 긴급(DB 기준) 기사 SKT 영향 분석 — 본문 확보 시에만 (폴백은 본문 빈약 → 생략)
+    if not fallback_mode:
+        briefing_text = add_urgent_analyses(items, briefing_text)
 
     # 저장
     save_briefing(briefing_text, len(items), len(new_terms))

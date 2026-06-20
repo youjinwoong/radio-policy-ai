@@ -2042,6 +2042,20 @@ def main():
         print('[긴급] 해당 없음')
 
     print('[모닝 브리핑] morning_briefing.yml GitHub Actions 담당 — 건너뜀')
+
+    # ── 크롤러 heartbeat ── (check_news_health가 '크롤러 정상 vs 고장' 구분에 사용)
+    # 신규 0건이어도 '크롤러는 돌았다'를 기록 → 주말 등 '뉴스 없음' 오경보 방지. 실패해도 무시.
+    try:
+        sb.table('system_health').upsert(
+            {'key': 'last_crawl_run',
+             'updated_at': datetime.now(timezone.utc).isoformat(),
+             'note': f'new={len(new_items)} total={len(all_items)}'},
+            on_conflict='key'
+        ).execute()
+        print('[heartbeat] system_health.last_crawl_run 갱신')
+    except Exception as e:
+        print(f'[heartbeat 오류] {e}')
+
     print(f'{"="*50}')
     print('[완료]')
 
