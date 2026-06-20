@@ -189,7 +189,9 @@
 
 **복구 절차**: 코드 배포 후에도 브리핑 내용이 차려면 본문 있는 기사가 필요 → PC에서 `python refetch_content.py`(한국 IP·trafilatura)로 본문 채운 뒤 morning_briefing 재실행.
 
-**교훈**: pip 무고정의 양날(자동 최신은 편하지만 깜깜이 회귀 위험). 근본은 HTTP/2 비활성(sb_client). 추가 보강을 원하면 워크플로 pip install에 버전 핀 병행 가능(현재 미적용).
+**교훈**: pip 무고정의 양날(자동 최신은 편하지만 깜깜이 회귀 위험). 근본은 HTTP/2 비활성(sb_client).
+
+**후속 보강(2026-06-20) — 의존성 버전 고정**: `requirements.txt`에 크롤 #201에서 검증된 버전 세트(61개)를 `==`로 박고, 6개 워크플로(daily_crawl·morning_briefing·law_crawl·assembly_crawl·backfill·cleanup) 모두 `pip install -r requirements.txt`로 통일. 이제 sb_client가 못 막는 "다른 라이브러리의 자동 최신화 회귀"까지 차단. 버전 올릴 땐 하나씩 바꿔 Run으로 검증(Dependabot 권장). 가벼운 워크플로도 전체 lock을 설치하지만(통일·일관성 우선) 무해. sb_client(HTTP/2 한 버그)와 requirements.txt(전체 자동 업데이트)는 상호보완.
 
 ---
 

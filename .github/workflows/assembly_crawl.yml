@@ -21,7 +21,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests python-dotenv supabase anthropic
+          pip install -r requirements.txt
 
       - name: Run assembly crawler
         env:

@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: 패키지 설치
-        run: pip install requests beautifulsoup4 supabase python-dateutil anthropic
+        run: pip install -r requirements.txt
       - name: 1달치 뉴스 백필 실행
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
