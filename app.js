@@ -3381,7 +3381,7 @@ async function loadOpsStatus() {
 
     var r = await Promise.all([
       sb.from('news_feed').select('created_at').order('created_at', { ascending: false }).limit(1),
-      sb.from('system_health').select('updated_at,note').eq('key', 'last_crawl_run').limit(1),
+      sb.from('system_health').select('key,updated_at,note'),
       sb.from('daily_briefings').select('briefing_date,created_at').order('created_at', { ascending: false }).limit(1),
       sb.from('law_amendments').select('created_at').eq('law_type', 'lsAnc').order('created_at', { ascending: false }).limit(1),
       sb.from('assembly_bills').select('created_at').order('created_at', { ascending: false }).limit(1),
@@ -3389,10 +3389,15 @@ async function loadOpsStatus() {
     ]);
 
     function first(x) { return (x && x.data && x.data[0]) ? x.data[0] : null; }
-    var lastNews  = first(r[0]) ? first(r[0]).created_at : null;
-    var crawlRow  = first(r[1]);
-    var lastCrawl = crawlRow ? crawlRow.updated_at : null;
-    var crawlNote = crawlRow ? (crawlRow.note || '') : '';
+    var hb = {};
+    (r[1].data || []).forEach(function(row){ hb[row.key] = row; });
+    function hbTime(k){ return hb[k] ? hb[k].updated_at : null; }
+    function hbNote(k){ return hb[k] ? (hb[k].note || '') : ''; }
+    var lastNews    = first(r[0]) ? first(r[0]).created_at : null;
+    var lastCrawl   = hbTime('last_crawl_run');
+    var lastGov     = hbTime('last_gov_notice_run');
+    var lastRefetch = hbTime('last_refetch_run');
+    var crawlNote   = hbNote('last_crawl_run');
     var briefRow  = first(r[2]);
     var lastLaw   = first(r[3]) ? first(r[3]).created_at : null;
     var lastBill  = first(r[4]) ? first(r[4]).created_at : null;
@@ -3400,6 +3405,7 @@ async function loadOpsStatus() {
 
     function hoursAgo(iso) { return iso ? (Date.now() - new Date(iso).getTime()) / 3600000 : Infinity; }
     var crawlerOk = hoursAgo(lastCrawl) < 1.5;
+    var govOk = hoursAgo(lastGov) < 25;   // 매일 17:00 → 25h 내면 정상
     var newsH = hoursAgo(lastNews);
     var briefOk = !!(briefRow && briefRow.briefing_date === todayKst);
 
@@ -3414,7 +3420,12 @@ async function loadOpsStatus() {
                    briefOk ? ('생성됨 (' + briefRow.briefing_date + ')') : '미생성',
                    briefOk ? true : (kstHour < 9 ? null : false),
                    '매일 06:00 KST');
-    rows += opsRow('입법예고 최근 수집', opsAgoText(lastLaw), null, 'PC 17:00 수집');
+    rows += opsRow('입법예고·정부고시 크롤러 (heartbeat)', opsAgoText(lastGov),
+                   lastGov ? govOk : null,
+                   lastGov ? '매일 17:00 PC 실행 — 새 예고 없어도 정상' : 'PC 17:00 스케줄러 (heartbeat 대기)');
+    rows += opsRow('└ 입법예고 최근 새 항목', opsAgoText(lastLaw), null, '매칭되는 새 입법예고가 드물어 간격 큼(정상)');
+    rows += opsRow('본문 수집 (refetch, heartbeat)', opsAgoText(lastRefetch), null,
+                   lastRefetch ? ('최근 결과: ' + hbNote('last_refetch_run')) : 'PC 본문 수집 (heartbeat 대기)');
     rows += opsRow('국회 법안 최근 갱신', opsAgoText(lastBill), null, '매일 10:00');
     rows += opsRow('뉴스 보관 건수', (newsCount != null ? newsCount + '건' : '—'), null, '15일 유지');
 

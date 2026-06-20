@@ -79,6 +79,20 @@ def resolve_url(url: str) -> str:
     return url
 
 
+def _refetch_heartbeat(sb, note=''):
+    """운영 상태 탭 '본문 수집(refetch) 마지막 실행' 기록. 실패해도 무시."""
+    try:
+        sb.table('system_health').upsert(
+            {'key': 'last_refetch_run',
+             'updated_at': datetime.now(timezone.utc).isoformat(),
+             'note': note},
+            on_conflict='key'
+        ).execute()
+        print('[heartbeat] system_health.last_refetch_run 갱신')
+    except Exception as e:
+        print(f'[heartbeat 오류] {e}')
+
+
 def main():
     regen_all = "--all" in sys.argv
     sb = make_client(SUPABASE_URL, SUPABASE_KEY)
@@ -116,6 +130,7 @@ def main():
 
     if not todo:
         print("✅ 재수집할 기사가 없습니다.")
+        _refetch_heartbeat(sb, '할 일 없음')
         return
 
     print(f"📋 {mode}: {len(todo)}건\n")
@@ -233,6 +248,9 @@ def main():
             print("\n[용어 설명 백필] 모든 용어에 description 있음 — 건너뜀")
     except Exception as e:
         print(f"\n[용어 설명 백필 오류] {e}")
+
+    # ── heartbeat ── (운영 상태 탭 '본문 수집(refetch) 마지막 실행')
+    _refetch_heartbeat(sb, f'ok={ok} fail={fail} skip={skip}')
 
 
 if __name__ == "__main__":

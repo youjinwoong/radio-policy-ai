@@ -687,6 +687,19 @@ def main():
 
     saved = save_items(all_items, existing_urls, existing_titles)
     print('[완료] 신규 %d건 저장' % saved)
+
+    # ── heartbeat ── (운영 상태 탭 '입법예고/정부고시 크롤러 마지막 실행'). 신규 0건이어도 기록, 실패해도 무시.
+    try:
+        sb.table('system_health').upsert(
+            {'key': 'last_gov_notice_run',
+             'updated_at': datetime.now(timezone.utc).isoformat(),
+             'note': 'saved=%d total=%d' % (saved, len(all_items))},
+            on_conflict='key'
+        ).execute()
+        print('[heartbeat] system_health.last_gov_notice_run 갱신')
+    except Exception as e:
+        print('[heartbeat 오류] %s' % e)
+
     print('=' * 50)
 
 
