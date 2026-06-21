@@ -477,25 +477,64 @@ def _format_law_anc_section(items: list) -> str:
 # ═══════════════════════════════════════════════════════
 
 _FALLBACK_PREFIX = '⚠️ (본문 미확보'
+_NONEWS_PREFIX = '🕊️ (신규 뉴스 없음'   # 기사 0건 placeholder 마커 — 기사 들어오면 정식본으로 교체 허용
 
 
 def already_sent_today() -> bool:
     """오늘 브리핑이 이미 발송됐으면 True — 중복 발송 방지.
-    단, 기존 브리핑이 폴백(간이)본이면 정식 본문 브리핑으로 교체 허용(False)."""
+    단, 기존 브리핑이 폴백(간이)본 또는 무뉴스 placeholder면 정식 브리핑으로 교체 허용(False)."""
     today_date = datetime.now(KST).strftime('%Y-%m-%d')
     try:
         resp = sb.table('daily_briefings').select('content') \
             .eq('briefing_date', today_date).execute()
         if resp.data:
             existing = (resp.data[0].get('content') or '')
-            if _FALLBACK_PREFIX in existing:
-                print(f'[중복 방지] 오늘({today_date}) 브리핑은 폴백(간이)본 — 정식 본문본으로 교체 허용')
+            if _FALLBACK_PREFIX in existing or _NONEWS_PREFIX in existing:
+                print(f'[중복 방지] 오늘({today_date}) 브리핑은 폴백/무뉴스 placeholder — 정식본으로 교체 허용')
                 return False
             print(f'[중복 방지] 오늘({today_date}) 브리핑이 이미 생성·발송됨 — 건너뜀')
             return True
     except Exception as e:
         print(f'[중복 체크 오류] {e}')
     return False
+
+
+def _handle_no_news():
+    """기사 0건인 날: 대시보드 공백 방지 placeholder 저장 + 1일 1회 텔레그램 통지.
+    실행 시각과 무관하게 '오늘 신규 뉴스 없음'을 알려 '왜 브리핑이 안 왔지?' 혼선을 차단한다.
+    (과거: 09시 이전 실행이면 조용히 종료 → 무음 누락으로 오인)
+    placeholder는 already_sent_today가 교체 허용 → 이후 기사 들어오면 정식본으로 자동 대체.
+    중복 텔레그램은 placeholder(_NONEWS_PREFIX) 존재 여부로 차단(아침 워크플로 2~4회 실행 대비)."""
+    today_date = datetime.now(KST).strftime('%Y-%m-%d')
+    today_str = datetime.now(KST).strftime('%Y년 %m월 %d일')
+    # 오늘 무뉴스 통지를 이미 보냈는지 확인 (placeholder가 있으면 이미 통지함)
+    already_notified = False
+    try:
+        resp = sb.table('daily_briefings').select('content') \
+            .eq('briefing_date', today_date).execute()
+        if resp.data:
+            already_notified = _NONEWS_PREFIX in (resp.data[0].get('content') or '')
+    except Exception as e:
+        print(f'[무뉴스 체크 오류] {e}')
+    # 대시보드 공백 방지용 placeholder 저장 (upsert)
+    placeholder = (
+        f'{_NONEWS_PREFIX} — 자동 placeholder, 기사 입력 시 정식본으로 교체됩니다.)\n\n'
+        f'📡 전파정책 모닝 브리핑 — {today_str}\n\n'
+        f'[안내]\n'
+        f'• 최근 24시간 내 신규 수집 기사가 없습니다.\n'
+        f'• 크롤러는 정상 작동 중이며(시스템 고장 아님), 신규 기사가 들어오면 정식 브리핑으로 자동 교체됩니다.\n\n'
+        f'[저장 결과]\n뉴스 0건 / 기술 용어 0건'
+    )
+    save_briefing(placeholder, 0, 0)
+    # 1일 1회 텔레그램 통지 (시각 무관)
+    if not already_notified:
+        send_telegram(
+            f'🕊️ 오늘({today_str}) 모닝 브리핑 — 최근 24시간 내 신규 수집 기사가 없어 생략합니다. '
+            f'(크롤러 정상 작동, 시스템 이상 아님)'
+        )
+        print('[무뉴스] 텔레그램 통지 1회 발송')
+    else:
+        print('[무뉴스] 오늘 이미 통지함 — 텔레그램 생략')
 
 
 def main():
@@ -519,8 +558,7 @@ def main():
         items, fallback_mode = fetch_items_fallback()
     if not items:
         print('[종료] 최근 24시간 내 수집된 기사 자체가 없음')
-        if datetime.now(KST).hour >= 9:
-            send_telegram('⚠️ 오늘 모닝 브리핑 생략 — 최근 24시간 내 수집된 기사가 전혀 없습니다.')
+        _handle_no_news()   # 시각 무관 1일 1회 통지 + 대시보드 placeholder
         return
 
     # 신규 기술 용어 조회 (오늘 추가된 것)
