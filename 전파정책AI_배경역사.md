@@ -223,6 +223,28 @@ HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검
 
 ---
 
+## 17. 무뉴스 날 무음 누락 방지 — 시각무관 1일1회 통지 + placeholder (2026-06-21)
+
+**계기**: 2026-06-21(일) "모닝 브리핑이 생성되지 않았다" 신고. 점검 결과 트리거 체인은 전부 정상이었음 — pg_cron briefing-trigger-0605/0620 succeeded, GitHub이 morning_briefing.yml dispatch를 204로 수락(PAT 유효, 같은 PAT로 도는 크롤 트리거도 당일 정상), 크롤러도 당일 08:47 KST 정상 heartbeat. 그런데도 06-21·06-19 브리핑이 없고 06-20은 17:13 KST에 늦게 생성됨.
+
+**원인(고장 아님 — 진짜 '뉴스 없음')**: news_feed 신규 입력이 2026-06-19 18:47 KST(=09:47 UTC) 이후 끊김(평소 하루 11~94건 → 06-20·21 0건). daily_crawl #224 로그 확인 결과 `[네이버 뉴스] 106건 수집 (실패 키워드 0개)` → **NAVER 키 정상**, 가져온 106건이 전부 기존/15일 초과라 `[필터] 24건 15일 초과 — 제외` → `[신규] 0건`. 즉 금요일 저녁+주말 뉴스 가뭄(크롤러·키 이상 아님).
+- morning_briefing.py가 24h 내 기사 0건이면 `fetch_items_fallback`(요약→제목)도 빈 결과 → "[종료] 최근 24시간 내 수집된 기사 자체가 없음"으로 **저장 없이** 종료. #16①의 빈-브리핑 폴백은 "기사는 있는데 본문 없음"만 막을 뿐 **기사 0건**은 못 막음(폴백도 24h 내 기사가 있어야 동작).
+- 게다가 옛 코드는 그 생략 통지를 `datetime.now(KST).hour >= 9`일 때만 보냄. 트리거가 06:00~06:30대(hour<9)라 **통지조차 없이 조용히 종료** → "왜 브리핑이 안 왔지?" 무음 누락으로 오인.
+
+**해결(2026-06-21, morning_briefing.py)**: 0건 분기를 `_handle_no_news()`로 교체.
+- 시각 무관하게 **'🕊️ 오늘 모닝 브리핑 — 최근 24시간 내 신규 수집 기사 없음(크롤러 정상 작동, 시스템 이상 아님)' 텔레그램 1회** 발송.
+- 대시보드 공백 방지용 **placeholder 브리핑**을 daily_briefings에 upsert. 맨 앞에 `🕊️ (신규 뉴스 없음 …` = `_NONEWS_PREFIX` 마커.
+- **중복 차단(1일1회)**: 아침에 워크플로가 최대 4회(06:00 GitHub cron · 06:05 pg_cron · 06:20 pg_cron · 06:30 GitHub cron) 실행될 수 있음. pg_cron 2종은 `trigger_briefing_if_missing`이 placeholder를 "오늘 행 있음"으로 보고 dispatch 생략, 06:30 GitHub run은 무조건 돌지만 placeholder(_NONEWS_PREFIX) 감지 시 텔레그램 생략. 결과 **하루 1회만** 통지.
+- **정식본 자동 교체**: `already_sent_today`가 `_NONEWS_PREFIX`도 `_FALLBACK_PREFIX`처럼 '교체 허용'(False)으로 처리 → 나중에 기사가 들어오면(예: 06:30 run에서 신규 확인) placeholder가 정식 브리핑으로 대체됨(#16① 폴백과 동일 패턴). 정식본엔 마커가 없으므로 이후 실행은 `already_sent_today`가 True 반환(추가 발송 없음).
+
+**발송 시각**: 정상 흐름에선 ~06:00 KST 1회(그날 처음 성공한 실행에서 발송 + placeholder 저장). GitHub cron 06:00 슬롯이 드롭·지연되면 첫 통지가 06:05→06:20→06:30 순으로 늦춰질 수 있으나 어느 경우든 1회만.
+
+**진단 메모(재발 시)**: 브리핑 미생성인데 트리거·PAT·크롤러 heartbeat가 다 정상이면 news_feed 24h 신규 0건을 의심. ① 대시보드 운영 상태 탭의 `last_crawl_run` heartbeat가 fresh + 신규0이면 고장 아님. ② daily_crawl 최신 Actions 로그 `[네이버 뉴스] N건`으로 'NAVER 키 만료(N=0·미설정·폴백만)' vs '진짜 뉴스 없음'(N>0·실패 키워드 0개) 가름. 06-21 건은 후자였음.
+
+**검증**: 패치 후 `python3 -m py_compile morning_briefing.py` 통과. 당일(06-21) 공백은 수동 placeholder 브리핑으로 메움(이후 코드 배포로 자동화). PC 터미널에서 `git add morning_briefing.py` 커밋·푸시해야 다음 아침부터 적용(GitHub Actions는 main 기준).
+
+---
+
 ## 부록 — 보고서 초안 제안 데이터 흐름
 
 ```
