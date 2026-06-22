@@ -245,6 +245,28 @@ HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검
 
 ---
 
+## 18. PAT 재생성 시 Actions 권한 누락 — workflow_dispatch 403 무음 실패 (2026-06-22)
+
+**계기**: 2026-06-21(일) 16:10 KST GitHub 메일 "[GitHub] Your fine-grained personal access token is about to expire" — Vault `github_pat`에 저장된 fine-grained PAT `radio-policy-commit`(token id 15192949)이 7일 뒤 만료 예고. 이 PAT는 pg_cron의 `dispatch_github_workflow`·`trigger_briefing_if_missing`이 GitHub Actions를 깨우는 유일한 인증 수단이라, 만료되면 모든 주 트리거(뉴스 :47·브리핑 06:05/06:20·국회·법령 백업·워치독)가 조용히 멈춤.
+
+**1차 검증(맞는 토큰 확인)**: Vault `github_pat`이 `github_pat_`로 시작하는 fine-grained PAT(길이 93)임을 확인. 교체 직전까지 디스패치 응답(`net._http_response`)이 전부 204(성공)였고 마지막 :47 트리거(01:47 UTC)도 204 → 예전 토큰은 정상 동작 중. 즉 메일의 토큰 = Vault 토큰.
+
+**교체 절차**: GitHub에서 Regenerate(만료일 없음=no expiration으로 생성됨) → 새 토큰 값을 `vault.update_secret`으로 Vault `github_pat` 교체. 값 일치·길이 93 확인.
+
+**함정(핵심 사고)**: 재생성된 토큰을 Vault에 넣고 `workflow_dispatch` 엔드포인트로 테스트하니 **403 "Resource not accessible by personal access token"**. 원인은 재생성본의 권한이 예전 토큰보다 부족 — 화면에 **Contents(code) Read/Write + Metadata(Required)만 있고 Actions 권한이 누락**됐음. `POST /repos/{owner}/{repo}/actions/workflows/{wf}/dispatches`(= `dispatch_github_workflow`가 쓰는 바로 그 엔드포인트)는 토큰에 **Actions: Read and write**를 요구하기 때문.
+- **왜 안 들켰을 뻔했나(무음 실패)**: `dispatch_github_workflow`는 `net.http_post`를 `PERFORM`만 하고 응답을 안 본다. pg_net은 비동기(fire-and-forget)라 GitHub가 403을 줘도 **SQL 문 자체는 성공** → `cron.job_run_details.status='succeeded' / return_message='1 row'`로 찍힘. 즉 운영상태 탭·cron 잡 상태로는 정상처럼 보이는데 실제 워크플로는 하나도 안 돈다. #3 워치독이 'GitHub Actions 마지막 성공 실행'을 보긴 하지만, 며칠 누적돼야 임계(14h/26h)에 걸려 한참 뒤에야 울림.
+- **진짜 status 확인법**: `cron.job_run_details`(항상 succeeded)가 아니라 `net._http_response.status_code`를 봐야 함. workflow_dispatch 성공=204, 권한부족=403, 토큰무효=401. 교체 후엔 반드시 이걸로 검증.
+
+**해결(2026-06-22)**: GitHub 토큰 Edit → Repository permissions에 **Actions = Read and write** 추가 → Update(권한만 변경이라 토큰 값 불변 → Vault 재교체 불필요). 재검증 결과 같은 `workflow_dispatch` 호출이 **204(성공)**로 정상화. 이 테스트 호출이 실제 `daily_crawl`을 한 번 트리거함(부작용 없음, 정상 크롤 1회).
+
+**교훈**:
+1. **PAT를 재생성/재발급할 때 권한이 그대로 따라오지 않을 수 있다.** 이 PAT의 필수 권한은 **Repository: Contents(Read/Write) + Metadata(Read, 자동) + Actions(Read/Write)** 3종. Actions가 빠지면 git push(commit)는 되지만 workflow_dispatch는 403.
+2. **pg_cron "succeeded"는 GitHub가 받았다는 뜻이 아니다**(net.http_post 비동기). 트리거 교체·점검은 `net._http_response.status_code`로 확인.
+3. 무해 검증법: `net.http_get`로 `https://api.github.com/repos/youjinwoong/radio-policy-ai`(200+push 확인)은 토큰 유효성만, **workflow_dispatch 204**는 Actions 권한까지 확인 — 후자가 진짜 동작 보증.
+4. 이번 재생성본은 만료일 없음 → 7일 만료 경고 재발 없음(보안상 무기한이 부담이면 만료기간 재설정 가능하나 그러면 만료마다 이 절차 반복).
+
+---
+
 ## 부록 — 보고서 초안 제안 데이터 흐름
 
 ```
