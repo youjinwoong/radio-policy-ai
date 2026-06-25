@@ -8,6 +8,14 @@
 """
 
 import os, sys, time, requests
+
+# Windows 스케줄러/cp949 콘솔에서 이모지 print 크래시 방지 (UnicodeEncodeError)
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 from sb_client import make_client

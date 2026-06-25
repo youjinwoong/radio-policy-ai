@@ -7,9 +7,17 @@
 
 import os
 import re
+import sys
 import json
 import hashlib
 import time
+
+# Windows 스케줄러/cp949 콘솔에서 이모지 print 크래시 방지 (UnicodeEncodeError)
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 from datetime import datetime, timezone, timedelta
 
 try:
