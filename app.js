@@ -338,6 +338,34 @@ function buildRagContext(chunks) {
   return '\n\n---\n\n[RAG 검색 결과 — 질문과 관련된 실제 법령·고시 원문]\n아래 내용은 질문과 의미적으로 유사한 문서 청크를 검색한 결과입니다. 반드시 아래 원문을 최우선으로 인용하고, 조항 번호와 내용이 일치하는지 확인하여 답변하세요:\n\n' + items.join('\n\n---\n\n');
 }
 
+async function searchConfluence(query) {
+  // 팀 컨플루언스(Atlassian Cloud) 실시간 검색. Edge Function(confluence-search)이
+  // API 토큰을 서버 측 Secret에 들고 대신 호출 → 브라우저 노출 없음(voyage-embed와 동일 패턴).
+  // 미배포·미설정·오류 시엔 []를 돌려 자문이 죽지 않고 기존 흐름 그대로 진행한다.
+  try {
+    if (!sb || !query || query.trim().length < 2) return [];
+    var result = await sb.functions.invoke('confluence-search', { body: { query: query, limit: 5 } });
+    if (result.error) { console.warn('confluence-search 오류 (건너뜀):', result.error); return []; }
+    return (result.data && Array.isArray(result.data.results)) ? result.data.results : [];
+  } catch(e) { console.warn('컨플루언스 검색 실패 (건너뜀):', e); return []; }
+}
+
+function buildConfluenceContext(pages) {
+  if (!pages || pages.length === 0) return '';
+  var items = pages.map(function(p, i) {
+    var meta = [];
+    if (p.space) meta.push('공간: ' + p.space);
+    if (p.lastModified) meta.push('수정: ' + p.lastModified);
+    var metaStr = meta.length ? ' [' + meta.join(' | ') + ']' : '';
+    var link = p.url ? '\n링크: ' + p.url : '';
+    return '[팀문서 ' + (i+1) + '] ' + (p.title || '') + metaStr + link + '\n' + (p.excerpt || '');
+  });
+  return '\n\n---\n\n[팀 컨플루언스 검색 결과 — 우리 팀 내부 문서]\n' +
+    '아래는 사내 컨플루언스에서 질문과 관련해 실시간 검색한 팀 문서입니다. 팀 내부 방침·업무 맥락·과거 논의·담당 업무를 물을 때 참고하세요. ' +
+    '단, 법령·고시의 정확한 조문 인용은 위 RAG 원문을 최우선으로 하고, 팀 문서는 내부 맥락 보강용으로만 쓰세요. ' +
+    '팀 문서를 근거로 답할 때는 문서 제목과 링크를 함께 제시하세요:\n\n' + items.join('\n\n---\n\n');
+}
+
 // ════════════════════════════════════════════
 //  Claude API
 // ════════════════════════════════════════════
@@ -1005,8 +1033,9 @@ async function callClaude(userText, onDelta) {
   const customContext = await searchCustomKnowledge(userText);   // 팀 내부 추가 지식
   const newsContext   = await fetchRecentNewsContext(userText);  // 뉴스 본문+제목
   const lawTrackContext = await fetchLawTrackContext();          // 최근 법령 개정·입법예고 동향
+  const confluenceContext = buildConfluenceContext(await searchConfluence(userText)); // 팀 컨플루언스 실시간 검색(내부 문서)
   const webSearchGuide = '\n\n---\n\n[웹 검색 도구 사용 지침]\n해외 규제·제도 비교, 최신 정책 동향 등 위 참조 자료(법령 RAG·추가 지식·뉴스)에 없는 사실 정보가 필요하면 web_search 도구로 확인 후 답변하세요. 특히 "한국 고유", "유일한", "주요국 중 한국만" 등 국가 간 비교 단정 표현은 검색으로 확인하기 전에는 사용하지 마세요. 국내 법령 해석은 RAG 원문을 최우선으로 하고 웹 검색은 보조로만 사용하세요.';
-  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + customContext + newsContext + lawTrackContext;
+  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + customContext + newsContext + lawTrackContext + confluenceContext;
 
   chatHistory.push({ role: 'user', content: userText });
 

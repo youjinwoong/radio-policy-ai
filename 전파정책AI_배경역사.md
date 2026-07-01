@@ -267,6 +267,68 @@ HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검
 
 ---
 
+## 19. 스케줄러 cp949 이모지 크래시 + gov 작업이 옛 폴더를 가리킴 (2026-06-25, 커밋 fea7855)
+
+**계기**: 운영상태 탭에서 "입법예고·정부고시 크롤러"와 "본문 수집(refetch)" heartbeat가 4일 14시간째(마지막 6/20 14:05) 멈춰 빨갛게 표시. 동시에 06/25 모닝 브리핑이 하루 3통(06:05/07:47/이후), 매번 다른 건수(14→8→7)에 "⚠️ 본문 미확보 간이 브리핑"으로 옴. 뉴스 크롤러(클라우드)·브리핑 생성·09:40 브리핑백업·10:30 국회요약 PC 작업은 정상.
+
+**오진 주의(첫 가설 기각)**: heartbeat 2종이 같은 날 멈춰 처음엔 "PC 꺼짐"으로 추정했으나, 작업 스케줄러 점검 결과 4개 RadioPolicy 작업이 모두 "준비"(사용 설정)·정상 트리거됨(오늘도 실행됨). 즉 PC는 켜져 있고 작업도 매시간/매일 떴다. 멈춘 건 heartbeat뿐 = **작업은 실행되나 스크립트가 끝까지 못 감**. (작업 마지막 실행 결과: refetch=0xC000013A 강제종료, gov=0x1 오류.)
+
+**원인 ① refetch (간이 브리핑의 직접 원인)**: `refetch_log.txt`에 매 실행 `UnicodeEncodeError: 'cp949' codec can't encode character '\U0001f4cb'` — `refetch_content.py` 136행 `print(f"📋 {mode}: {len(todo)}건")`. 스케줄러로 돌면 stdout이 콘솔TTY에 안 붙어 인코딩이 cp949(윈도우 한국어 기본)로 잡히는데, 이모지(📋)는 cp949에 없어 **첫 이모지 print에서 즉시 크래시**. main() 초반에서 죽으니 본문 한 건도 못 가져오고 끝의 `_refetch_heartbeat`도 못 씀 → heartbeat 6/20 고정, news_feed content 계속 NULL → morning_briefing이 본문 폴백(요약→제목)으로 간이 브리핑 발송. 결과코드 0xC000013A=STATUS_CONTROL_C_EXIT(프로세스 강제종료). 진웅님이 수동으로 돌리던 Windows Terminal은 UTF-8이라 정상 동작 → "수동은 되는데 자동은 안 됨"으로 혼동 가중.
+
+**원인 ② 입법예고(gov_notice)**: 스케줄러 작업 "전파정책_정부크롤러"(매일 17:00, 계정 SYSTEM, 로그온 무관 실행)의 동작이 **옛 프로젝트 폴더** `C:\Users\SKTelecom\Desktop\frequence\전파정책전문가\run_gov_crawler.bat`를 가리킴(현재 프로젝트는 `radio-policy-ai`). 그 옛 bat은 (a) 같은 옛 폴더로 cd, (b) `gov_notice_crawler.py` 실행, (c) **현재 존재하지 않는** `gov_playwright_crawler.py`까지 호출. 옛 폴더 스크립트가 낡아(또는 동일 cp949 이모지 문제) 0x1로 끝 → heartbeat 6/20 고정. (이 작업은 SYSTEM·로그온 무관 실행이라 PC 로그인 여부와 무관하게 트리거됨.)
+
+**해결**:
+1. `refetch_content.py`·`gov_notice_crawler.py` 상단(임포트 직후)에 `try: sys.stdout.reconfigure(encoding="utf-8"); sys.stderr.reconfigure(encoding="utf-8") except Exception: pass` 추가 — cp949 콘솔에서도 이모지/한글 print 안전. (gov는 `import sys`도 함께 추가.)
+2. `run_gov_crawler.bat`: cd 경로를 `radio-policy-ai`로 교정, 없는 `gov_playwright_crawler.py` 호출 제거, `set PYTHONUTF8=1` 추가.
+3. 작업 스케줄러 "전파정책_정부크롤러" → 동작의 프로그램을 `…\radio-policy-ai\run_gov_crawler.bat`, 시작 위치를 `…\radio-policy-ai`로 재지정(작업 스케줄러 GUI 편집. SYSTEM 실행이라 자격증명 재입력 없음).
+
+**검증**: 운영상태 탭에서 본문수집 heartbeat `ok=119 fail=0 skip=9`(이전 ok=0), 입법예고 heartbeat 1분 전으로 갱신 — 둘 다 빨강→초록. 단, `resend_briefing.py`로 재발송하면 여전히 간이본이 오는데 이는 **resend가 daily_briefings 저장본(아침에 만든 간이 텍스트)을 그대로 재전송**하기 때문(재생성 아님). 정식본은 `python morning_briefing.py`로 재생성해야 함 — `already_sent_today()`가 저장본의 `_FALLBACK_PREFIX`(⚠️ 본문 미확보)를 감지하면 '교체 허용'(False)으로 정식본 재생성·발송.
+
+**교훈**:
+1. **PC 로컬 실행 파이썬 스크립트는 이모지/유니코드 print 때문에 stdout/stderr UTF-8 강제가 필수.** cp949 콘솔(스케줄러·파이프 리다이렉트)에서 무음 크래시 방지. 제거 금지, 신규 스크립트도 적용.
+2. **폴더를 옮기면 Windows 작업 스케줄러 작업의 동작 경로도 같이 갱신해야 함.** 옛 `전파정책전문가` 폴더를 가리키게 두지 말 것.
+3. **heartbeat가 멈췄는데 스케줄러 작업이 '준비/실행됨'이면 PC 꺼짐이 아니라 스크립트 크래시/오류.** 1차 점검은 작업의 *마지막 실행 결과*(0x0 정상 / 0xC000013A 강제종료 / 0x1 일반오류)와 스크립트 로그(`refetch_log.txt`·`gov_crawler_log.txt`). #18의 "cron succeeded ≠ 트리거 성공"과 같은 '실행됨 ≠ 완료' 함정 계열.
+4. resend는 저장본 재전송, 재생성은 morning_briefing.py — 본문 채워진 뒤 정식본은 후자로.
+
+---
+
+## 20. 팀 컨플루언스(Atlassian Cloud) 실시간 검색 연동 (2026-07-01)
+
+**요구**: AI 자문이 법령·고시·뉴스뿐 아니라 **우리 팀 내부 문서(컨플루언스)**도 근거로 삼게 하고 싶다. 방식은 "질문 시 실시간 조회"(RAG 사전 수집이 아님).
+
+**환경 확인 결과(설계 좌우)**: 처음엔 Atlassian Cloud를 가정했으나, 실제로는 **사내 호스팅 Confluence(Server/Data Center), 회사 도메인**이었다. 두 갈래를 갈랐다:
+- 인증: Cloud는 이메일+API토큰(Basic)이지만 Server/DC는 **PAT(Personal Access Token) Bearer**. `id.atlassian.com`의 API 토큰은 Cloud 전용이라 사내엔 안 통함. PAT는 Confluence 프로필→Settings→Personal Access Tokens에서 발급하며 SSO(SAML)가 걸려도 REST API에서 통한다.
+- 접근성: **외부 인터넷에서도 열리는 것을 확인** → Supabase Edge Function(도쿄, 공용 클라우드)이 도달 가능 → Edge 경유 구조 유지 확정. (만약 사내망 전용이었다면 gov_notice_crawler처럼 PC 로컬 실행으로 구조를 갈아엎어야 했음.)
+- Edge Function은 두 방식을 모두 지원하도록 **인증 자동 분기**: `CONFLUENCE_EMAIL`이 있으면 Basic(Cloud), 없으면 Bearer(Server/DC PAT). 페이지 링크는 응답 `_links.base`(context path 포함 정식 절대경로) 우선.
+
+**핵심 결정 — 왜 브라우저 직접 호출이 아니라 Edge Function인가**:
+- 대시보드(`app.js`)는 GitHub Pages 정적 파일이라 공개 repo·브라우저에 그대로 노출된다. Confluence API 토큰을 여기 넣으면 유출(과거 Voyage 키 유출 사고와 동일 위험). 또한 Confluence Cloud API는 브라우저에서 부르면 CORS로 막힌다.
+- 그래서 기존 `voyage-embed`와 **똑같은 패턴**으로 신규 Edge Function `confluence-search`를 두고, 토큰을 Supabase Edge Secret에 보관하여 서버 측에서만 Confluence를 호출한다. 대시보드는 anon으로 Edge Function만 부른다.
+
+**데이터 흐름**:
+```
+질문 → callClaude → searchConfluence(질문) → Edge:confluence-search (토큰 보관)
+     → CQL: type=page AND text ~ "질문" [AND space in (…)] ORDER BY lastmodified DESC
+     → Confluence Cloud REST v1 /rest/api/content/search (expand=space,version,body.view)
+     → 상위 5건 제목·링크·본문발췌(HTML→평문 900자) → buildConfluenceContext → system 프롬프트 주입
+```
+- 발췌 컨텍스트는 "법령 조문은 RAG 원문 우선, 팀 문서는 내부 맥락 보강용"이라고 명시해 조문 인용이 팀 문서로 오염되지 않게 함(#7 RAG 인용 정확성 장치와 같은 취지).
+
+**폴백 설계(자문 무중단)**: `searchConfluence`는 미배포·Secret 미설정·403/401·네트워크 오류 어느 경우든 `[]`를 반환하고 `buildConfluenceContext`는 `''`를 반환. 따라서 **배포 전에도 자문은 기존과 동일하게 동작**하고, 배포·Secret 설정이 끝나면 자동으로 팀 문서가 붙는다. (voyage-embed 실패 시 시맨틱만 빠지고 자문이 사는 것과 같은 무중단 철학.)
+
+**검색 space를 코드가 아니라 Secret(`CONFLUENCE_SPACES`)으로 둔 이유**: 대상 space가 바뀌어도 app.js 재배포·캐시버스터 갱신 없이 Secret만 바꾸면 됨. 비우면 토큰 계정이 열람 가능한 전체 space 검색. 검색 범위는 결국 **토큰 발급 계정의 Confluence 권한**에 종속(권한 밖 문서는 애초에 안 나옴).
+
+**CQL 안전화**: 사용자 질문의 `"`·`\`를 공백으로 치환하고 200자로 잘라 CQL 문법 깨짐/인젝션 방지.
+
+**배포 절차(수동, PC/콘솔)**:
+1. Supabase → Edge Functions → `confluence-search` 생성, `docs/confluence-search.ts` 전체 붙여넣고 Deploy(verify_jwt off).
+2. Edge Secrets 등록(사내 Server/DC=PAT): `CONFLUENCE_BASE_URL`(사이트 루트, /wiki·끝슬래시 없이), `CONFLUENCE_API_TOKEN`(Confluence 프로필→Personal Access Tokens), 선택 `CONFLUENCE_SPACES`. `CONFLUENCE_EMAIL`은 비움(Bearer 인증).
+3. `app.js`·`index.html`(캐시버스터 `app.js?v=20260701a`) PC 터미널에서 커밋·푸시.
+
+**관련 커밋**: app.js(searchConfluence·buildConfluenceContext·callClaude 주입), index.html(캐시버스터), docs/confluence-search.ts(신규 Edge 템플릿). — 배포·Secret 등록 후 자문 탭에서 팀 문서 관련 질문으로 `[팀문서 N]` 컨텍스트가 붙는지 확인.
+
+---
+
 ## 부록 — 보고서 초안 제안 데이터 흐름
 
 ```
