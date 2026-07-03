@@ -329,6 +329,45 @@ HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검
 
 ---
 
+## 21. 타 프로젝트 OKF 법령 번들(regulatory-kb) 적재 — 요약 레이어 신설 (2026-07-03)
+
+**요구**: 다른 프로젝트에서 만든 **OKF(Open Knowledge Format) 법령 번들**(`regulatory-kb/`, 104 concept = 법령/고시/훈령/예규/절차 103 + 용어집 1)을 이 프로젝트로 가져와 자문에 쓰고 싶다. 기존 지식베이스(document_chunks)와 상당수 겹침. 1회 적재, 원본 동기화 불필요.
+
+**핵심 발견(설계 좌우)**: 이 OKF는 **조문 원문이 아니라 법령별 구조화 요약·실무 문서**였다(본문 `# 요약 / # 적용 범위 / # 주요 내용 / # 실무 체크리스트 / # Citations`). 반면 document_chunks는 `제N조` 원문을 조문 단위로 청킹한 것(자문 조문 인용이 여기 의존). 즉 **다루는 법은 겹치나 형태가 다른 상호보완 레이어**다. 그래서 초기 가정 "겹침=교체(조문 청크 대체)"는 폐기 — 조문 원문을 요약으로 갈아끼우면 인용 회귀. 올바른 방향 = **요약 레이어를 원문 레이어 옆에 추가.**
+
+**설계 결정**:
+- **별도 스토어 `kb_documents`/`kb_chunks` 신설**(document_chunks 무변경). manifest.json(정본, 104 entries)을 순회해 적재. concept_type·law_type·law_number·enforcement_date·status·body_md를 컬럼 보존. path 유니크(문서 정체 키), dedup_key로 버전 그룹.
+- **임베딩 voyage-law-2(법률 특화, 1024)**: document_chunks의 voyage-4-lite와 **분리**. 서로 다른 모델 벡터는 같은 공간 비교가 무의미하므로, kb 질의도 반드시 voyage-law-2로 임베딩해야 함 → `voyage-embed` Edge에 `model` 파라미터 추가(미지정 시 기존 voyage-4-lite로 하위호환). 두 모델 다 1024차원이라 컬럼은 호환되나 **혼용은 금지**.
+- **자문 연동은 병행 조회(대체 아님)**: app.js `searchKbSummaries`(시맨틱 voyage-law-2 + trgm 병행) → `buildKbContext`가 `[법령요약]` 컨텍스트 주입(컨플루언스 `[팀문서]`와 같은 패턴). 시스템 프롬프트에 조문 인용은 document_chunks 원문 우선, 요약은 맥락 보강이라 명시.
+- **구버전(superseded) 처리**: manifest의 status를 컬럼 보존해 전부 적재하되(이력 유지), 자문 검색 RPC 기본 `only_current=true`로 **현행본만 노출**(구버전은 명시 요청 시). "구버전 인용 금지" 가드레일(#7 계열)과 이력 보존을 동시 충족. 최초 적재분: current 101 / superseded 3(단말장치 기술기준 2022-16호, 시험기관 지정 2025-4호, 전자파적합성 2023-13호).
+- **적재 스크립트 `import_regulatory_kb.py`**: 외부 의존성 없이 stdlib(urllib)만 사용, .env·프론트매터 수동 파싱, `insert_kb_chunks` RPC로 청크+임베딩 일괄 삽입(text→vector 캐스팅, batch_update_embeddings와 동일 패턴). PC 스크립트라 stdout UTF-8 강제(#19). 최초 적재 검증: 문서 104, 청크 1241, 임베딩 누락 0, 1024차원.
+
+**앞으로의 "법령 추가"(Ⓑ) `add_law.py`**: 새 법 PDF 1개로 ①조문→document_chunks(기존 upload_law_pdf.py 재사용, voyage-4-lite) ②Haiku가 OKF 요약 초안 작성→regulatory-kb 저장+manifest 갱신→kb_*(voyage-law-2)까지 한 커맨드. dedup·최신본 superseded 처리는 번들의 `MAINTENANCE.md`/manifest `on_readd_rule` 규칙을 따름(동일 law_number 덮어쓰기 / 최신본은 기존 current를 superseded로 내리고 신규 current 추가). Haiku 초안은 사람이 검토·보정 후 확정(MVP).
+
+**교훈**: "겹친다"가 곧 "같은 표현"은 아니다 — 같은 법이라도 요약과 원문은 형태가 달라 대체가 아니라 병행이 맞다. 임베딩은 저장·질의 모델 일치가 절대 원칙(모델 섞으면 검색이 소리 없이 망가짐).
+
+---
+
+## 22. 정부고시 크롤러 7일 무음 중단 — .bat LF 훼손 + Python 3.13 PATH 셰도잉 이중 사고 (2026-06-25 ~ 07-03 발견·복구)
+
+**증상**: 운영 상태 탭에서 `입법예고·정부고시 크롤러 (heartbeat)`가 **7일 18시간 전**(마지막 2026-06-25 17:00 직전)으로 빨간 경고. 작업 스케줄러 "전파정책_정부크롤러"는 매일 17:00 "실행"으로 기록되나 결과 코드 2147943467(0x8007042B=1067, 프로세스 예기치 종료).
+
+**원인 ① — .bat LF+UTF-8 훼손 (6/25~)**: #19 수리 당일(6/25 15:52) `run_gov_crawler.bat`이 **LF 줄바꿈 + UTF-8 한국어 echo 텍스트**로 재작성됨(세션 편집 도구가 LF로 저장). 한국어 로케일 cmd가 이 조합을 오파싱해 `echo [%date% %time%] === 크롤링 시작 ===` 줄이 **`time ===` 명령으로 실행** → "새로운 시간을 입력하십시오:" 대화형 프롬프트에서 무한 대기(로그에 이 프롬프트만 반복) → python은 아예 실행 안 됨 → heartbeat 무음 중단, 이후 스케줄러가 강제 종료(1067). **치명 포인트: git이 탐지 못 함** — `.gitattributes`의 `*.bat eol=crlf` 정규화 때문에 working tree가 LF여도 `git status`는 clean. 탐지는 바이트 검사(비ASCII=0·bareLF=0)로만 가능.
+
+**원인 ② — Python 3.13 설치로 PATH 셰도잉 (6/30~)**: 6/30 09:58 공유 PC에 Python 3.13이 설치되며 PATH 최상단을 차지. 패키지(bs4·supabase·trafilatura 등)는 전부 기존 **3.12에만** 있어, bare `python`을 쓰는 작업이 전부 `ModuleNotFoundError: No module named 'bs4'`로 즉사:
+- `RadioPolicy-RefetchContent`(작업 동작에 inline `python`) — 6/30부터 매일 실패(refetch_log.txt에 Traceback 반복, last_refetch_run 6/29에 멈춤).
+- `run_briefing_backup.bat`(bare `python`) — 백업 경로 깨짐(pg_cron 주 트리거가 살아 있어 브리핑은 정상 발송 → 무음).
+- `RadioPolicy-AssemblySummary`만 **Python312 전체 경로**를 써서 무사 — 이게 정답 패턴.
+
+**복구 (07-03)**:
+1. `run_gov_crawler.bat`·`run_briefing_backup.bat`을 **ASCII+CRLF**로 재작성(echo 텍스트 영문화), python을 `C:\Users\SKTelecom\AppData\Local\Programs\Python\Python312\python.exe` 전체 경로로 고정, `set PYTHONUTF8=1` 유지(#19). 바이트 검증: CRLF=6·bareLF=0·비ASCII=0.
+2. 고친 배치 수동 실행으로 7일 밀린 정부고시·입법예고 수집 및 heartbeat 복구, refetch_content.py도 3.12로 수동 1회 실행.
+3. `RadioPolicy-RefetchContent`는 작업 **동작 자체에** inline `python`이 박혀 있어 작업 수정 필요(운영자 직접): 동작의 명령을 `"C:\Users\SKTelecom\AppData\Local\Programs\Python\Python312\python.exe" refetch_content.py …`로 교체.
+
+**교훈**: ① .bat을 편집한 세션이 곧 .bat을 깨뜨린 세션 — 편집 후 바이트 검증이 유일한 안전망(git status 무용). ② 공유 PC는 누가 언제 다른 Python을 깔지 모른다 — 스케줄러가 부르는 인터프리터는 반드시 전체 경로로 고정. ③ "스케줄러는 실행됐다"와 "스크립트가 돌았다"는 다르다 — 판정은 heartbeat(system_health)와 각 작업의 LastTaskResult로.
+
+---
+
 ## 부록 — 보고서 초안 제안 데이터 흐름
 
 ```
