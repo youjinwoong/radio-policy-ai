@@ -672,7 +672,11 @@ def save_items(items: list, existing_urls: set, existing_titles: set) -> int:
         print('[저장] 신규 항목 없음')
         return 0
 
-    sb.table('news_feed').insert(new_items).execute()
+    # upsert(on_conflict=url, ignore_duplicates): 중복 URL 1건 때문에 배치 전체가
+    # 실패하지 않도록 crawler.py와 동일 패턴 사용 (idx_news_feed_url_unique와 한 쌍)
+    sb.table('news_feed').upsert(
+        new_items, on_conflict='url', ignore_duplicates=True
+    ).execute()
     print('[저장] %d건 완료' % len(new_items))
     return len(new_items)
 

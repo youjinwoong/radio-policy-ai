@@ -258,7 +258,7 @@ create table if not exists public.chat_logs (
 -- ===========================================================================
 -- 2. 인덱스 (INDEXES) — 검색 속도 + AI 시맨틱 검색(HNSW)
 -- ===========================================================================
-create index if not exists idx_news_feed_url_unique     on public.news_feed using btree (url);   -- 중복 방지(고유)
+create unique index if not exists idx_news_feed_url_unique on public.news_feed using btree (url); -- 중복 방지(고유) — 실DB와 동일(UNIQUE). 크롤러는 upsert(on_conflict='url')와 한 쌍
 create index if not exists idx_news_feed_locked          on public.news_feed using btree (locked) where (locked = true);
 
 create index if not exists assembly_bills_proc_result_idx on public.assembly_bills using btree (proc_result);
