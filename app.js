@@ -96,6 +96,7 @@ function initSupabase() {
 //  RAG — 키워드 검색 + Haiku 쿼리 확장 (동의어·법령 용어)
 // ════════════════════════════════════════════
 let lastRagSources = [];
+let lastConfluenceFailed = false; // 직전 자문에서 컨플루언스 검색이 실패해 생략됐는지 (무음 실패 가시화)
 
 function extractKeywords(text) {
   // 한국어 조사·어미·불용어 제거
@@ -348,12 +349,13 @@ async function searchConfluence(query) {
   // 팀 컨플루언스(Atlassian Cloud) 실시간 검색. Edge Function(confluence-search)이
   // API 토큰을 서버 측 Secret에 들고 대신 호출 → 브라우저 노출 없음(voyage-embed와 동일 패턴).
   // 미배포·미설정·오류 시엔 []를 돌려 자문이 죽지 않고 기존 흐름 그대로 진행한다.
+  lastConfluenceFailed = false;
   try {
     if (!sb || !query || query.trim().length < 2) return [];
     var result = await sb.functions.invoke('confluence-search', { body: { query: query, limit: 5 } });
-    if (result.error) { console.warn('confluence-search 오류 (건너뜀):', result.error); return []; }
+    if (result.error) { lastConfluenceFailed = true; console.warn('confluence-search 오류 (건너뜀):', result.error); return []; }
     return (result.data && Array.isArray(result.data.results)) ? result.data.results : [];
-  } catch(e) { console.warn('컨플루언스 검색 실패 (건너뜀):', e); return []; }
+  } catch(e) { lastConfluenceFailed = true; console.warn('컨플루언스 검색 실패 (건너뜀):', e); return []; }
 }
 
 function buildConfluenceContext(pages) {
@@ -884,7 +886,7 @@ async function searchCustomKnowledge(query) {
             results.push(row);
           }
         });
-      } catch(e) {}
+      } catch(e) { console.warn('추가지식(custom_knowledge) 조회 실패(건너뜀):', kw, e); }
       if (results.length >= 3) break;
     }
     if (results.length === 0) return '';
@@ -1003,11 +1005,11 @@ async function onDeleteCustomFile(docName, btn) {
         .eq('doc_category', '추가지식').eq('doc_name', docName)
         .not('file_path', 'is', null).limit(1);
       (fp || []).forEach(function(r) { if (r.file_path) paths.push(r.file_path); });
-    } catch(_) {}
+    } catch(e) { console.warn('원본 file_path 조회 실패(Storage 정리 생략될 수 있음):', e); }
     var { error } = await sb.from('document_chunks').delete()
       .eq('doc_category', '추가지식').eq('doc_name', docName);
     if (error) throw new Error(error.message);
-    if (paths.length) { try { await sb.storage.from('uploads').remove(paths); } catch(_) {} }
+    if (paths.length) { try { await sb.storage.from('uploads').remove(paths); } catch(e) { console.warn('Storage 원본 삭제 실패(파일 잔존 가능):', e); } }
     renderCustomKnowledgeList((document.getElementById('ck-list-search') || {}).value || '');
   } catch(e) {
     alert('삭제 실패: ' + e.message);
@@ -1578,6 +1580,15 @@ async function sendChat() {
       msgEl.appendChild(srcDiv);
     }
 
+    // 컨플루언스 검색 실패 가시화 (fail-soft로 자문은 정상 진행 — 생략 사실만 표시)
+    if (lastConfluenceFailed) {
+      const cfDiv = document.createElement('div');
+      cfDiv.className = 'rag-sources';
+      cfDiv.style.color = '#b45309';
+      cfDiv.innerHTML = '<i class="ti ti-alert-triangle"></i>팀 컨플루언스 검색 실패 — 이번 답변에는 팀 문서가 반영되지 않았습니다';
+      msgEl.appendChild(cfDiv);
+    }
+
     if (sb) {
       try {
         await sb.from('chat_logs').insert({
@@ -1586,7 +1597,7 @@ async function sendChat() {
           category: detectCategory(text),
           sources: lastRagSources
         });
-      } catch(e) {}
+      } catch(e) { console.warn('자문 이력(chat_logs) 저장 실패(답변은 정상):', e); }
       refreshDashboard();
     }
   } catch(e) {
@@ -2018,7 +2029,7 @@ async function deleteNewsItem(newsId) {
   if (!confirm(msg)) return;
   try {
     // 재수집 방지: 크롤러가 같은 URL·제목을 다시 저장하지 않도록 블록리스트 기록
-    try { await sb.from('deleted_news').insert({ url: n.url || null, title: n.title || null }); } catch(e2) {}
+    try { await sb.from('deleted_news').insert({ url: n.url || null, title: n.title || null }); } catch(e2) { console.warn('deleted_news 기록 실패(같은 기사 재수집될 수 있음):', e2); }
     var resp = await sb.from('news_feed').delete().eq('id', newsId);
     if (resp.error) throw resp.error;
     newsDataCache = newsDataCache.filter(function(x) { return String(x.id) !== String(newsId); });
@@ -2369,7 +2380,7 @@ async function analyzeNewsImpact(newsId) {
 }
 
 async function markRead(id) {
-  if (sb) { try { await sb.from('news_feed').update({ is_read: true }).eq('id', id); } catch(e) {} }
+  if (sb) { try { await sb.from('news_feed').update({ is_read: true }).eq('id', id); } catch(e) { console.warn('읽음 표시 저장 실패:', e); } }
 }
 
 // 구 filterNews 호환용 (혹시 다른 곳에서 호출 시)
@@ -5359,7 +5370,7 @@ async function promoteFinalToSample() {
   if (ok) {
     var note = document.getElementById('report-feedback-note');
     if (note) note.textContent = '📌 예시 보고서로 추가됨 — PC에서 backfill_report_embeddings.py 실행 시 의미검색에 반영됩니다.';
-    try { await distillReportStyle(false); } catch(e) {}
+    try { await distillReportStyle(false); } catch(e) { console.warn('보고서 스타일 재증류 실패(다음 등록 때 재시도됨):', e); }
     var promo = document.getElementById('report-promote-btn'); if (promo) promo.style.display = 'none';
   }
 }
