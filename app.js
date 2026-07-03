@@ -200,27 +200,29 @@ async function searchKeywords(query, lawOnly) {
     });
   }
 
-  // 키워드별로 검색 (최대 10개 키워드, 키워드당 4청크)
+  // 키워드별로 검색 (최대 10개 키워드, 키워드당 4청크) — 전 키워드 동시 조회 후 원래 순서로 병합
+  var kwList = [];
   for (var ki = 0; ki < Math.min(keywords.length, 10); ki++) {
-    var kw = keywords[ki];
-    if (kw.length < 2) continue;
-    try {
-      var resp = await sb
-        .from('document_chunks')
-        .select('id, doc_name, doc_category, chunk_index, content, notice_no, article_no, effective_date')
-        .ilike('content', '%' + kw + '%')
-        .limit(4);
-      if (resp.data) {
-        for (var ri = 0; ri < resp.data.length; ri++) {
-          var row = resp.data[ri];
-          if (!seen.has(row.id)) {
-            seen.add(row.id);
-            results.push(row);
-          }
-        }
-      }
-    } catch(e) { console.warn('키워드 검색 오류:', kw, e); }
+    if (keywords[ki].length >= 2) kwList.push(keywords[ki]);
   }
+  var kwResults = await Promise.all(kwList.map(function(kw) {
+    return sb
+      .from('document_chunks')
+      .select('id, doc_name, doc_category, chunk_index, content, notice_no, article_no, effective_date')
+      .ilike('content', '%' + kw + '%')
+      .limit(4)
+      .then(function(resp) { return resp.data || []; })
+      .catch(function(e) { console.warn('키워드 검색 오류:', kw, e); return []; });
+  }));
+  kwResults.forEach(function(rows) {
+    for (var ri = 0; ri < rows.length; ri++) {
+      var row = rows[ri];
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        results.push(row);
+      }
+    }
+  });
 
   // trgm 결과 병합
   if (trgmPromise) {
@@ -1051,6 +1053,13 @@ async function callClaude(userText, onDelta) {
   const { claudeKey } = getConfig();
   if (!claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다. 설정 탭에서 입력해주세요.');
 
+  // 보조 컨텍스트 검색 5종을 먼저 동시에 시작 (조문 RAG와 병렬 실행 — 프롬프트 조합 순서는 아래에서 고정)
+  const customP     = searchCustomKnowledge(userText).catch(function(e) { console.warn('추가지식 검색 실패(건너뜀):', e); return ''; });
+  const newsP       = fetchRecentNewsContext(userText).catch(function(e) { console.warn('뉴스 컨텍스트 실패(건너뜀):', e); return ''; });
+  const lawTrackP   = fetchLawTrackContext().catch(function(e) { console.warn('법령동향 실패(건너뜀):', e); return ''; });
+  const confluenceP = searchConfluence(userText).catch(function(e) { console.warn('컨플루언스 검색 실패(건너뜀):', e); return []; });
+  const kbP         = searchKbSummaries(userText).catch(function(e) { console.warn('법령요약 검색 실패(건너뜀):', e); return []; });
+
   // RAG: 관련 문서 청크 검색 (보도자료는 원본 JSON, 법령은 Supabase)
   lastRagSources = [];
   var ragChunks = [];
@@ -1076,13 +1085,13 @@ async function callClaude(userText, onDelta) {
     }
   }
 
-  // 시스템 프롬프트에 컨텍스트 조합
+  // 시스템 프롬프트에 컨텍스트 조합 (위에서 동시 시작한 검색 결과를 기존 순서 그대로 조립)
   const ragContext    = buildRagContext(ragChunks);
-  const customContext = await searchCustomKnowledge(userText);   // 팀 내부 추가 지식
-  const newsContext   = await fetchRecentNewsContext(userText);  // 뉴스 본문+제목
-  const lawTrackContext = await fetchLawTrackContext();          // 최근 법령 개정·입법예고 동향
-  const confluenceContext = buildConfluenceContext(await searchConfluence(userText)); // 팀 컨플루언스 실시간 검색(내부 문서)
-  const kbContext     = buildKbContext(await searchKbSummaries(userText));       // 법령·규제 요약 지식베이스(regulatory-kb, 현행본)
+  const customContext = await customP;                            // 팀 내부 추가 지식
+  const newsContext   = await newsP;                              // 뉴스 본문+제목
+  const lawTrackContext = await lawTrackP;                        // 최근 법령 개정·입법예고 동향
+  const confluenceContext = buildConfluenceContext(await confluenceP); // 팀 컨플루언스 실시간 검색(내부 문서)
+  const kbContext     = buildKbContext(await kbP);                // 법령·규제 요약 지식베이스(regulatory-kb, 현행본)
   const webSearchGuide = '\n\n---\n\n[웹 검색 도구 사용 지침]\n해외 규제·제도 비교, 최신 정책 동향 등 위 참조 자료(법령 RAG·추가 지식·뉴스)에 없는 사실 정보가 필요하면 web_search 도구로 확인 후 답변하세요. 특히 "한국 고유", "유일한", "주요국 중 한국만" 등 국가 간 비교 단정 표현은 검색으로 확인하기 전에는 사용하지 마세요. 국내 법령 해석은 RAG 원문을 최우선으로 하고 웹 검색은 보조로만 사용하세요.';
   const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + kbContext + customContext + newsContext + lawTrackContext + confluenceContext;
 
