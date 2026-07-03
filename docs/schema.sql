@@ -325,6 +325,32 @@ as $$
   limit match_count;
 $$;
 
+-- 3-2b) 승인 직후 임베딩 저장 (관리자 비밀번호 검증) ---------------------------
+-- anon은 document_chunks UPDATE가 RLS로 막혀 있고 batch_update_embeddings는
+-- service_role 전용이므로, admin_set_kb_approval과 동일한 SHA-256 검증 통로를 둠.
+-- 대시보드 승인 버튼 → voyage-embed(문서 모드) → 이 RPC로 저장. (배경역사 #23)
+create or replace function public.admin_update_chunk_embeddings(
+  p_ids bigint[], p_embeddings text[], p_pwd text)
+returns integer
+language plpgsql security definer
+set search_path to 'public', 'extensions'
+as $$
+declare n integer := 0; i integer;
+begin
+  if encode(digest(p_pwd, 'sha256'), 'hex') is distinct from '<관리자 비밀번호 SHA-256 — 실DB에만>' then
+    raise exception 'AUTH_FAILED';
+  end if;
+  if array_length(p_ids, 1) is distinct from array_length(p_embeddings, 1) then
+    raise exception 'LENGTH_MISMATCH';
+  end if;
+  for i in 1..coalesce(array_length(p_ids, 1), 0) loop
+    update document_chunks set embedding = p_embeddings[i]::vector where id = p_ids[i];
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+
 -- 3-3) 보고서 샘플 시맨틱 검색 -----------------------------------------------
 create or replace function public.match_report_samples(
   query_embedding extensions.vector,

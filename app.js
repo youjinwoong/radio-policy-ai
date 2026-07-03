@@ -210,6 +210,7 @@ async function searchKeywords(query, lawOnly) {
     return sb
       .from('document_chunks')
       .select('id, doc_name, doc_category, chunk_index, content, notice_no, article_no, effective_date')
+      .eq('is_approved', true)  // 승인 게이트: trgm·시맨틱 RPC와 동일하게 승인 전 문서 제외
       .ilike('content', '%' + kw + '%')
       .limit(4)
       .then(function(resp) { return resp.data || []; })
@@ -3324,6 +3325,48 @@ async function approveDoc(idx) {
   if (res.error) { _handleAdminRpcError(res.error, '승인'); return; }
   _kbDocsLoaded = false;   // KB 목록 재조회 유도
   await loadPendingApprovals();
+  // 승인 직후 임베딩 자동 생성 — 실패해도 승인은 유지되고 '임베딩 대기'로 남음(PC 백필 가능)
+  try {
+    var n = await embedDocChunks(doc.doc_name, pwd);
+    alert(n > 0 ? '승인 완료 — 의미검색 임베딩 ' + n + '건 자동 생성됨' : '승인 완료');
+  } catch(e) {
+    console.warn('자동 임베딩 실패(임베딩 대기 유지 — PC에서 backfill_embeddings.py로 보완):', e);
+    alert('승인은 완료됐습니다. 임베딩 자동 생성은 실패해 "임베딩 대기"로 남습니다 (PC 백필로 보완 가능).');
+  }
+  _kbDocsLoaded = false;
+}
+
+// 승인된 문서의 embedding NULL 청크를 Edge Function(voyage-embed)으로 채움 (배경역사 #23)
+async function embedDocChunks(docName, pwd) {
+  var resp = await sb.from('document_chunks')
+    .select('id, content')
+    .eq('doc_name', docName)
+    .is('embedding', null)
+    .order('id');
+  var rows = resp.data || [];
+  if (!rows.length) return 0;
+  var embeddings = [];
+  // Edge Function은 텍스트 1건씩 처리 — 동시 5건으로 순차 배치 (문서 저장용 input_type=document)
+  for (var i = 0; i < rows.length; i += 5) {
+    var batch = rows.slice(i, i + 5);
+    var embs = await Promise.all(batch.map(function(r) {
+      return sb.functions.invoke('voyage-embed', {
+        body: { query: r.content, model: 'voyage-4-lite', input_type: 'document' }
+      }).then(function(res2) {
+        if (res2.error || !res2.data || !res2.data.embedding) throw new Error('voyage-embed 실패');
+        return res2.data.embedding;
+      });
+    }));
+    embs.forEach(function(e) { embeddings.push(e); });
+  }
+  // 50건씩 서버 검증 RPC로 저장 (anon 직접 UPDATE는 RLS로 차단되어 있음)
+  for (var j = 0; j < rows.length; j += 50) {
+    var ids  = rows.slice(j, j + 50).map(function(r) { return r.id; });
+    var vecs = embeddings.slice(j, j + 50).map(function(e) { return '[' + e.join(',') + ']'; });
+    var r2 = await sb.rpc('admin_update_chunk_embeddings', { p_ids: ids, p_embeddings: vecs, p_pwd: pwd });
+    if (r2.error) throw new Error(r2.error.message);
+  }
+  return rows.length;
 }
 
 async function rejectDoc(idx) {
@@ -4448,7 +4491,7 @@ async function doPdfUpload() {
       closePdfUpload();
       var pendingNote = (_pdfUploadCtx === 'press')
         ? ''
-        : '\n\n⏳ 승인 대기 상태로 등록되었습니다. 설정 → 승인 대기 문서에서 승인해야 AI 자문에 반영됩니다.';
+        : '\n\n⏳ 승인 대기 상태로 등록되었습니다. 설정 → 승인 대기 문서에서 승인하면 AI 자문 반영 + 의미검색 임베딩까지 자동 생성됩니다.';
       var msg = totalFiles === 1
         ? '✅ "' + (docName || files[0].name.replace(/\.[^.]+$/, '')) + '" 업로드 완료!\n' + totalChunks + '개 청크가 등록되었습니다.' + pendingNote
         : '✅ ' + totalFiles + '개 파일 업로드 완료!\n총 ' + totalChunks + '개 청크가 등록되었습니다.' + pendingNote;
