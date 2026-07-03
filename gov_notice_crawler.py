@@ -86,24 +86,82 @@ def fetch_with_retry(url: str, timeout: int = 20):
 
 
 def parse_date(s: str) -> str:
+    """다양한 날짜 형식 → ISO 8601 변환. 파싱 실패 시 빈 문자열 반환.
+    (crawler.py의 다중 형식 해석기와 동일 — 날짜만 있는 기존 입력은 결과 불변,
+     시각 포함·ISO·상대 날짜 등 기존에 빈 값이 되던 형식이 추가로 파싱됨. 배경역사 #23)"""
     if not s:
         return ''
     s = s.strip()
-    m = re.match(r'(\d{4})[.\-](\d{1,2})[.\-](\d{1,2})', s)
+    now = datetime.now(KST)
+
+    # 1) ISO 8601 / RFC 3339
+    m = re.match(r'(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?', s)
     if m:
+        y, mo, d, h, mi, sec = m.group(1, 2, 3, 4, 5, 6)
+        sec = sec or '00'
         try:
-            dt = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=KST)
+            dt = datetime(int(y), int(mo), int(d), int(h), int(mi), int(sec), tzinfo=KST)
             return dt.isoformat()
         except Exception:
             pass
-    m = re.match(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일', s)
+
+    # 2) YYYY.MM.DD HH:MM:SS  /  YYYY.MM.DD HH:MM  /  YYYY.MM.DD
+    m = re.match(r'(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
     if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        h  = int(m.group(4)) if m.group(4) else 0
+        mi = int(m.group(5)) if m.group(5) else 0
+        sec = int(m.group(6)) if m.group(6) else 0
         try:
-            dt = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=KST)
+            dt = datetime(y, mo, d, h, mi, sec, tzinfo=KST)
             return dt.isoformat()
         except Exception:
             pass
-    return ''
+
+    # 3) 한국어 형식: 2024년 05월 28일 14:30
+    m = re.match(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        h  = int(m.group(4)) if m.group(4) else 0
+        mi = int(m.group(5)) if m.group(5) else 0
+        sec = int(m.group(6)) if m.group(6) else 0
+        try:
+            dt = datetime(y, mo, d, h, mi, sec, tzinfo=KST)
+            return dt.isoformat()
+        except Exception:
+            pass
+
+    # 4) 상대 날짜: N분 전, N시간 전, N일 전
+    m = re.search(r'(\d+)\s*(분|시간|일)\s*전', s)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        if unit == '분':
+            dt = now - timedelta(minutes=n)
+        elif unit == '시간':
+            dt = now - timedelta(hours=n)
+        else:
+            dt = now - timedelta(days=n)
+        return dt.isoformat()
+
+    # 5) 어제
+    if '어제' in s:
+        dt = now - timedelta(days=1)
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    # 6) MM.DD 형식 (연도 없음) → 현재 연도로 보정
+    m = re.match(r'^(\d{1,2})[./](\d{1,2})$', s)
+    if m:
+        mo, d = int(m.group(1)), int(m.group(2))
+        try:
+            dt = datetime(now.year, mo, d, tzinfo=KST)
+            if dt > now:
+                dt = dt.replace(year=now.year - 1)
+            return dt.isoformat()
+        except Exception:
+            pass
+
+    return ''  # 파싱 실패 — 호출자가 fallback 처리
 
 
 def get_existing_urls() -> tuple:

@@ -12,10 +12,18 @@ GitHub Actions에서 매일 11:00 KST 실행 (law_crawl.yml)
 """
 
 import os
+import sys
 import time
 import requests
 from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
+
+# Windows 스케줄러/cp949 콘솔에서 이모지·특수문자 print 크래시 방지 (배경역사 #19)
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 try:
     from dotenv import load_dotenv
@@ -85,6 +93,23 @@ def law_type_from_gubun(gubun: str) -> str:
 #  API 조회
 # ══════════════════════════════════════════════════════════
 
+def _api_get_with_retry(params: dict, timeout: int = 10,
+                        max_retry: int = 3, delay: int = 5):
+    """법제처 API 호출 + 일시 오류 재시도 — 하루 1회 잡이라 1회 실패가
+    하루치 누락으로 직결되는 것을 방지 (gov_notice_crawler와 동일 정책, 배경역사 #23)"""
+    for attempt in range(1, max_retry + 1):
+        try:
+            resp = requests.get(LAW_API_BASE, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            if attempt < max_retry:
+                print(f'  [재시도 {attempt}/{max_retry}] {e}')
+                time.sleep(delay)
+            else:
+                raise
+
+
 def fetch_laws(keyword: str, target: str, display: int = 20) -> list:
     """법제처 DRF API로 법령 목록 조회 (target=law 현행 / eflaw 시행예정)"""
     if not LAW_OC_KEY:
@@ -94,8 +119,7 @@ def fetch_laws(keyword: str, target: str, display: int = 20) -> list:
         'query': keyword, 'display': display, 'page': 1, 'sort': 'ddes',
     }
     try:
-        resp = requests.get(LAW_API_BASE, params=params, timeout=10)
-        resp.raise_for_status()
+        resp = _api_get_with_retry(params, timeout=10)
         data = resp.json()
         items = data.get('LawSearch', {}).get('law', [])
         if isinstance(items, dict):
@@ -115,8 +139,7 @@ def fetch_admrul(keyword: str, display: int = 20) -> list:
         'query': keyword, 'display': display, 'page': 1,
     }
     try:
-        resp = requests.get(LAW_API_BASE, params=params, timeout=10)
-        resp.raise_for_status()
+        resp = _api_get_with_retry(params, timeout=10)
         data = resp.json()
         items = data.get('AdmRulSearch', {}).get('admrul', [])
         if isinstance(items, dict):

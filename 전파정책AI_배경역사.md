@@ -376,6 +376,8 @@ HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검
 
 **적용 ② — news_feed 저장 견고화**: 실DB의 `idx_news_feed_url_unique`는 **이미 UNIQUE**였으나(중복 0건 확인), 문서 사본 docs/schema.sql이 일반 인덱스로 잘못 기록돼 있어 교정. gov_notice_crawler.py의 저장이 plain `insert` 배치라 **중복 URL 1건에 그 회차 배치 전체가 실패**할 수 있어, crawler.py와 동일한 `upsert(on_conflict='url', ignore_duplicates=True)` 패턴으로 통일.
 
+**적용 ③ — 크롤러 견고화 2종 + cp949 가드 보강**: (1) gov_notice_crawler.py의 `parse_date`를 crawler.py의 다중 형식 해석기로 교체 — 날짜만 있는 기존 입력은 결과 불변(테스트로 확인), 시각 포함·ISO·상대날짜 등 기존에 빈 값이 되던 형식이 추가로 파싱됨. (2) law_crawler.py·assembly_crawler.py API 호출에 3회/5초 재시도 부여 — 하루 1회 잡이라 일시 오류 1회가 하루치 누락으로 직결되던 것을 방지(gov와 동일 정책). (3) 검증 중 law_crawler.py가 cp949 콘솔에서 `—`(em dash) print로 즉사하는 것을 발견 — #19 가드(`sys.stdout.reconfigure(encoding="utf-8")`)가 law·assembly에는 없었음(평소 GitHub Actions에서만 돌아 잠복). 두 파일에 가드 추가. 세 크롤러 수동 실행으로 정상 완주 확인.
+
 **검토 후 기각한 항목 (이유 기록 — 재제안 방지)**:
 - **crawler.py Haiku 프롬프트 캐싱**: Haiku 4.5 캐시 최소 프리픽스 4,096토큰인데 분류 프롬프트는 ~2,000자로 미달 → cache_control 붙여도 조용히 무시(절감 0). 게다가 시스템 프롬프트가 기사 제목별 유사 피드백 사례를 포함해 기사마다 달라 캐시 부적합. 대시보드(app.js) 고정 프롬프트 ~10KB는 조건 충족 — 원하면 그쪽만 적용 가능(단발 질문 위주면 캐시쓰기 +25% 할증으로 미세 손해, 연속 질문 위주면 이득).
 - **Haiku 분류 배치화**: 기사별 맞춤 피드백 사례(get_feedback_examples)가 핵심 개인화 기능이라 배치 시 포기/재설계 필요 → 분류 품질 리스크 대비 절감액(월 2~3만원)이 작아 기각.
