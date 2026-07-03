@@ -271,7 +271,10 @@ async function searchKeywords(query, lawOnly) {
     console.log('시맨틱 검색:', semanticRows.length + '개 청크');
   }
 
-  // 하이브리드 점수: 키워드(기본 가중치 2배) + trgm×5 + 시맨틱×10
+  // 하이브리드 점수(정규화): 키워드는 무제한 누적이라 결과 내 최대값으로 0~1 정규화,
+  // trgm·시맨틱은 원래 0~1 절대 척도라 그대로 사용하되 시맨틱(의미 유사도)에 2배 가중.
+  // 흔한 단어 물량이 의미 적합도를 압도하던 문제 교정 (배경역사 #23)
+  var maxKwScore = 0;
   results.forEach(function(r) {
     var score = 0;
     for (var ki = 0; ki < Math.min(keywords.length, 10); ki++) {
@@ -281,9 +284,12 @@ async function searchKeywords(query, lawOnly) {
       if ((r.doc_name || '').toLowerCase().includes(kw)) score += w;
     }
     r._score = score;
-    r._hybrid_score = score
-      + (r._trgm_score     ? r._trgm_score     * 5  : 0)
-      + (r._semantic_score ? r._semantic_score  * 10 : 0);
+    if (score > maxKwScore) maxKwScore = score;
+  });
+  results.forEach(function(r) {
+    r._hybrid_score = (maxKwScore > 0 ? r._score / maxKwScore : 0)
+      + (r._trgm_score     || 0)
+      + (r._semantic_score || 0) * 2;
   });
   results.sort(function(a, b) { return b._hybrid_score - a._hybrid_score; });
 
