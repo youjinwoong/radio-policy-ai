@@ -145,11 +145,15 @@ async function expandQueryKeywords(query) {
   } catch(e) { console.warn('쿼리 확장 실패 (기본 키워드로 진행):', e); return []; }
 }
 
-async function getQueryEmbedding(query) {
+async function getQueryEmbedding(query, model) {
   // Supabase Edge Function(voyage-embed)으로 질의 임베딩 생성 (키 노출 없음)
+  // model 미지정=voyage-4-lite(document_chunks 조문) / 'voyage-law-2'(kb_chunks 법령요약).
+  // 저장·질의 모델은 반드시 일치해야 함(모델별 임베딩 공간이 달라 혼용 시 검색 무의미).
   try {
     if (!sb) return null;
-    var result = await sb.functions.invoke('voyage-embed', { body: { query: query } });
+    var body = { query: query };
+    if (model) body.model = model;
+    var result = await sb.functions.invoke('voyage-embed', { body: body });
     if (result.error) { console.warn('voyage-embed 오류:', result.error); return null; }
     return (result.data && result.data.embedding) ? result.data.embedding : null;
   } catch(e) { console.warn('시맨틱 임베딩 실패 (폴백):', e); return null; }
@@ -364,6 +368,50 @@ function buildConfluenceContext(pages) {
     '아래는 사내 컨플루언스에서 질문과 관련해 실시간 검색한 팀 문서입니다. 팀 내부 방침·업무 맥락·과거 논의·담당 업무를 물을 때 참고하세요. ' +
     '단, 법령·고시의 정확한 조문 인용은 위 RAG 원문을 최우선으로 하고, 팀 문서는 내부 맥락 보강용으로만 쓰세요. ' +
     '팀 문서를 근거로 답할 때는 문서 제목과 링크를 함께 제시하세요:\n\n' + items.join('\n\n---\n\n');
+}
+
+// ── 법령·규제 요약 지식베이스(regulatory-kb / kb_chunks) ──
+// document_chunks(조문 원문)와 별개 레이어. 조문 원문 인용은 RAG 우선, 여기는 요약·적용범위·실무 맥락.
+// 시맨틱은 법률 특화 voyage-law-2로 질의 임베딩(저장도 law-2) + trgm 병행. 기본 현행본(current)만.
+async function searchKbSummaries(query) {
+  try {
+    if (!sb || !query || query.trim().length < 2) return [];
+    var trgmP = sb.rpc('search_kb_chunks_trgm', { query_text: query, match_threshold: 0.10, match_count: 6, only_current: true })
+      .then(function(r) { return r.data || []; }).catch(function(e) { console.warn('kb trgm 오류(건너뜀):', e); return []; });
+    var semP = getQueryEmbedding(query, 'voyage-law-2').then(function(emb) {
+      if (!emb) return [];
+      return sb.rpc('match_kb_chunks_semantic', { query_embedding: emb, match_threshold: 0.35, match_count: 6, only_current: true })
+        .then(function(r) { return r.data || []; }).catch(function(e) { console.warn('kb 시맨틱 오류(건너뜀):', e); return []; });
+    });
+    var trgm = await trgmP, sem = await semP;
+    var seen = {}, out = [];
+    var key = function(r) { return r.doc_id + ':' + r.chunk_idx; };
+    sem.forEach(function(r) { r._score = (r.similarity || 0) * 10; out.push(r); seen[key(r)] = r; });
+    trgm.forEach(function(r) {
+      var k = key(r);
+      if (seen[k]) { seen[k]._score += (r.trgm_score || 0) * 5; }
+      else { r._score = (r.trgm_score || 0) * 5; out.push(r); seen[k] = r; }
+    });
+    out.sort(function(a, b) { return b._score - a._score; });
+    return out.slice(0, 5);
+  } catch(e) { console.warn('법령요약 검색 실패(건너뜀):', e); return []; }
+}
+
+function buildKbContext(rows) {
+  if (!rows || rows.length === 0) return '';
+  var items = rows.map(function(r, i) {
+    var meta = [];
+    if (r.law_type) meta.push(r.law_type);
+    if (r.law_number) meta.push('법령번호: ' + r.law_number);
+    if (r.enforcement_date) meta.push('시행일: ' + r.enforcement_date);
+    var metaStr = meta.length ? ' [' + meta.join(' | ') + ']' : '';
+    return '[법령요약 ' + (i+1) + '] ' + (r.title || '') + metaStr + '\n' + (r.content || '');
+  });
+  return '\n\n---\n\n[법령·규제 요약 지식베이스 — 현행 법령·고시·훈령 요약/실무]\n' +
+    '아래는 우리 팀이 정리한 법령·고시·훈령의 요약·적용범위·실무 체크리스트·소관부처 문서(현행본)입니다. ' +
+    '법의 취지·실무 대응·담당부처를 물을 때 활용하세요. ' +
+    '단, 정확한 조문 번호·문구 인용은 위 RAG 조문 원문을 최우선으로 하고, 이 요약은 실무 맥락 보강용으로 쓰세요:\n\n' +
+    items.join('\n\n---\n\n');
 }
 
 // ════════════════════════════════════════════
@@ -1034,8 +1082,9 @@ async function callClaude(userText, onDelta) {
   const newsContext   = await fetchRecentNewsContext(userText);  // 뉴스 본문+제목
   const lawTrackContext = await fetchLawTrackContext();          // 최근 법령 개정·입법예고 동향
   const confluenceContext = buildConfluenceContext(await searchConfluence(userText)); // 팀 컨플루언스 실시간 검색(내부 문서)
+  const kbContext     = buildKbContext(await searchKbSummaries(userText));       // 법령·규제 요약 지식베이스(regulatory-kb, 현행본)
   const webSearchGuide = '\n\n---\n\n[웹 검색 도구 사용 지침]\n해외 규제·제도 비교, 최신 정책 동향 등 위 참조 자료(법령 RAG·추가 지식·뉴스)에 없는 사실 정보가 필요하면 web_search 도구로 확인 후 답변하세요. 특히 "한국 고유", "유일한", "주요국 중 한국만" 등 국가 간 비교 단정 표현은 검색으로 확인하기 전에는 사용하지 마세요. 국내 법령 해석은 RAG 원문을 최우선으로 하고 웹 검색은 보조로만 사용하세요.';
-  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + customContext + newsContext + lawTrackContext + confluenceContext;
+  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + kbContext + customContext + newsContext + lawTrackContext + confluenceContext;
 
   chatHistory.push({ role: 'user', content: userText });
 

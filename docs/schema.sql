@@ -1,0 +1,445 @@
+-- ============================================================================
+--  전파정책 AI — 데이터베이스 설치 스크립트 (schema.sql)  [배포용 / 강의용]
+-- ----------------------------------------------------------------------------
+--  사용법 (각 수강생이 자기 Supabase 프로젝트에서 1회 실행)
+--    1) Supabase 대시보드 → 왼쪽 메뉴 'SQL Editor' → 'New query'
+--    2) 이 파일 내용 전체를 복사해서 편집창에 붙여넣기
+--    3) 오른쪽 아래 'Run' 클릭 → 초록색 'Success' 확인
+--    4) 'Table Editor'에서 표(news_feed, law_amendments, document_chunks ...)가
+--       생겼는지 확인하면 완료
+--
+--  주의
+--    * 이 스크립트는 '표 구조'만 만듭니다. 데이터는 들어있지 않습니다(정상).
+--    * 임베딩(AI 검색)은 1024차원(Voyage voyage-4-lite) 기준입니다.
+--    * Edge Function(voyage-embed), Storage 키, API 키는 별도 단계에서 설정합니다.
+--    * 키 값(claude_key 등)은 이 파일에 적지 말고, 각자 콘솔에서 입력하세요.
+-- ============================================================================
+
+
+-- ===========================================================================
+-- 0. 확장(EXTENSION) — AI 검색(vector) + 한글 유사검색(pg_trgm)
+-- ===========================================================================
+create extension if not exists vector  with schema extensions;   -- pgvector (임베딩)
+create extension if not exists pg_trgm with schema extensions;   -- 부분문자열 유사검색
+
+
+-- ===========================================================================
+-- 1. 테이블 (TABLES)
+-- ===========================================================================
+
+-- 1-1) 뉴스 피드 -------------------------------------------------------------
+create table if not exists public.news_feed (
+  id                 uuid primary key default gen_random_uuid(),
+  title              text not null,
+  source             text,
+  category           text,
+  url                text,
+  is_read            boolean default false,
+  published_at       timestamptz,
+  created_at         timestamptz default now(),
+  content            text,
+  content_fetched_at timestamptz,
+  briefed_date       date,
+  summary            text,
+  importance         text default '참고',
+  urgency            text default '참고',
+  locked             boolean not null default false
+);
+comment on table public.news_feed is '뉴스 본문·요약·긴급도(15일 유지). 내부값 긴급/보통/참고';
+
+-- 1-2) 삭제 기사 블록리스트(재수집 방지) -------------------------------------
+create table if not exists public.deleted_news (
+  id         bigint generated always as identity primary key,
+  url        text,
+  title      text,
+  deleted_at timestamptz not null default now()
+);
+
+-- 1-3) 긴급도 수동 수정 학습 데이터 ------------------------------------------
+create table if not exists public.importance_feedback (
+  id              bigint generated always as identity primary key,
+  news_id         uuid unique,
+  title           text,
+  summary         text,
+  ai_importance   text,
+  user_importance text,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+-- 1-4) 피드백 증류 규칙 캐시(단일 행 id=1) -----------------------------------
+create table if not exists public.feedback_rules (
+  id             integer primary key,
+  rules          text,
+  feedback_count integer not null default 0,
+  updated_at     timestamptz not null default now()
+);
+
+-- 1-5) 일일 브리핑 원문 ------------------------------------------------------
+create table if not exists public.daily_briefings (
+  id           uuid primary key default gen_random_uuid(),
+  briefing_date date unique not null,
+  content      text not null,
+  news_count   integer default 0,
+  terms_count  integer default 0,
+  created_at   timestamptz default now()
+);
+
+-- 1-6) 법령·고시·입법예고 ----------------------------------------------------
+create table if not exists public.law_amendments (
+  id               uuid primary key default gen_random_uuid(),
+  law_id           text unique not null,
+  law_nm           text not null,
+  law_type         text not null,             -- law/bylaw/rules/admrul/lsAnc
+  ann_type         text,
+  public_dt        text,
+  enf_dt           text,
+  public_no        text,
+  matched_keywords text[],
+  link_url         text,
+  prev_public_dt   text,
+  created_at       timestamptz default now(),
+  updated_at       timestamptz default now(),
+  summary          text
+);
+
+-- 1-7) 국회 법안 -------------------------------------------------------------
+create table if not exists public.assembly_bills (
+  id               uuid primary key default gen_random_uuid(),
+  bill_id          text unique not null,
+  bill_no          text,
+  bill_name        text not null,
+  proposer         text,
+  committee        text,
+  proc_result      text default '접수',
+  propose_dt       text,
+  proc_dt          text,
+  age              integer default 22,
+  matched_keywords text[],
+  link_url         text,
+  prev_proc_result text,
+  created_at       timestamptz default now(),
+  updated_at       timestamptz default now(),
+  summary          text
+);
+comment on table public.assembly_bills is '국회 의안 모니터링 — 전파/통신 관련 법안 추적';
+
+-- 1-8) RAG 청크(법령·고시·보도자료) — 임베딩 1024 ---------------------------
+create table if not exists public.document_chunks (
+  id             bigint generated by default as identity primary key,
+  doc_name       text not null,
+  doc_category   text,
+  chunk_index    integer,
+  content        text not null,
+  created_at     timestamptz default now(),
+  notice_no      text,
+  article_no     text,
+  effective_date text,
+  embedding      extensions.vector(1024),
+  file_path      text,
+  is_approved    boolean not null default true
+);
+
+-- 1-9) 보고서 샘플(형식·톤 학습용, 청킹 안 함) ------------------------------
+create table if not exists public.report_samples (
+  id          bigint generated always as identity primary key,
+  title       text not null,
+  report_type text,                           -- 정책검토/규제영향/동향보고/기타
+  content     text not null,
+  summary     text,
+  embedding   extensions.vector(1024),
+  created_at  timestamptz default now()
+);
+
+-- 1-10) 보고서 스타일 가이드 캐시(단일 행 id=1) ------------------------------
+create table if not exists public.report_style_rules (
+  id             integer primary key default 1,
+  rules          text,
+  sample_count   integer default 0,
+  updated_at     timestamptz default now(),
+  feedback_count integer default 0
+);
+
+-- 1-11) 보고서 '항상 적용' 영구 지시 ----------------------------------------
+create table if not exists public.report_directives (
+  id         bigint generated always as identity primary key,
+  directive  text not null,
+  created_at timestamptz default now()
+);
+
+-- 1-12) 보고서 피드백(편집-diff 학습 데이터) --------------------------------
+create table if not exists public.report_feedback (
+  id         bigint generated always as identity primary key,
+  request    text,
+  draft      text,
+  final      text,
+  rating     smallint,
+  created_at timestamptz default now()
+);
+
+-- 1-13) 팀 추가 지식(수동 입력) ---------------------------------------------
+create table if not exists public.custom_knowledge (
+  id         bigint generated by default as identity primary key,
+  title      text not null,
+  content    text not null,
+  category   text default '일반',
+  tags       text[] default '{}',
+  created_at timestamptz default now(),
+  is_active  boolean default true
+);
+
+-- 1-14) 기술 용어 사전 -------------------------------------------------------
+create table if not exists public.tech_terms (
+  id            uuid primary key default gen_random_uuid(),
+  term          text unique not null,
+  term_en       text,
+  category      text default '기타',
+  definition    text,
+  description   text,
+  diagram_html  text,
+  source        text,
+  source_url    text,
+  related_terms text[],
+  is_reviewed   boolean default false,
+  created_at    timestamp default now(),
+  updated_at    timestamp default now()
+);
+
+-- 1-15) 지식베이스 문서 메타(법령/고시/ITU-R 등) ----------------------------
+create table if not exists public.documents (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  type       text check (type = any (array[
+               '법령','고시','ITU-R','전파법','전파법_시행령','전파법_시행규칙',
+               '전기통신사업법','전기통신사업법_시행령','방송통신발전기본법',
+               '방송통신발전기본법_시행령','기술기준','적합성평가','주파수할당',
+               '주파수분배표','전자파','정보통신망법','정보통신기반시설','방송통신설비'])),
+  version    text,
+  file_url   text,
+  file_path  text,
+  status     text default '최신' check (status = any (array['최신','업로드필요','개정예고'])),
+  updated_at timestamptz default now()
+);
+
+-- 1-16) 변경 이력 -----------------------------------------------------------
+create table if not exists public.changes (
+  id          uuid primary key default gen_random_uuid(),
+  doc_name    text not null,
+  change_type text check (change_type = any (array['개정','폐지','제정','예고'])),
+  description text,
+  source_url  text,
+  detected_at timestamptz default now()
+);
+
+-- 1-17) 시스템 상태(키-값) ---------------------------------------------------
+create table if not exists public.system_status (
+  key        text primary key,
+  value      text,
+  updated_at timestamptz default now()
+);
+
+-- 1-18) 앱 설정(키-값) — claude_key 등은 콘솔에서 직접 입력 -----------------
+create table if not exists public.app_config (
+  key   text primary key,
+  value text not null
+);
+
+-- 1-19) AI 자문 이력 ---------------------------------------------------------
+create table if not exists public.chat_logs (
+  id         uuid primary key default gen_random_uuid(),
+  question   text not null,
+  answer     text not null,
+  category   text,
+  sources    text,
+  created_at timestamptz default now()
+);
+
+
+-- ===========================================================================
+-- 2. 인덱스 (INDEXES) — 검색 속도 + AI 시맨틱 검색(HNSW)
+-- ===========================================================================
+create index if not exists idx_news_feed_url_unique     on public.news_feed using btree (url);   -- 중복 방지(고유)
+create index if not exists idx_news_feed_locked          on public.news_feed using btree (locked) where (locked = true);
+
+create index if not exists assembly_bills_proc_result_idx on public.assembly_bills using btree (proc_result);
+create index if not exists assembly_bills_propose_dt_idx  on public.assembly_bills using btree (propose_dt desc);
+
+create index if not exists law_amendments_law_type_idx    on public.law_amendments using btree (law_type);
+create index if not exists law_amendments_public_dt_idx   on public.law_amendments using btree (public_dt);
+
+create index if not exists document_chunks_category_idx   on public.document_chunks using btree (doc_category);
+create index if not exists document_chunks_doc_name_idx   on public.document_chunks using btree (doc_name);
+create index if not exists document_chunks_content_idx    on public.document_chunks using gin (to_tsvector('simple', content));
+create index if not exists document_chunks_content_trgm_idx on public.document_chunks using gin (content extensions.gin_trgm_ops);
+create index if not exists document_chunks_embedding_hnsw_idx
+  on public.document_chunks using hnsw (embedding extensions.vector_cosine_ops) with (m = '16', ef_construction = '64');
+
+create index if not exists report_samples_embedding_idx
+  on public.report_samples using hnsw (embedding extensions.vector_cosine_ops);
+
+create index if not exists tech_terms_category_idx on public.tech_terms using btree (category);
+create index if not exists tech_terms_term_idx     on public.tech_terms using btree (term);
+create index if not exists tech_terms_content_idx  on public.tech_terms using gin
+  (to_tsvector('simple', (((term || ' ') || coalesce(definition,'')) || ' ') || coalesce(description,'')));
+
+
+-- ===========================================================================
+-- 3. 검색 함수 (RPC) — 대시보드 AI 자문 / 보고서 초안이 호출
+-- ===========================================================================
+
+-- 3-1) 시맨틱(벡터) 검색 -----------------------------------------------------
+create or replace function public.match_chunks_semantic(
+  query_embedding extensions.vector,
+  match_threshold double precision default 0.5,
+  match_count integer default 8)
+returns table(id bigint, doc_name text, doc_category text, chunk_index integer,
+  content text, notice_no text, article_no text, effective_date text, similarity double precision)
+language sql stable security definer
+as $$
+  select id, doc_name, doc_category, chunk_index, content,
+         notice_no, article_no, effective_date,
+         (1 - (embedding <=> query_embedding))::float as similarity
+  from public.document_chunks
+  where embedding is not null and is_approved
+    and (1 - (embedding <=> query_embedding)) > match_threshold
+  order by embedding <=> query_embedding
+  limit match_count;
+$$;
+
+-- 3-2) 부분문자열(trgm) 검색 -------------------------------------------------
+create or replace function public.search_chunks_trgm(
+  query_text text,
+  match_threshold double precision default 0.12,
+  match_count integer default 8)
+returns table(id bigint, doc_name text, doc_category text, chunk_index integer,
+  content text, notice_no text, article_no text, effective_date text, trgm_score double precision)
+language sql stable security definer
+as $$
+  select id, doc_name, doc_category, chunk_index, content,
+         notice_no, article_no, effective_date,
+         extensions.word_similarity(query_text, content)::float as trgm_score
+  from public.document_chunks
+  where is_approved
+    and extensions.word_similarity(query_text, content) > match_threshold
+  order by trgm_score desc
+  limit match_count;
+$$;
+
+-- 3-3) 보고서 샘플 시맨틱 검색 -----------------------------------------------
+create or replace function public.match_report_samples(
+  query_embedding extensions.vector,
+  match_count integer default 2,
+  filter_type text default null)
+returns table(id bigint, title text, report_type text, content text, similarity double precision)
+language sql stable
+as $$
+  select rs.id, rs.title, rs.report_type, rs.content,
+         1 - (rs.embedding <=> query_embedding) as similarity
+  from public.report_samples rs
+  where rs.embedding is not null
+    and (filter_type is null or rs.report_type = filter_type)
+  order by rs.embedding <=> query_embedding
+  limit match_count;
+$$;
+
+-- 3-4) 지식베이스 문서 목록 --------------------------------------------------
+create or replace function public.list_kb_documents()
+returns table(doc_category text, doc_name text, chunks bigint, embedded bigint, approved boolean)
+language sql stable
+as $$
+  select min(doc_category) as doc_category, doc_name, count(*) as chunks,
+         count(*) filter (where embedding is not null) as embedded,
+         bool_and(is_approved) as approved
+  from public.document_chunks
+  where doc_category is distinct from '보도자료'
+  group by doc_name
+  order by doc_name;
+$$;
+
+
+-- ===========================================================================
+-- 4. 초기 단일행 시드 (캐시 테이블) — 없으면 코드가 기대하는 id=1 행 생성
+-- ===========================================================================
+insert into public.report_style_rules (id) values (1) on conflict (id) do nothing;
+insert into public.feedback_rules (id, feedback_count) values (1, 0) on conflict (id) do nothing;
+
+
+-- ===========================================================================
+-- 5. RLS(행 보안) — 보고서/지식/자문 테이블만 활성 + anon 전체 정책
+--    (대시보드는 anon 키로 접근하므로 정책이 있어야 동작)
+-- ===========================================================================
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'document_chunks','report_samples','report_style_rules',
+    'report_directives','report_feedback','chat_logs']
+  loop
+    execute format('alter table public.%I enable row level security;', t);
+    execute format($p$create policy "anon_all_%1$s" on public.%1$I
+                       for all to anon using (true) with check (true);$p$, t);
+  end loop;
+exception when duplicate_object then null;   -- 정책이 이미 있으면 무시
+end $$;
+
+
+-- ===========================================================================
+-- 6. Storage 버킷 (uploads, private) — 원본 파일 보관
+-- ===========================================================================
+insert into storage.buckets (id, name, public)
+values ('uploads', 'uploads', false)
+on conflict (id) do nothing;
+
+do $$
+begin
+  create policy "uploads_anon_all" on storage.objects
+    for all to anon
+    using (bucket_id = 'uploads') with check (bucket_id = 'uploads');
+exception when duplicate_object then null;
+end $$;
+
+
+-- ============================================================================
+--  regulatory-kb (OKF 법령 요약 레이어) — kb_documents / kb_chunks
+--  document_chunks(조문 원문)와 별개 레이어. 조문 인용은 그쪽, 요약·실무는 이쪽.
+--  임베딩은 voyage-law-2(1024). 적재: import_regulatory_kb.py / add_law.py. (배경역사 #21)
+-- ============================================================================
+create table if not exists public.kb_documents (
+  id bigint generated by default as identity primary key,
+  dedup_key text, title text not null, concept_type text, family text,
+  law_type text, law_number text, enforcement_date text, competent_authority text,
+  status text not null default 'current', superseded_by text,
+  path text not null, description text, body_md text, created_at timestamptz default now()
+);
+create unique index if not exists kb_documents_path_uidx on public.kb_documents(path);
+create index if not exists kb_documents_dedup_key_idx on public.kb_documents(dedup_key);
+create index if not exists kb_documents_status_idx on public.kb_documents(status);
+
+create table if not exists public.kb_chunks (
+  id bigint generated by default as identity primary key,
+  doc_id bigint not null references public.kb_documents(id) on delete cascade,
+  chunk_idx integer, content text not null, embedding vector(1024), created_at timestamptz default now()
+);
+create index if not exists kb_chunks_doc_id_idx on public.kb_chunks(doc_id);
+create index if not exists kb_chunks_content_trgm_idx on public.kb_chunks using gin (content gin_trgm_ops);
+create index if not exists kb_chunks_embedding_hnsw_idx on public.kb_chunks using hnsw (embedding vector_cosine_ops) with (m='16', ef_construction='64');
+
+alter table public.kb_documents enable row level security;
+alter table public.kb_chunks enable row level security;
+-- 정책: kb_documents_anon_select / kb_chunks_anon_select (for select to anon using(true)).
+-- RPC: match_kb_chunks_semantic / search_kb_chunks_trgm (기본 only_current=true) / insert_kb_chunks(적재용).
+
+-- ============================================================================
+--  여기까지 'Run' 성공이면 데이터베이스 준비 완료!
+--
+--  남은 설정 (SQL 아님 — 콘솔/단계에서)
+--   (A) Anthropic 키 등록: 대시보드가 app_config.claude_key 를 읽습니다.
+--        예) insert into public.app_config(key,value)
+--               values ('claude_key','sk-ant-여기에-본인-키');   -- 직접 입력
+--   (B) Edge Function 'voyage-embed' 배포 + Secrets(VOYAGE_API_KEY) 설정
+--   (C) GitHub Secrets 입력 후 Actions 워크플로우 'Enable'
+--
+--  [참고/선택] 고급 자동복구(pg_cron + GitHub PAT 디스패치, 무음실패 알림)는
+--  운영자 저장소(repo)·Vault에 종속된 기능이라 이 배포본에서는 제외했습니다.
+--  필요하면 강사가 별도 안내합니다.
+-- ============================================================================
