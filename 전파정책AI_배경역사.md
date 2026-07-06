@@ -366,6 +366,8 @@ HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검
 
 **교훈**: ① .bat을 편집한 세션이 곧 .bat을 깨뜨린 세션 — 편집 후 바이트 검증이 유일한 안전망(git status 무용). ② 공유 PC는 누가 언제 다른 Python을 깔지 모른다 — 스케줄러가 부르는 인터프리터는 반드시 전체 경로로 고정. ③ "스케줄러는 실행됐다"와 "스크립트가 돌았다"는 다르다 — 판정은 heartbeat(system_health)와 각 작업의 LastTaskResult로.
 
+**후속 (2026-07-06) — 주말 전원 공백으로 heartbeat 경고 재발 → StartWhenAvailable 도입**: 7/3(금) 17:00 실행 시각과 주말(7/4~7/5) 내내 PC가 꺼져 있어 정부고시 heartbeat가 다시 "3일 전" 경고. 월요일 부팅(08:59) 시 스케줄러가 누락을 감지했지만(이벤트 153) 당시 StartWhenAvailable=false라 보충 실행 없이 0x800710E0(거부)만 기록. 수동 따라잡기(신규 2건 수집) 후, 운영자가 관리자 PowerShell로 `New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries` + `Set-ScheduledTask`를 적용 → **놓친 17:00 실행이 다음 부팅 직후 자동 보충**되도록 변경(트리거·동작·시작 위치는 무변경, XML 검증 완료). 매일 1회 실행 작업의 구조적 공백(조기 퇴근·연휴)에 대한 항구 대책. RefetchContent는 매시 실행이라 부팅 후 최대 1시간 내 자가 회복되므로 불필요.
+
 ---
 
 ## 23. 구조 최적화 1차 — AI 자문 검색 병렬화 + news_feed 저장 견고화 (2026-07-03)
