@@ -1975,10 +1975,13 @@ function renderNewsList() {
           group.map(function(n) {
             var rule = IMPORTANCE_RULES[n._importance] || IMPORTANCE_RULES['참고'];
             var urlIcon = n.url ? ' <a href="' + n.url + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:11px"><i class="ti ti-external-link"></i></a>' : '';
-            return '<div onclick="showNewsDetail(\'' + n.id + '\')" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border-tertiary);cursor:pointer">' +
-              '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '" style="flex-shrink:0"></div>' +
+            return '<div onclick="showNewsDetail(\'' + n.id + '\')" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border-tertiary);cursor:pointer">' +
+              '<div class="news-dot ' + (n.is_read ? 'dot-read' : 'dot-new') + '" style="flex-shrink:0;margin-top:4px"></div>' +
               '<span style="font-size:12px;font-weight:700;color:' + rule.color + ';background:' + rule.bg + ';padding:1px 6px;border-radius:4px;flex-shrink:0">' + rule.label + '</span>' +
-              '<span style="font-size:13px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + n.title + urlIcon + '</span>' +
+              '<div style="flex:1;min-width:0;overflow:hidden">' +
+                '<div style="font-size:13px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + n.title + urlIcon + '</div>' +
+                (n.summary ? '<div style="margin-top:2px;font-size:11px;color:var(--text-tertiary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">' + n.summary.slice(0, 80) + (n.summary.length > 80 ? '…' : '') + '</div>' : '') +
+              '</div>' +
               '<span style="font-size:11px;color:var(--text-tertiary);flex-shrink:0;margin-left:8px">' + (n.source||'') + '</span>' +
               '<span onclick="event.stopPropagation();deleteNewsItem(\'' + n.id + '\')" title="기사 삭제" style="cursor:pointer;font-size:11px;color:var(--text-tertiary);opacity:.5;flex-shrink:0;margin-left:6px"><i class="ti ti-trash"></i></span>' +
             '</div>';
