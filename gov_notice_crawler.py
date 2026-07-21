@@ -534,11 +534,12 @@ def _fetch_opinion_reason(href: str):
         return None
     full = soup.get_text('\n', strip=True)
     # "개정이유/제정이유" 헤더부터 "의견제출/그 밖의 사항" 직전까지가 핵심 본문
-    m = re.search(r'(제\s*·?\s*개정이유|개정이유|제정이유)', full)
+    # 부처마다 "개정 이유"처럼 띄어 쓰기도 하므로 공백 허용 (배경역사 #25)
+    m = re.search(r'(?:제\s*·?\s*)?(?:개\s*정|제\s*정)\s*이\s*유', full)
     if not m:
         return ''  # 본문 마커 없음 — 추출 불가(재시도 방지로 '' 저장)
     body = full[m.start():]
-    for end_kw in ('의견제출', '그 밖의 사항', '그밖의 사항'):
+    for end_kw in ('의견제출', '의견 제출', '그 밖의 사항', '그밖의 사항'):
         idx = body.find(end_kw)
         if idx > 0:
             body = body[:idx]
@@ -575,7 +576,11 @@ def _summarize_opinion(law_nm: str, reason: str) -> str:
 def backfill_opinion_summaries(limit: int = 30):
     """summary가 비어 있는 입법예고(lsAnc) 행을 상세 본문 → Haiku 요약으로 채움.
     멱등: 호출/요약 실패 시 NULL 유지(다음 실행 재시도), 본문 없으면 ''로 표시(재시도 방지)."""
-    if not ANTHROPIC_API_KEY or anthropic is None:
+    if anthropic is None:
+        # SYSTEM 계정 실행 시 --user 설치 패키지는 안 보임 — 전역 site-packages 설치 필요 (배경역사 #25)
+        print('[입법예고 요약] anthropic 모듈 import 실패(전역 site-packages 설치 확인) — 요약 생략')
+        return
+    if not ANTHROPIC_API_KEY:
         print('[입법예고 요약] ANTHROPIC_API_KEY 미설정 — 요약 생략')
         return
     try:
