@@ -111,7 +111,8 @@ C:\Users\SKTelecom\Desktop\frequence\radio-policy-ai\
 내 보고서 **형식·톤** + 법령·자료(RAG) **내용 근거**로 보고서 초안 생성. 핵심: 내용은 RAG에서, 형식·톤은 내 보고서에서.
 
 - 메뉴: [자문] › 보고서 초안 제안 (탭2 — 초안 생성 / 내 보고서 관리)
-- 생성: claude-sonnet-4-6, stream:true, web_search 3회 (callReportDraft). 증류: claude-haiku-4-5 (distillReportStyle).
+- 생성: claude-sonnet-5, stream:true, web_search 3회 (callReportDraft). 증류: claude-haiku-4-5 (distillReportStyle).
+- **상위 모델(Sonnet 계열)은 자문·보고서·DIFF·용어상세 4곳 + 백필 스크립트에서만 사용** — 모델 교체 시 app.js 6곳과 backfill_term_details.py를 함께 바꿔야 생성물 형식·품질 일치. Haiku 경로는 비용 구조상 그대로 둘 것. (배경역사 #27)
 - **개인화 학습 채널 3종** (쓸수록 내 톤 수렴):
   1. **말로 지시(onReviseDraft)** — `이번만`(다회 대화식 즉석 수정, 기억 안 함) / `항상 적용`(report_directives 영구 저장→모든 초안 최우선 주입, 관리 탭에서 삭제)
   2. **빨간펜(편집-diff)** — "고쳐서 최종본 채택"(saveReportFinal→report_feedback.final). 초안↔최종본 차이를 증류에 "반드시 반영". 채택본은 "예시 보고서로 추가"로 승격(선택)
@@ -140,7 +141,7 @@ C:\Users\SKTelecom\Desktop\frequence\radio-policy-ai\
 ## 대시보드 (GitHub Pages)
 
 - URL: https://youjinwoong.github.io/radio-policy-ai/
-- **수정 배포 시 index.html 캐시 버스터 `app.js?v=`·`styles.css?v=` 갱신 필수 (현재 `app.js?v=20260721a` / `styles.css?v=20260620a`)** — CSS 고칠 때 styles.css 버스터도 갱신해야 사용자 브라우저가 새로 받음
+- **수정 배포 시 index.html 캐시 버스터 `app.js?v=`·`styles.css?v=` 갱신 필수 (현재 `app.js?v=20260721b` / `styles.css?v=20260620a`)** — CSS 고칠 때 styles.css 버스터도 갱신해야 사용자 브라우저가 새로 받음
 - 아이콘은 Tabler Icons webfont(ti ti-*) — 존재하는 이름만(없으면 빈칸 렌더).
 - 메뉴: [모니터링] 보도자료·뉴스 / Daily Briefing / 기술 용어 · [자문] AI 자문 / 보고서 초안 제안 · [법안 동향] 국회 법안 / 행정부 입법예고·법령 개정 / 법령 DIFF 분석 · [지식 베이스] 국내 법령·고시 / ITU-R / 정부 보도자료 / 추가 지식 입력 / 설정 / 운영 상태(크롤·브리핑·heartbeat 한눈 점검)
 - 뉴스 중요도: 화면 라벨 "🔴 중요/🟡 보통/🟢 참고", 내부값·DB·코드는 '긴급/보통/참고'. 수정 시 news_feed 갱신+importance_feedback 기록+당일 브리핑 🔴 동기화. 잠금=15일 삭제 제외, 삭제=영구+deleted_news 기록.

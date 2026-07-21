@@ -37,7 +37,7 @@ SUPABASE_URL      = os.environ['SUPABASE_URL']
 SUPABASE_KEY      = os.environ['SUPABASE_SERVICE_KEY']
 ANTHROPIC_API_KEY = os.environ['ANTHROPIC_API_KEY']
 
-MODEL = 'claude-sonnet-4-6'  # app.js generateTermDetail과 동일 모델 유지
+MODEL = 'claude-sonnet-5'  # app.js generateTermDetail과 동일 모델 유지
 
 sb: Client = make_client(SUPABASE_URL, SUPABASE_KEY)
 ai = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -82,7 +82,7 @@ def generate(t: dict) -> dict | None:
     try:
         resp = ai.messages.create(
             model=MODEL,
-            max_tokens=4000,
+            max_tokens=6000,
             system='당신은 이동통신·전파 정책 전문가입니다. 반드시 지정된 XML 태그 형식으로만 답변하세요.',
             messages=[{'role': 'user', 'content': build_user_msg(t)}],
         )

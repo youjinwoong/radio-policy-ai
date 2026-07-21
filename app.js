@@ -470,7 +470,7 @@ async function extractTermsFromNews() {
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers:{'x-api-key':claudeKey,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,system:systemMsg,messages:[{role:'user',content:userMsg}]})
+      body:JSON.stringify({model:'claude-sonnet-5',max_tokens:1500,system:systemMsg,messages:[{role:'user',content:userMsg}]})
     });
     var data = await res.json();
     var text = data.content[0].text.trim().replace(/^```[\w]*\n?/,'').replace(/\n?```$/,'').trim();
@@ -682,7 +682,7 @@ async function generateTermDetail(id) {
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers:{'x-api-key':claudeKey,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,system:systemMsg,messages:[{role:'user',content:userMsg}]})
+      body:JSON.stringify({model:'claude-sonnet-5',max_tokens:6000,system:systemMsg,messages:[{role:'user',content:userMsg}]})
     });
     var data = await res.json();
 
@@ -1115,8 +1115,9 @@ async function callClaude(userText, onDelta) {
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 16384,
+      model: 'claude-sonnet-5',
+      // Sonnet 5 토크나이저(동일 텍스트 +30% 토큰)·적응형 추론 여유분 반영해 상향
+      max_tokens: 24000,
       // ★ 스트리밍 필수: 웹검색+긴 답변은 응답이 2분 이상 걸려, 비스트리밍 시
       //   ~120초 idle 구간에 브라우저·사내망 프록시가 연결을 끊어 "Failed to fetch"가 났음.
       //   토큰을 실시간 수신하면 연결이 idle가 아니게 되어 끊김이 사라짐. (stream 제거 금지)
@@ -2744,7 +2745,7 @@ async function runDiffAnalysis() {
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2500, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
+      body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 4000, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
     });
     if (!res.ok) {
       var errBody = await res.json().catch(function() { return {}; });
@@ -3440,7 +3441,7 @@ async function testConnection() {
           'content-type': 'application/json',
           'anthropic-dangerous-direct-browser-access': 'true'
         },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 10, messages: [{ role: 'user', content: 'ping' }] })
+        body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 10, messages: [{ role: 'user', content: 'ping' }] })
       });
       results.push(res.ok ? 'Claude API 연결 성공' : 'Claude API X (HTTP ' + res.status + ')');
     } catch(e) { results.push('Claude API X (' + e.message + ')'); }
@@ -5165,7 +5166,7 @@ async function callReportDraft(userText, reportType, onDelta, opts) {
     method:'POST',
     headers:{ 'x-api-key':claudeKey, 'anthropic-version':'2023-06-01', 'content-type':'application/json', 'anthropic-dangerous-direct-browser-access':'true' },
     body: JSON.stringify({
-      model:'claude-sonnet-4-6', max_tokens:16384, stream:true,
+      model:'claude-sonnet-5', max_tokens:24000, stream:true,
       system: system,
       tools:[{ type:'web_search_20250305', name:'web_search', max_uses:3 }],
       messages: messages
