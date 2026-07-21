@@ -1,0 +1,142 @@
+# -*- coding: utf-8 -*-
+"""
+tech_terms 상세(description·diagram_html·related_terms) 백필.
+
+대시보드는 용어 모달을 열 때 개별 생성(app.js generateTermDetail)하는데,
+새로 추출된 용어는 클릭 전까지 상세가 비어 "생성 중..." 로딩이 뜬다.
+이 스크립트는 비어 있는 항목만 골라 대시보드와 동일한 프롬프트·모델로
+일괄 생성해 채운다. 이미 채워진 필드는 덮어쓰지 않는다(멱등).
+
+- 모델: claude-sonnet-4-6 (app.js generateTermDetail과 동일 — 형식·품질 일치)
+- 형식: <description>/<diagram>/<related> XML 태그 (app.js와 동일 파싱)
+- 필요 env: SUPABASE_URL, SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY
+"""
+import os
+import re
+import sys
+import time
+
+# Windows 스케줄러/cp949 콘솔 이모지 크래시 방지 (배경역사 #19)
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+import anthropic
+from supabase import Client
+from sb_client import make_client
+
+SUPABASE_URL      = os.environ['SUPABASE_URL']
+SUPABASE_KEY      = os.environ['SUPABASE_SERVICE_KEY']
+ANTHROPIC_API_KEY = os.environ['ANTHROPIC_API_KEY']
+
+MODEL = 'claude-sonnet-4-6'  # app.js generateTermDetail과 동일 모델 유지
+
+sb: Client = make_client(SUPABASE_URL, SUPABASE_KEY)
+ai = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+
+def _empty(v) -> bool:
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return v.strip() == ''
+    if isinstance(v, list):
+        return len(v) == 0
+    return False
+
+
+def build_user_msg(t: dict) -> str:
+    """app.js generateTermDetail의 userMsg와 동일한 프롬프트."""
+    label = t['term'] + (f" ({t['term_en']})" if t.get('term_en') else '')
+    return (
+        f"기술 용어 [{label}] 에 대해 아래 형식으로 정확히 답변하세요.\n"
+        f"분야: {t.get('category') or '기타'}. 현재 정의: {t.get('definition') or '없음'}.\n\n"
+        "<description>\n"
+        "3~5문단 상세 설명. **굵은글씨**로 핵심 개념 강조. 단락 구분은 빈 줄로.\n"
+        "내용: 개념 배경/기술 원리/국내외 현황/관련 표준 순서로 서술.\n"
+        "</description>\n\n"
+        "<diagram>\n"
+        "아래 조건을 모두 지킨 SVG를 생성하라:\n"
+        '- viewBox="0 0 680 320" xmlns="http://www.w3.org/2000/svg"\n'
+        '- 배경: rect fill="#f8fafc" 전체 채움\n'
+        '- 한국어 레이블 사용, font-family="sans-serif"\n'
+        "- 주요 구성요소를 박스/원/화살표로 시각화 (최소 4개 요소)\n"
+        "- 색상: 주요 박스 #6366f1(보라), 보조 #10b981(초록), 강조 #f59e0b(노랑), 배경박스 #e0e7ff\n"
+        "- 화살표는 marker-end 사용하여 방향 표시\n"
+        "- 개념 흐름이나 계층 구조를 한눈에 파악할 수 있게\n"
+        "</diagram>\n\n"
+        "<related>관련용어1,관련용어2,관련용어3</related>"
+    )
+
+
+def generate(t: dict) -> dict | None:
+    """반환: {description, diagram_html, related_terms} / None(실패)."""
+    try:
+        resp = ai.messages.create(
+            model=MODEL,
+            max_tokens=4000,
+            system='당신은 이동통신·전파 정책 전문가입니다. 반드시 지정된 XML 태그 형식으로만 답변하세요.',
+            messages=[{'role': 'user', 'content': build_user_msg(t)}],
+        )
+        text = ''.join(b.text for b in resp.content if b.type == 'text')
+    except Exception as e:
+        print(f'  [API 오류] {t["term"]}: {str(e)[:100]}')
+        return None
+
+    desc    = re.search(r'<description>([\s\S]*?)</description>', text)
+    diagram = re.search(r'<diagram>([\s\S]*?)</diagram>', text)
+    related = re.search(r'<related>([\s\S]*?)</related>', text)
+    return {
+        'description':   desc.group(1).strip() if desc else '',
+        'diagram_html':  diagram.group(1).strip() if diagram else '',
+        'related_terms': [s.strip() for s in related.group(1).split(',') if s.strip()] if related else [],
+    }
+
+
+def main():
+    rows = (sb.table('tech_terms')
+            .select('id,term,term_en,category,definition,description,diagram_html,related_terms')
+            .execute().data) or []
+    targets = [r for r in rows if _empty(r.get('description'))
+               or _empty(r.get('diagram_html'))
+               or _empty(r.get('related_terms'))]
+    print(f'[용어 상세 백필] 전체 {len(rows)}건 중 대상 {len(targets)}건 (모델: {MODEL})')
+
+    done = failed = 0
+    for t in targets:
+        parsed = generate(t)
+        if parsed is None:
+            failed += 1
+            time.sleep(1)
+            continue
+        # 비어 있던 필드만 채움 — 기존 내용(운영자 검수분 포함) 보존
+        update = {}
+        if _empty(t.get('description')) and parsed['description']:
+            update['description'] = parsed['description']
+        if _empty(t.get('diagram_html')) and parsed['diagram_html']:
+            update['diagram_html'] = parsed['diagram_html']
+        if _empty(t.get('related_terms')) and parsed['related_terms']:
+            update['related_terms'] = parsed['related_terms']
+        if not update:
+            failed += 1
+            print(f'  [파싱 실패] {t["term"]} — 태그 없음')
+            time.sleep(1)
+            continue
+        sb.table('tech_terms').update(update).eq('id', t['id']).execute()
+        done += 1
+        print(f'  ok {t["term"]} ({", ".join(update.keys())})')
+        time.sleep(0.5)
+
+    print(f'[용어 상세 백필] 완료 - 성공 {done} / 실패 {failed}')
+
+
+if __name__ == '__main__':
+    main()

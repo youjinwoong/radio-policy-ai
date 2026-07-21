@@ -179,6 +179,7 @@ python resend_briefing.py [날짜]              # 브리핑 재발송
 python upload_law_pdf.py 파일 "문서명" 고시    # 법령/고시/ITU-R 업로드
 python backfill_embeddings.py                 # 임베딩 백필(document_chunks)
 python backfill_report_embeddings.py          # 보고서 샘플 임베딩 백필(report_samples)
+python backfill_term_details.py               # 기술용어 상세 백필(tech_terms 설명·개념도·관련용어, 빈 것만. 모델은 app.js와 동일하게 유지)
 ```
 
 ## 점검 체크리스트 (요약 — 상세 경위는 배경역사 문서)
