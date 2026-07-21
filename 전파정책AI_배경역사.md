@@ -394,6 +394,23 @@ HTTP/2 사고에서 직접 겪은 불편(빈 브리핑·주말 오경보·점검
 
 ---
 
+## 24. 국회 법안 의안 링크 전건 공백 — API LINK_URL 미반환 발견, billId URL 구성으로 교정 (2026-07-21)
+
+**증상**: 대시보드 국회 법안 탭에서 법안을 클릭해도 의안정보시스템으로 이동하지 않음. 운영자 신고.
+
+**원인**: `assembly_crawler.py`는 열린국회정보 API(nzmimeepazxkubdpn) 응답의 `LINK_URL` 필드를 그대로 `assembly_bills.link_url`에 저장하는데, **이 API는 LINK_URL을 실제로 반환하지 않음** — DB 확인 결과 222건 전부 link_url 공백. 대시보드 `renderAssemblyBills()`는 link_url이 있을 때만 "의안보기" 앵커를 그리므로 링크가 아예 렌더되지 않았고, 카드 자체도 클릭 불가 영역이었음. 크롤러 최초 작성 시 API 명세의 필드명만 믿고 실데이터 검증을 안 한 것이 근인 (실DB 검증 원칙의 재확인 사례).
+
+**교정 (3단)**:
+1. **크롤러**: `bill_link()` 헬퍼 신설 — `LINK_URL` → `DETAIL_LINK` → `https://likms.assembly.go.kr/bill/billDetail.do?billId=<BILL_ID>` 순 폴백. upsert·텔레그램 신규/상태변경 알림 3곳 모두 이 헬퍼 사용 (알림의 "의안 바로가기"도 같은 이유로 그동안 누락되고 있었음).
+2. **DB 백필**: 기존 222건 `UPDATE ... SET link_url = 'https://likms.assembly.go.kr/bill/billDetail.do?billId=' || bill_id WHERE link_url IS NULL OR link_url = ''`.
+3. **대시보드**: 카드 전체를 클릭 가능(`cursor:pointer` + `window.open(..., '_blank', 'noopener')`)하게 하고, link_url이 비어도 bill_id로 같은 URL을 프론트에서도 구성(이중 안전망). 하단 "의안보기" 앵커는 유지하되 `event.stopPropagation()`으로 카드 클릭과 중복 열림 방지. 캐시버스터 20260721a.
+
+**검증**: billId 조합 URL(`billDetail.do?billId=PRC_C2B6...`)이 해당 법안(2220039 전기통신사업법 일부개정법률안) 상세 페이지를 정확히 여는 것을 브라우저로 사전 확인 후 적용. billId는 의안 고유 식별자(PRC_...)라 전 건 동일 패턴 적용 가능.
+
+**교훈**: 외부 API 필드는 명세가 아니라 **실제 응답/실DB 값으로 검증**해야 함. "필드를 읽어서 저장한다"는 코드가 있어도 값이 항상 비어 있으면 기능은 처음부터 죽어 있던 것 — 이런 유형은 에러가 안 나므로 화면에서 실제 클릭해보기 전에는 발견되지 않음.
+
+---
+
 ## 부록 — 보고서 초안 제안 데이터 흐름
 
 ```

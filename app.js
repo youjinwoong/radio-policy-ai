@@ -4615,11 +4615,15 @@ function renderAssemblyBills(bills) {
       : '—';
     var isNew = (function() { var d = _parseProposeDt(b.propose_dt); return d && d >= weekAgo; })();
     var borderTop = i === 0 ? '' : 'border-top:1px solid var(--border);';
-    var link = b.link_url
-      ? '<a href="' + b.link_url + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none;white-space:nowrap"><i class="ti ti-external-link" style="font-size:11px"></i> 의안보기</a>'
+    // 열린국회정보 API가 LINK_URL을 안 주는 경우 bill_id로 의안정보시스템 상세 URL 구성
+    var linkUrl = b.link_url || (b.bill_id ? 'https://likms.assembly.go.kr/bill/billDetail.do?billId=' + encodeURIComponent(b.bill_id) : '');
+    var link = linkUrl
+      ? '<a href="' + escHtml(linkUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent);font-size:11px;text-decoration:none;white-space:nowrap"><i class="ti ti-external-link" style="font-size:11px"></i> 의안보기</a>'
       : '';
 
-    html += '<div style="' + borderTop + 'padding:12px 14px">'
+    html += '<div style="' + borderTop + 'padding:12px 14px' + (linkUrl ? ';cursor:pointer' : '') + '"'
+      + (linkUrl ? ' onclick="window.open(\'' + escHtml(linkUrl) + '\',\'_blank\',\'noopener\')"' : '')
+      + '>'
       + '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px">'
       + '<span style="flex:1;font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.4">' + escHtml(b.bill_name) + '</span>'
       + (isNew ? '<span style="font-size:10px;background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:99px;flex-shrink:0">신규</span>' : '')

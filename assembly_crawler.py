@@ -125,13 +125,22 @@ def load_existing_bills() -> dict[str, dict]:
     return {r['bill_id']: r for r in rows}
 
 
+def bill_link(bill: dict) -> str:
+    """의안 상세 URL. API(nzmimeepazxkubdpn)는 LINK_URL을 반환하지 않으므로
+    DETAIL_LINK → bill_id 기반 의안정보시스템 URL 순으로 폴백."""
+    link = bill.get('LINK_URL', '') or bill.get('DETAIL_LINK', '')
+    if not link and bill.get('BILL_ID'):
+        link = f'https://likms.assembly.go.kr/bill/billDetail.do?billId={bill["BILL_ID"]}'
+    return link
+
+
 def upsert_bill(bill: dict, matched_keywords: list[str], existing: dict | None) -> str:
     """법안 저장/갱신. 반환값: 'new' | 'status_changed' | 'unchanged'"""
     bill_id      = bill.get('BILL_ID', '')
     bill_name    = bill.get('BILL_NAME', '').strip()
     proc_result  = (bill.get('PROC_RESULT') or '접수').strip()
     propose_dt   = bill.get('PROPOSE_DT', '')
-    link_url     = bill.get('LINK_URL', '')
+    link_url     = bill_link(bill)
 
     if not bill_id or not bill_name:
         return 'unchanged'
@@ -204,7 +213,7 @@ def send_telegram(msg: str):
 def notify_new(bill: dict, keywords: list[str]):
     kw_str = ', '.join(keywords)
     dt_str = format_date(bill.get('PROPOSE_DT', ''))
-    link   = bill.get('LINK_URL', '')
+    link   = bill_link(bill)
     msg = (
         f'📋 <b>[국회 신규 법안]</b>\n'
         f'{bill.get("BILL_NAME", "")}\n\n'
@@ -221,7 +230,7 @@ def notify_new(bill: dict, keywords: list[str]):
 
 def notify_status_change(bill: dict, prev_status: str, keywords: list[str]):
     new_status = bill.get('PROC_RESULT', '')
-    link       = bill.get('LINK_URL', '')
+    link       = bill_link(bill)
     msg = (
         f'🔄 <b>[법안 상태 변경]</b>\n'
         f'{bill.get("BILL_NAME", "")}\n\n'
