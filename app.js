@@ -470,10 +470,17 @@ async function extractTermsFromNews() {
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers:{'x-api-key':claudeKey,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-5',max_tokens:1500,system:systemMsg,messages:[{role:'user',content:userMsg}]})
+      // thinking:disabled — Sonnet 5는 thinking 미지정 시 적응형 추론이 켜져 응답 첫 블록이 빈 thinking 블록이 됨.
+      //  → content[0].text가 undefined라 크래시했고, 숨은 thinking 토큰이 max_tokens(1500)를 잠식해 JSON도 잘렸음.
+      body:JSON.stringify({model:'claude-sonnet-5',max_tokens:1500,thinking:{type:'disabled'},system:systemMsg,messages:[{role:'user',content:userMsg}]})
     });
     var data = await res.json();
-    var text = data.content[0].text.trim().replace(/^```[\w]*\n?/,'').replace(/\n?```$/,'').trim();
+    if (data.type === 'error' || !data.content) {
+      throw new Error('Claude API 오류: ' + ((data.error && data.error.message) || JSON.stringify(data)));
+    }
+    // content[0]을 가정하지 말고 text 블록을 찾아서 사용 (적응형 추론 시 첫 블록이 thinking일 수 있음)
+    var textBlock = data.content.find(function(b) { return b.type === 'text'; });
+    var text = (textBlock ? textBlock.text : '').trim().replace(/^```[\w]*\n?/,'').replace(/\n?```$/,'').trim();
     var firstBracket = text.indexOf('[');
     var lastBracket = text.lastIndexOf(']');
     if (firstBracket === -1) { alert('용어 추출 결과가 없습니다.'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-bulb"></i>뉴스에서 용어 추출';} return; }
@@ -2748,14 +2755,17 @@ async function runDiffAnalysis() {
     var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 4000, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
+      // thinking:disabled — Sonnet 5 적응형 추론이 응답 첫 블록을 빈 thinking 블록으로 만들어 content[0].text가 비어 파싱 실패했음(무음 오류).
+      body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 4000, thinking: { type: 'disabled' }, system: sysMsg, messages: [{ role: 'user', content: userMsg }] })
     });
     if (!res.ok) {
       var errBody = await res.json().catch(function() { return {}; });
       throw new Error((errBody.error && errBody.error.message) || ('Claude API 오류 (HTTP ' + res.status + ')'));
     }
     var data = await res.json();
-    var txt = (data.content && data.content[0] && data.content[0].text) || '';
+    // content[0]을 가정하지 말고 text 블록을 찾아서 사용
+    var txtBlock = data.content && data.content.find(function(b) { return b.type === 'text'; });
+    var txt = (txtBlock && txtBlock.text) || '';
 
     var summaryM   = txt.match(/<summary>([\s\S]*?)<\/summary>/);
     var risksM     = txt.match(/<risks>([\s\S]*?)<\/risks>/);
