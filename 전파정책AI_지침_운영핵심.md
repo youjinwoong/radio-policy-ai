@@ -229,6 +229,7 @@ python backfill_term_details.py               # 기술용어 상세 백필(tech_
 - **report_samples·report_feedback·report_directives·report_style_rules 비우지 말 것** — 보고서 형식·개인화 학습 데이터(비우면 초기화).
 - **보고서 개인화 채널(말로 지시·빨간펜·👍/👎·자동 재증류)을 단일 채널로 축소 금지** — "쓸수록 내 톤" 핵심.
 - **callReportDraft·callClaude를 비스트리밍으로 되돌리지 말 것** — 2분+ 응답 idle 끊김 "Failed to fetch". stream:true 유지.
+- **비스트리밍 Claude 호출에서 `data.content[0].text` 가정 금지 — Sonnet 5는 `thinking` 미지정 시 적응형 추론 기본 ON** — 응답 첫 블록이 빈 thinking 블록이 되어 `content[0].text`가 undefined(`reading 'trim'` 크래시) + 숨은 thinking 토큰이 max_tokens 잠식으로 출력 잘림. 기계적 추출(용어추출·법령DIFF 등)은 `thinking:{type:'disabled'}` 추가하고, 응답은 반드시 `content.find(b=>b.type==='text')`로 읽을 것. 스트리밍(자문·보고서)은 text_delta만 누적하므로 무관, Haiku는 적응형 기본 OFF이라 무관. Sonnet 4.6→5 전환(#27) 후 발생. (2026-07-23 용어추출 크래시·법령DIFF 무음 사고)
 - **보고서 등록을 청킹하지 말 것** — 형식 학습용이라 전문 통째 보관(법령은 청킹, 보고서는 반대).
 - **브리핑 Haiku에 긴급(🔴) 판정 재위임 금지** — 🔴는 news_feed 긴급도 단일 기준.
 - **영향도 분석이 긴급도를 덮어쓰게 하지 말 것** — 담당자 수정 되돌리던 버그 원인.
