@@ -5673,7 +5673,25 @@ function renderLawMapGraph(focusId) {
   if (_lawMapNet) { try { _lawMapNet.destroy(); } catch(e) {} }
   _lawMapNet = new vis.Network(el, data, options);
   _lawMapNet.on('click', function(p) {
-    if (p.nodes && p.nodes.length) showLawMapNodeDetail(p.nodes[0]);
+    if (!(p.nodes && p.nodes.length)) return;
+    var id = p.nodes[0];
+    var clicked = _lawMapNodes.find(function(x) { return x.id === id; });
+    if (!clicked) return;
+    var focusNode = _lawMapFocusId ? _lawMapNodes.find(function(x) { return x.id === _lawMapFocusId; }) : null;
+    var inTopicView = !!(focusNode && focusNode.node_type === 'topic');
+    if (!inTopicView && clicked.node_type === 'topic') {
+      // 전체 인용망에서 주제 노드 클릭 → 주제 포커스로 전환
+      var sel = document.getElementById('lawmap-topic-select');
+      if (sel) sel.value = id;
+      lawMapSelectTopic(id);
+      return;
+    }
+    if (!inTopicView && clicked.node_type !== 'topic' && id !== _lawMapFocusId) {
+      // 전체 인용망(또는 법령 포커스)에서 법령 클릭 → 그 법령 중심의 실제 인용·계열 관계로 드릴다운
+      renderLawMapGraph(id);
+      setLawMapStatus('법령 <b>' + lmEsc(clicked.name) + '</b> — 실제 인용·계열 관계 표시 중 · <a style="cursor:pointer;text-decoration:underline;color:var(--accent, #5b7ff5)" onclick="lawMapSelectTopic(\'\')">← 전체 인용망으로</a>');
+    }
+    showLawMapNodeDetail(id);
   });
 }
 
