@@ -6012,17 +6012,27 @@ async function fillLawMapArticle(n, basisText, docName, topicName) {
       var qEl = document.getElementById('lawmap-q');
       var terms = extractKeywords((topicName || '') + ' ' + (basisText || '') + ' ' + (qEl ? qEl.value : ''))
         .filter(function(k) { return !LAWMAP_MATCH_STOP[k]; });
+      // 주제명 자체 단어(예: '주파수','분배')도 매칭어에 포함 — 조문 제목 매칭용
+      (topicName || '').split(/[\s·]+/).forEach(function(w) { w = w.trim(); if (w.length >= 2 && !LAWMAP_MATCH_STOP[w] && terms.indexOf(w) === -1) terms.push(w); });
       if (terms.length) {
-        var scored = all.map(function(c) {
-          var t = c.content || '', s = 0;
-          terms.forEach(function(k) { if (t.indexOf(k) !== -1) s++; });
-          return { c: c, s: s };
-        }).filter(function(x) { return x.s > 0; }).sort(function(x, y) { return y.s - x.s; });
-        if (scored.length) {
-          var topArt = scored[0].c.article_no;
-          if (topArt) picked = all.filter(function(c) { return c.article_no === topArt; });
-          if (!picked.length) picked = [scored[0].c];
-        }
+        // 조문 단위로 집계: 제목(article_no) 매칭 ×5, 본문 매칭 ×1. 목적·정의 등 총칙 보일러플레이트는 감점
+        var byArt = {};
+        all.forEach(function(c) {
+          var art = c.article_no || '';
+          if (!art) return;
+          var rec = byArt[art] || (byArt[art] = { art: art, chunks: [], score: 0, ci: c.chunk_index || 0 });
+          rec.chunks.push(c);
+          var title = art, body = c.content || '';
+          terms.forEach(function(k) {
+            if (title.indexOf(k) !== -1) rec.score += 5;
+            if (body.indexOf(k) !== -1) rec.score += 1;
+          });
+          if (/\((목적|정의|적용범위|다른 법령|시행일)\)/.test(art)) rec.score -= 8;   // 총칙·부칙 보일러플레이트 배제
+        });
+        var arts = Object.keys(byArt).map(function(k) { return byArt[k]; })
+          .filter(function(r) { return r.score > 0; })
+          .sort(function(a, b) { return b.score - a.score || a.ci - b.ci; });
+        if (arts.length) picked = arts[0].chunks;
       }
     }
     if (!picked.length) return;
