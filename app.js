@@ -6027,7 +6027,7 @@ async function fillLawMapArticle(n, basisText, docName, topicName) {
             if (title.indexOf(k) !== -1) rec.score += 5;
             if (body.indexOf(k) !== -1) rec.score += 1;
           });
-          if (/\((목적|정의|적용범위|다른 법령|시행일)\)/.test(art)) rec.score -= 8;   // 총칙·부칙 보일러플레이트 배제
+          if (/(목적|정의|적용\s*범위|다른\s*법령|개정|폐지|경과조치|시행일|약칭)/.test(art)) rec.score -= 20;   // 총칙·부칙 보일러플레이트 배제
         });
         var arts = Object.keys(byArt).map(function(k) { return byArt[k]; })
           .filter(function(r) { return r.score > 0; })
