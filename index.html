@@ -731,8 +731,8 @@
     <button class="bottom-nav-item active" id="bn-monitor" onclick="showMobileSubMenu('monitor-sub')">
       <i class="ti ti-news"></i><span>모니터링</span>
     </button>
-    <button class="bottom-nav-item" id="bn-chat" onclick="go('chat',null);setBottomNav('bn-chat')">
-      <i class="ti ti-message-circle"></i><span>AI 자문</span>
+    <button class="bottom-nav-item" id="bn-chat" onclick="showMobileSubMenu('chat-sub')">
+      <i class="ti ti-message-circle"></i><span>자문</span>
     </button>
     <button class="bottom-nav-item" id="bn-terms" onclick="go('terms',null);setBottomNav('bn-terms')">
       <i class="ti ti-book"></i><span>기술용어</span>
@@ -773,6 +773,23 @@
     </div>
   </div>
 
+  <!-- 모바일 서브메뉴: 자문 -->
+  <div id="chat-sub" class="mobile-submenu" style="display:none">
+    <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('chat-sub')"></div>
+    <div class="mobile-submenu-sheet">
+      <div class="mobile-submenu-title">자문</div>
+      <button class="mobile-submenu-item" onclick="go('chat',null);setBottomNav('bn-chat');closeMobileSubMenu('chat-sub')">
+        <i class="ti ti-message-circle"></i>AI 자문
+      </button>
+      <button class="mobile-submenu-item" onclick="go('reportdraft',null);setBottomNav('bn-chat');closeMobileSubMenu('chat-sub')">
+        <i class="ti ti-file-text"></i>보고서 초안 제안
+      </button>
+      <button class="mobile-submenu-item" onclick="go('lawmap',null);setBottomNav('bn-chat');closeMobileSubMenu('chat-sub')">
+        <i class="ti ti-topology-star-3"></i>법령 관계도
+      </button>
+    </div>
+  </div>
+
   <!-- 모바일 서브메뉴: 지식베이스 -->
   <div id="law-sub" class="mobile-submenu" style="display:none">
     <div class="mobile-submenu-backdrop" onclick="closeMobileSubMenu('law-sub')"></div>
@@ -780,9 +797,6 @@
       <div class="mobile-submenu-title">지식베이스</div>
       <button class="mobile-submenu-item" onclick="go('law',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
         <i class="ti ti-file-text"></i>국내 법령·고시
-      </button>
-      <button class="mobile-submenu-item" onclick="go('lawmap',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
-        <i class="ti ti-topology-star-3"></i>법령 관계도
       </button>
       <button class="mobile-submenu-item" onclick="go('itu',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
         <i class="ti ti-world"></i>ITU-R 문서
@@ -904,6 +918,6 @@
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260723s"></script>
+<script src="app.js?v=20260723t"></script>
 </body>
 </html>

@@ -3664,7 +3664,7 @@ function go(page, navEl, sourceType) {
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-more', chat:'bn-chat', reportdraft:'bn-chat', law:'bn-law', lawmap:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', diff:'bn-monitor', settings:'bn-more', opsstatus:'bn-more'};
+  var pageTobn = {home:'bn-more', chat:'bn-chat', reportdraft:'bn-chat', lawmap:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', diff:'bn-monitor', settings:'bn-more', opsstatus:'bn-more'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
