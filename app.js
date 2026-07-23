@@ -5934,8 +5934,11 @@ async function showLawMapNodeDetail(nodeId) {
   var html =
     '<div style="font-weight:700;color:var(--text-primary)">' + lmEsc(n.name) +
       ' <span style="font-size:10px;padding:1px 7px;border-radius:999px;background:' + color + '22;border:1px solid ' + color + '66;color:var(--text-secondary)">' + (LAWMAP_TYPE_LABEL[n.node_type] || n.node_type) + '</span></div>';
-  if (focusTopic && topicEdge) {
-    html += '<div style="margin:5px 0;padding:6px 10px;border-left:3px solid ' + LAWMAP_COLORS.topic + ';background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12.5px;color:var(--text-primary)">🎯 <b>' + lmEsc(focusTopic.name) + '</b>에서의 역할: ' + lmEsc(topicEdge.description || topicEdge.relation_type) + '</div>';
+  if (focusTopic) {
+    var roleText = topicEdge
+      ? ('에서의 역할: ' + lmEsc(topicEdge.description || topicEdge.relation_type))
+      : ' 맥락에서 관련 조문을 표시합니다';   // 직접 관계 엣지 없이 계열로 딸려온 노드
+    html += '<div style="margin:5px 0;padding:6px 10px;border-left:3px solid ' + LAWMAP_COLORS.topic + ';background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12.5px;color:var(--text-primary)">🎯 <b>' + lmEsc(focusTopic.name) + '</b>' + roleText + '</div>';
   }
   if (n.description) {
     html += '<div style="margin:4px 0 2px;color:var(--text-secondary)">' + lmEsc(n.description) + '</div>';
@@ -5970,8 +5973,8 @@ async function showLawMapNodeDetail(nodeId) {
     docBtn.style.display = 'inline-flex';
     docBtn.addEventListener('click', function() { openLawMapDoc(docName); });
   }
-  // 주제 맥락이 있으면 근거/관련 조문 원문 발췌를 먼저 표시. 법령 전체 요약(OKF)은 항상 펼쳐서 표시.
-  if (focusTopic && topicEdge) fillLawMapArticle(n, topicEdge.description || '', docName, focusTopic.name);
+  // 주제 포커스면 관련 조문 발췌를 먼저 표시(직접 엣지 없어도 주제명 키워드로 검색). 법령 전체 요약(OKF)은 펼쳐서 표시.
+  if (focusTopic) fillLawMapArticle(n, (topicEdge && topicEdge.description) || '', docName, focusTopic.name);
   fillLawMapMainContent(n, true);
 }
 
