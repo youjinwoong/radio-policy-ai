@@ -5622,17 +5622,28 @@ function renderLawMapGraph(focusId) {
     var sub = lawmapNeighborhood(_lawMapFocusId);
     nodes = sub.nodes; edges = sub.edges;
   } else {
-    // 전체 뷰: 읽을 수 있는 '핵심 골격'만 — 노드 90개 이하가 될 때까지 인용 임계값 상향
-    // (라벨이 미세해지지 않도록 과밀 방지. 세부 인용은 노드를 클릭해 드릴다운)
-    var thresholds = [2, 3, 5, 8, 12, 20, 30];
+    // 전체 뷰: 시드 엣지 + 인용 엣지(weight≥임계)로 표시 노드를 정하고, 계열(하위법령) 엣지는
+    //   '양끝이 이미 포함된 경우에만' 유지. (계열 엣지를 무조건 남기면 국가회계법–시행령 쌍처럼
+    //   주변 관계가 잘린 고립 쌍이 딸려 들어와 '관계 없는 법'처럼 보였음.) 노드 220 이하 목표로 임계 상향.
+    var thresholds = [3, 4, 5, 6, 8, 12];
+    var keep, usedIds2;
     for (var ti = 0; ti < thresholds.length; ti++) {
       var th = thresholds[ti];
-      edges = _lawMapEdges.filter(function(e) { return e.source !== 'citation' || (e.weight || 1) >= th; });
-      var usedIds = new Set();
-      edges.forEach(function(e) { usedIds.add(e.source_id); usedIds.add(e.target_id); });
-      nodes = _lawMapNodes.filter(function(n) { return usedIds.has(n.id) || n.node_type === 'topic'; });
-      if (nodes.length <= 90) break;
+      keep = new Set();
+      var inc = new Set();
+      _lawMapEdges.forEach(function(e) {
+        if (e.source === 'seed' || (e.source === 'citation' && (e.weight || 1) >= th)) {
+          keep.add(e.id); inc.add(e.source_id); inc.add(e.target_id);
+        }
+      });
+      _lawMapNodes.forEach(function(n) { if (n.node_type === 'topic') inc.add(n.id); });
+      _lawMapEdges.forEach(function(e) { if (e.source === 'family' && inc.has(e.source_id) && inc.has(e.target_id)) keep.add(e.id); });
+      usedIds2 = new Set();
+      _lawMapEdges.forEach(function(e) { if (keep.has(e.id)) { usedIds2.add(e.source_id); usedIds2.add(e.target_id); } });
+      if (usedIds2.size + _lawMapNodes.filter(function(n) { return n.node_type === 'topic' && !usedIds2.has(n.id); }).length <= 220) break;
     }
+    edges = _lawMapEdges.filter(function(e) { return keep.has(e.id); });
+    nodes = _lawMapNodes.filter(function(n) { return usedIds2.has(n.id) || n.node_type === 'topic'; });
   }
   // 보강 버튼: 주제 포커스일 때만 노출
   var enrichBtn = document.getElementById('lawmap-enrich-btn');
