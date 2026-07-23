@@ -97,6 +97,7 @@ function initSupabase() {
 // ════════════════════════════════════════════
 let lastRagSources = [];
 let lastConfluenceFailed = false; // 직전 자문에서 컨플루언스 검색이 실패해 생략됐는지 (무음 실패 가시화)
+let lastLawmapData = null;        // 직전 자문 답변의 <lawmap> 블록 파싱 결과 (법령 관계도 자동 축적용)
 
 function extractKeywords(text) {
   // 한국어 조사·어미·불용어 제거
@@ -1075,6 +1076,12 @@ async function callClaude(userText, onDelta) {
   const lawTrackP   = fetchLawTrackContext().catch(function(e) { console.warn('법령동향 실패(건너뜀):', e); return ''; });
   const confluenceP = searchConfluence(userText).catch(function(e) { console.warn('컨플루언스 검색 실패(건너뜀):', e); return []; });
   const kbP         = searchKbSummaries(userText).catch(function(e) { console.warn('법령요약 검색 실패(건너뜀):', e); return []; });
+  // 법령 관계도: 기존 주제명 목록(주제명 분열 방지용) — 실패해도 자문은 정상 진행
+  const lawTopicsP  = sb
+    ? sb.from('law_graph_nodes').select('name').eq('node_type', 'topic').limit(120)
+        .then(function(r) { return (r.data || []).map(function(x) { return x.name; }); })
+        .catch(function(e) { console.warn('관계도 주제 목록 조회 실패(건너뜀):', e); return []; })
+    : Promise.resolve([]);
 
   // RAG: 관련 문서 청크 검색 (보도자료는 원본 JSON, 법령은 Supabase)
   lastRagSources = [];
@@ -1109,7 +1116,15 @@ async function callClaude(userText, onDelta) {
   const confluenceContext = buildConfluenceContext(await confluenceP); // 팀 컨플루언스 실시간 검색(내부 문서)
   const kbContext     = buildKbContext(await kbP);                // 법령·규제 요약 지식베이스(regulatory-kb, 현행본)
   const webSearchGuide = '\n\n---\n\n[웹 검색 도구 사용 지침]\n해외 규제·제도 비교, 최신 정책 동향 등 위 참조 자료(법령 RAG·추가 지식·뉴스)에 없는 사실 정보가 필요하면 web_search 도구로 확인 후 답변하세요. 특히 "한국 고유", "유일한", "주요국 중 한국만" 등 국가 간 비교 단정 표현은 검색으로 확인하기 전에는 사용하지 마세요. 국내 법령 해석은 RAG 원문을 최우선으로 하고 웹 검색은 보조로만 사용하세요.';
-  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + ragContext + kbContext + customContext + newsContext + lawTrackContext + confluenceContext;
+  // 법령 관계도 자동 축적: 답변 말미에 기계용 <lawmap> 블록을 덧붙이게 함 (별도 API 호출 없음 — 출력 몇 줄 추가뿐)
+  const lawTopics = await lawTopicsP;
+  const lawmapGuide = '\n\n---\n\n[법령 관계도 블록 지침]\n' +
+    '이번 질문이 법령·고시·규제 근거가 있는 정책/법령 질문이면, 답변 본문을 모두 마친 뒤 맨 마지막 줄에 아래 형식의 블록을 정확히 한 줄로 출력하세요 (블록 앞뒤에 설명·마크다운 금지):\n' +
+    '<lawmap>{"topic":"주제명(2~12자)","description":"주제 한줄 설명","relations":[{"law":"법령·고시명","type":"law|decree|rules|notice|etc","relation":"관계 한줄","basis":"제N조","law_desc":"법령 한줄 설명"}]}</lawmap>\n' +
+    '- relations에는 이번 답변에서 실제 근거로 사용한 법령·고시만 포함 (최대 8개). law는 정식 명칭(예: "전파법", "전기통신사업법 시행령").\n' +
+    '- 기존 주제명 목록에 같은 의미의 주제가 있으면 새 이름을 만들지 말고 그 이름을 그대로 재사용: ' + (lawTopics.length ? lawTopics.join(', ') : '(아직 없음)') + '\n' +
+    '- 보고서 작성 요청, 문서 요약, 잡담, 법령 근거가 등장하지 않는 질문이면 이 블록을 출력하지 마세요.';
+  const systemWithRag = SYSTEM_PROMPT + webSearchGuide + lawmapGuide + ragContext + kbContext + customContext + newsContext + lawTrackContext + confluenceContext;
 
   chatHistory.push({ role: 'user', content: userText });
 
@@ -1172,7 +1187,11 @@ async function callClaude(userText, onDelta) {
           if (evt.type === 'content_block_delta' && evt.delta) {
             if (evt.delta.type === 'text_delta' && evt.delta.text) {
               aiText += evt.delta.text;
-              if (typeof onDelta === 'function') onDelta(aiText);
+              if (typeof onDelta === 'function') {
+                // <lawmap> 블록은 기계용 — 스트리밍 중 화면에 노출되지 않게 잘라서 전달
+                var lmCut = aiText.indexOf('<lawmap');
+                onDelta(lmCut === -1 ? aiText : aiText.slice(0, lmCut));
+              }
             } else if (evt.delta.type === 'citations_delta' && evt.delta.citation) {
               addCitation(evt.delta.citation);
             }
@@ -1190,6 +1209,15 @@ async function callClaude(userText, onDelta) {
     chatHistory.pop();
     throw streamErr;
   }
+
+  // <lawmap> 블록 추출·제거 (관계도 자동 축적 — 화면·히스토리에는 블록 없이 저장)
+  lastLawmapData = null;
+  var lmMatch = aiText.match(/<lawmap>\s*([\s\S]*?)\s*<\/lawmap>/);
+  if (lmMatch) {
+    try { lastLawmapData = JSON.parse(lmMatch[1]); } catch(e) { console.warn('lawmap 블록 파싱 실패(무시):', e); }
+  }
+  // 닫는 태그가 잘린 미완성 블록까지 포함해 화면 텍스트에서 제거
+  aiText = aiText.replace(/<lawmap>[\s\S]*?<\/lawmap>/g, '').replace(/<lawmap>[\s\S]*$/, '').replace(/\s+$/, '');
 
   chatHistory.push({ role: 'assistant', content: aiText });
   // 웹 검색 출처 표시
@@ -1604,6 +1632,22 @@ async function sendChat() {
       msgEl.appendChild(cfDiv);
     }
 
+    // 법령 관계도 자동 축적: 답변의 <lawmap> 블록 → DB 저장 + 답변 밑 미니 관계도 표시 (추가 API 호출 없음)
+    if (lastLawmapData && lastLawmapData.topic && Array.isArray(lastLawmapData.relations) && lastLawmapData.relations.length > 0) {
+      const lmData = lastLawmapData;
+      saveLawmapData(lmData, 'ai')
+        .then(function() { _lawMapLoaded = false; })  // 다음 관계도 탭 진입 시 새로 로드
+        .catch(function(e) { console.warn('법령 관계도 저장 실패(답변은 정상):', e); });
+      const lmDiv = document.createElement('div');
+      lmDiv.className = 'lawmap-mini';
+      lmDiv.innerHTML =
+        '<div class="lawmap-mini-head"><i class="ti ti-topology-star-3"></i> 이 답변의 법령 관계도 <span>— 관계망에 자동 반영됨</span></div>' +
+        renderMiniLawMap(lmData.topic, lmData.relations) +
+        '<div class="lawmap-mini-link">관계도 탭에서 크게 보기 →</div>';
+      lmDiv.addEventListener('click', function() { goLawMapTopicByName(lmData.topic); });
+      msgEl.appendChild(lmDiv);
+    }
+
     if (sb) {
       try {
         await sb.from('chat_logs').insert({
@@ -1646,6 +1690,7 @@ function smartRefresh() {
     'panel-terms':    function() { loadTerms && loadTerms(); },
     'panel-press':    function() { loadPressJSON(); },
     'panel-law':      function() { loadKbDocs(); },
+    'panel-lawmap':   function() { loadLawMap(true); },
   };
   var fn = map[id] || function() { loadNews(); };
   fn();
@@ -3614,12 +3659,12 @@ function go(page, navEl, sourceType) {
 
   // 상단 바 제목 업데이트
   var newsTitle = currentNewsSourceType === 'gov' ? '정부 보도자료·공지사항' : (currentNewsSourceType === 'media' ? '뉴스' : '보도자료·뉴스');
-  var titles = {home:'대시보드', chat:'AI 자문', reportdraft:'보고서 초안 제안', diff:'법령 DIFF 분석', law:'국내 법령·고시', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:newsTitle, briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정', opsstatus:'운영 상태'};
+  var titles = {home:'대시보드', chat:'AI 자문', reportdraft:'보고서 초안 제안', diff:'법령 DIFF 분석', law:'국내 법령·고시', lawmap:'법령 관계도', itu:'ITU-R 문서', press:'정부 보도자료', terms:'기술 용어', news:newsTitle, briefing:'Daily Briefing', assembly:'국회 법안', lawtrack:'행정부 입법예고·법령 개정', settings:'설정', opsstatus:'운영 상태'};
   var ttEl = document.getElementById('topbar-title');
   if (ttEl && titles[page]) ttEl.textContent = titles[page];
 
   // 모바일 하단 네비 동기화
-  var pageTobn = {home:'bn-more', chat:'bn-chat', reportdraft:'bn-chat', law:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', diff:'bn-monitor', settings:'bn-more', opsstatus:'bn-more'};
+  var pageTobn = {home:'bn-more', chat:'bn-chat', reportdraft:'bn-chat', law:'bn-law', lawmap:'bn-law', itu:'bn-law', press:'bn-law', custom:'bn-law', terms:'bn-terms', news:'bn-monitor', briefing:'bn-monitor', assembly:'bn-monitor', lawtrack:'bn-monitor', diff:'bn-monitor', settings:'bn-more', opsstatus:'bn-more'};
   if (pageTobn[page]) setBottomNav(pageTobn[page]);
 
   if (page === 'news') loadNews();
@@ -3629,6 +3674,7 @@ function go(page, navEl, sourceType) {
   if (page === 'press') loadPressFromSupabase();
   if (page === 'terms') loadTerms();
   if (page === 'law') loadKbDocs();
+  if (page === 'lawmap') loadLawMap();
   if (page === 'assembly') loadAssemblyBills();
   if (page === 'lawtrack') loadLawTrack();
   if (page === 'opsstatus') loadOpsStatus();
@@ -5440,6 +5486,517 @@ async function promoteFinalToSample() {
     try { await distillReportStyle(false); } catch(e) { console.warn('보고서 스타일 재증류 실패(다음 등록 때 재시도됨):', e); }
     var promo = document.getElementById('report-promote-btn'); if (promo) promo.style.display = 'none';
   }
+}
+
+// ════════════════════════════════════════════
+//  법령 관계도 (lawmap) — 주제↔법령 네트워크 그래프
+//  데이터: law_graph_nodes / law_graph_edges (Supabase)
+//  성장 경로: ①자문 자동 축적(<lawmap> 블록) ②탭 즉석 AI 생성 ③AI 보강 ④인용망 스크립트(build_law_citation_graph.py)
+// ════════════════════════════════════════════
+var LAWMAP_COLORS = { topic:'#5b7ff5', law:'#2ea060', decree:'#1f9e9e', rules:'#1f9e9e', notice:'#e08a3c', etc:'#d5486a' };
+var LAWMAP_TYPE_LABEL = { topic:'주제', law:'법률', decree:'시행령', rules:'규칙·세칙', notice:'고시·행정규칙', etc:'기타·국제' };
+
+let _lawMapLoaded = false;
+let _lawMapNodes = [];
+let _lawMapEdges = [];
+let _lawMapNet = null;        // vis.Network 인스턴스
+let _lawMapFocusId = null;    // 현재 포커스 노드(주제) id — null이면 전체 인용망
+let _visNetLoadPromise = null;
+
+function lmEsc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function guessLawNodeType(name) {
+  if (/시행령$/.test(name)) return 'decree';
+  if (/(시행규칙|규칙|세칙)$/.test(name)) return 'rules';
+  if (/(고시|공고|훈령|예규|지침|기준)/.test(name)) return 'notice';
+  if (/법$/.test(name)) return 'law';
+  return 'etc';
+}
+
+// vis-network 지연 로드 — lawmap 탭 첫 진입 시에만 CDN에서 1회 로드 (다른 탭 성능 무영향)
+function loadVisNetwork() {
+  if (window.vis && window.vis.Network) return Promise.resolve();
+  if (_visNetLoadPromise) return _visNetLoadPromise;
+  _visNetLoadPromise = new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js';
+    s.onload = function() { resolve(); };
+    s.onerror = function() { _visNetLoadPromise = null; reject(new Error('vis-network 로드 실패 — 네트워크 상태를 확인하세요')); };
+    document.head.appendChild(s);
+  });
+  return _visNetLoadPromise;
+}
+
+function setLawMapStatus(html) {
+  var el = document.getElementById('lawmap-status');
+  if (el) el.innerHTML = html || '';
+}
+
+async function loadLawMap(force) {
+  var el = document.getElementById('lawmap-graph');
+  if (!el || !sb) return;
+  if (_lawMapLoaded && !force) { return; }
+  el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:16px">불러오는 중...</div>';
+  try {
+    await loadVisNetwork();
+    // 서버측 max-rows(1000행) 제한 회피 — 페이지네이션 전체 조회
+    async function fetchAllRows(table, cols) {
+      var all = [];
+      for (var off = 0; off < 20000; off += 1000) {
+        var resp = await sb.from(table).select(cols).range(off, off + 999);
+        if (resp.error) throw resp.error;
+        all = all.concat(resp.data || []);
+        if ((resp.data || []).length < 1000) break;
+      }
+      return all;
+    }
+    var r = await Promise.all([
+      fetchAllRows('law_graph_nodes', 'id,name,node_type,description,doc_name,source'),
+      fetchAllRows('law_graph_edges', 'id,source_id,target_id,relation_type,description,source,weight')
+    ]);
+    _lawMapNodes = r[0];
+    _lawMapEdges = r[1];
+    _lawMapLoaded = true;
+    fillLawMapTopicSelect();
+    if (_lawMapNodes.length === 0) {
+      el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:16px">아직 관계 데이터가 없습니다. 위 질문창에 주제를 입력해 AI로 생성하거나, AI 자문을 이용하면 자동으로 쌓입니다.</div>';
+      return;
+    }
+    // 기존 포커스가 새 데이터에도 있으면 유지, 없으면 전체 뷰
+    if (_lawMapFocusId && !_lawMapNodes.some(function(n) { return n.id === _lawMapFocusId; })) _lawMapFocusId = null;
+    renderLawMapGraph(_lawMapFocusId);
+  } catch(e) {
+    el.innerHTML = '<div style="color:#dc2626;font-size:12px;padding:16px">관계도 로드 실패: ' + lmEsc(e && e.message ? e.message : e) + '</div>';
+  }
+}
+
+function fillLawMapTopicSelect() {
+  var sel = document.getElementById('lawmap-topic-select');
+  if (!sel) return;
+  var cur = sel.value;
+  var topics = _lawMapNodes.filter(function(n) { return n.node_type === 'topic'; })
+    .sort(function(a, b) { return a.name.localeCompare(b.name, 'ko'); });
+  var html = '<option value="">전체 인용망</option>';
+  topics.forEach(function(t) { html += '<option value="' + t.id + '">' + lmEsc(t.name) + '</option>'; });
+  sel.innerHTML = html;
+  if (cur && topics.some(function(t) { return t.id === cur; })) sel.value = cur;
+}
+
+// 중심 노드의 포커스 서브그래프: 직접 이웃 + 계열(하위법령) 1단계 확장
+// ※ 인용 이웃으로 2촌 확장하면 허브 법령(전파법 등)을 거쳐 수백 노드로 폭발 → 계열 엣지로만 확장
+function lawmapNeighborhood(centerId) {
+  var keep = new Set([centerId]);
+  var direct = _lawMapEdges.filter(function(e) { return e.source_id === centerId || e.target_id === centerId; });
+  // 허브 노드(피인용 수백 건) 포커스 시 강한 엣지 상위 80개만
+  if (direct.length > 80) {
+    direct = direct.slice().sort(function(a, b) { return (b.weight || 1) - (a.weight || 1); }).slice(0, 80);
+  }
+  direct.forEach(function(e) { keep.add(e.source_id); keep.add(e.target_id); });
+  _lawMapEdges.forEach(function(e) {
+    if (e.relation_type !== '하위법령') return;
+    if (keep.has(e.source_id)) keep.add(e.target_id);
+    else if (keep.has(e.target_id)) keep.add(e.source_id);
+  });
+  return {
+    nodes: _lawMapNodes.filter(function(n) { return keep.has(n.id); }),
+    edges: _lawMapEdges.filter(function(e) { return keep.has(e.source_id) && keep.has(e.target_id); })
+  };
+}
+
+function lawmapWrapLabel(name) {
+  if (name.length <= 10) return name;
+  var mid = Math.ceil(name.length / 2);
+  var sp = name.indexOf(' ', Math.max(0, mid - 3));
+  if (sp !== -1 && sp < name.length - 2) return name.slice(0, sp) + '\n' + name.slice(sp + 1);
+  return name.slice(0, mid) + '\n' + name.slice(mid);
+}
+
+function renderLawMapGraph(focusId) {
+  _lawMapFocusId = focusId || null;
+  var el = document.getElementById('lawmap-graph');
+  if (!el) return;
+  var nodes = _lawMapNodes, edges = _lawMapEdges;
+  var focusNode = null;
+  if (_lawMapFocusId) {
+    focusNode = _lawMapNodes.find(function(n) { return n.id === _lawMapFocusId; }) || null;
+    var sub = lawmapNeighborhood(_lawMapFocusId);
+    nodes = sub.nodes; edges = sub.edges;
+  } else {
+    // 전체 뷰: 약한 인용은 숨겨 과밀 방지 — 노드 300개 이하가 될 때까지 인용 임계값 상향
+    // (주제 포커스 뷰에서는 약한 인용 포함 전부 표시됨)
+    var thresholds = [2, 3, 5, 8, 12];
+    for (var ti = 0; ti < thresholds.length; ti++) {
+      var th = thresholds[ti];
+      edges = _lawMapEdges.filter(function(e) { return e.source !== 'citation' || (e.weight || 1) >= th; });
+      var usedIds = new Set();
+      edges.forEach(function(e) { usedIds.add(e.source_id); usedIds.add(e.target_id); });
+      nodes = _lawMapNodes.filter(function(n) { return usedIds.has(n.id) || n.node_type === 'topic'; });
+      if (nodes.length <= 300) break;
+    }
+  }
+  // 보강 버튼: 주제 포커스일 때만 노출
+  var enrichBtn = document.getElementById('lawmap-enrich-btn');
+  if (enrichBtn) enrichBtn.style.display = (focusNode && focusNode.node_type === 'topic') ? 'inline-flex' : 'none';
+
+  var textColor = (getComputedStyle(document.documentElement).getPropertyValue('--text-primary') || '').trim() || '#333';
+  var visNodes = nodes.map(function(n) {
+    return {
+      id: n.id,
+      label: lawmapWrapLabel(n.name),
+      shape: 'dot',
+      size: n.node_type === 'topic' ? 24 : 14,
+      color: { background: LAWMAP_COLORS[n.node_type] || '#999', border: 'rgba(0,0,0,0.22)',
+               highlight: { background: LAWMAP_COLORS[n.node_type] || '#999', border: textColor } },
+      font: { color: textColor, size: 12 }
+    };
+  });
+  var visEdges = edges.map(function(e) {
+    return {
+      id: e.id, from: e.source_id, to: e.target_id,
+      arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+      width: Math.min(1 + Math.log((e.weight || 1)) / Math.LN2 * 0.7, 4),
+      color: { color: '#8a8f98', opacity: 0.55, highlight: '#5b7ff5' },
+      title: (e.relation_type || '') + (e.description ? ' — ' + e.description : ''),
+      smooth: { type: 'continuous' }
+    };
+  });
+  el.innerHTML = '';
+  var data = { nodes: new vis.DataSet(visNodes), edges: new vis.DataSet(visEdges) };
+  var options = {
+    physics: {
+      barnesHut: { gravitationalConstant: -2600, springLength: 130, springConstant: 0.03, avoidOverlap: 0.15 },
+      stabilization: { iterations: 150 }
+    },
+    interaction: { hover: true, tooltipDelay: 120 },
+    layout: { improvedLayout: visNodes.length <= 150 }
+  };
+  if (_lawMapNet) { try { _lawMapNet.destroy(); } catch(e) {} }
+  _lawMapNet = new vis.Network(el, data, options);
+  _lawMapNet.on('click', function(p) {
+    if (p.nodes && p.nodes.length) showLawMapNodeDetail(p.nodes[0]);
+  });
+}
+
+function lawMapSelectTopic(id) {
+  renderLawMapGraph(id || null);
+  if (id) {
+    var n = _lawMapNodes.find(function(x) { return x.id === id; });
+    setLawMapStatus(n ? '주제 <b>' + lmEsc(n.name) + '</b> — 관련 법령·계열 표시 중' : '');
+    if (n) showLawMapNodeDetail(id);
+  } else {
+    setLawMapStatus('전체 인용망 — 화살표 굵기는 인용·확인 횟수');
+    var det = document.getElementById('lawmap-detail');
+    if (det) det.innerHTML = '<span style="color:var(--text-secondary)">노드를 클릭하면 설명·주요 내용·근거 조문이 표시됩니다.</span>';
+  }
+}
+
+// ── 질문 → ①로컬 매칭(비용 0) → ②없으면 AI 생성 제안 ──
+async function askLawMap() {
+  var input = document.getElementById('lawmap-q');
+  var q = (input && input.value || '').trim();
+  if (!q) return;
+  if (!sb) { setLawMapStatus('⚠️ Supabase 연결이 필요합니다 (설정 탭)'); return; }
+  if (!_lawMapLoaded) await loadLawMap();
+  var kws = extractKeywords(q);
+  var best = null, bestScore = 0;
+  _lawMapNodes.forEach(function(n) {
+    var hay = (n.name + ' ' + (n.description || '')).toLowerCase();
+    var s = 0;
+    kws.forEach(function(k) {
+      var kk = k.toLowerCase();
+      if (n.name.toLowerCase().indexOf(kk) !== -1) s += 2;
+      else if (hay.indexOf(kk) !== -1) s += 1;
+    });
+    if (n.node_type === 'topic') s *= 1.5;
+    if (s > bestScore) { bestScore = s; best = n; }
+  });
+  if (best && bestScore >= 2) {
+    var sel = document.getElementById('lawmap-topic-select');
+    if (sel) sel.value = (best.node_type === 'topic') ? best.id : '';
+    renderLawMapGraph(best.id);
+    setLawMapStatus('✔ 기존 관계망 매칭 (<b>' + lmEsc(best.name) + '</b>) — API 호출 없음 · 찾던 주제가 아니면 <button class="btn" style="font-size:11px;padding:2px 8px" onclick="generateLawMapTopic()"><i class="ti ti-sparkles"></i> AI로 새로 생성</button>');
+    showLawMapNodeDetail(best.id);
+  } else {
+    setLawMapStatus('일치하는 주제가 없습니다 — <button class="btn btn-primary" style="font-size:11px;padding:2px 10px" onclick="generateLawMapTopic()"><i class="ti ti-sparkles"></i> AI로 관계도 생성 (1회 과금)</button>');
+  }
+}
+
+// ── AI 호출 공통 (비스트리밍·짧은 JSON) ──
+var LAWMAP_GEN_SYSTEM = '당신은 한국 전파·통신 법령 체계 전문가입니다. 질문 주제와 관련된 법령(법률·시행령·시행규칙·고시)과 타 분야 법령(세법 등)까지 포함해 관계도를 JSON으로만 출력합니다. 형식: {"topic":"주제명(2~12자)","description":"주제 한줄 설명","relations":[{"law":"법령 정식명칭","type":"law|decree|rules|notice|etc","relation":"주제와의 관계 한줄","basis":"제N조 등 근거 조문","law_desc":"법령 한줄 설명"}]} — JSON 외 텍스트 금지. relations 최대 8개. 제공된 참고 원문에 근거가 있으면 basis에 조문을 명시하고, 근거가 불확실한 법령은 넣지 마세요.';
+
+async function callLawmapAI(userMsg) {
+  var cfg = getConfig();
+  if (!cfg.claudeKey) throw new Error('Claude API 키가 설정되지 않았습니다 (설정 탭에서 입력)');
+  var res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': cfg.claudeKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+    // thinking:disabled — Sonnet 5 적응형 추론이 첫 블록을 thinking으로 만들어 비스트리밍 파싱이 깨지는 함정 회피 (지침 do-not)
+    body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 2500, thinking: { type: 'disabled' }, system: LAWMAP_GEN_SYSTEM, messages: [{ role: 'user', content: userMsg }] })
+  });
+  if (!res.ok) {
+    var err = await res.json().catch(function() { return {}; });
+    throw new Error((err.error && err.error.message) || ('API 오류 HTTP ' + res.status));
+  }
+  var data = await res.json();
+  // content[0] 가정 금지 — text 블록을 찾아 사용
+  var tb = (data.content || []).find(function(b) { return b.type === 'text'; });
+  var text = tb ? tb.text : '';
+  var m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('AI 응답에서 JSON을 찾지 못했습니다');
+  return JSON.parse(m[0]);
+}
+
+async function generateLawMapTopic() {
+  var input = document.getElementById('lawmap-q');
+  var q = (input && input.value || '').trim();
+  if (!q) return;
+  setLawMapStatus('🤖 RAG 근거 수집 + AI 생성 중… (20~40초)');
+  try {
+    var chunks = await searchKeywords(q, false);
+    var ctx = (chunks || []).slice(0, 8).map(function(c) {
+      return '[' + c.doc_name + (c.article_no ? ' ' + c.article_no : '') + ']\n' + (c.content || '').slice(0, 500);
+    }).join('\n\n');
+    var existingTopics = _lawMapNodes.filter(function(n) { return n.node_type === 'topic'; }).map(function(n) { return n.name; });
+    var userMsg = '질문: ' + q +
+      '\n\n기존 주제명 목록(같은 의미가 있으면 그대로 재사용): ' + (existingTopics.join(', ') || '(없음)') +
+      (ctx ? '\n\n[참고 법령 원문]\n' + ctx : '');
+    var data = await callLawmapAI(userMsg);
+    var saved = await saveLawmapData(data, 'ai');
+    await loadLawMap(true);
+    if (saved.topicId) {
+      var sel = document.getElementById('lawmap-topic-select');
+      if (sel) sel.value = saved.topicId;
+      renderLawMapGraph(saved.topicId);
+      showLawMapNodeDetail(saved.topicId);
+    }
+    setLawMapStatus('✨ 생성 완료 · DB 저장 — 다음부터는 검색만으로 표시됩니다');
+  } catch(e) {
+    setLawMapStatus('⚠️ 생성 실패: ' + lmEsc(e && e.message ? e.message : e));
+  }
+}
+
+// ── 저장 (병합 원칙: 기존 노드·엣지 절대 삭제 안 함 — 신규만 추가, 재확인 엣지는 weight+1) ──
+async function saveLawmapData(data, src) {
+  if (!sb || !data || !data.topic || !Array.isArray(data.relations)) return {};
+  src = src || 'ai';
+  async function getOrCreateNode(name, type, desc) {
+    name = String(name || '').trim();
+    if (!name || name.length > 60) return null;
+    var ex = await sb.from('law_graph_nodes').select('id,description').eq('name', name).maybeSingle();
+    if (ex.data && ex.data.id) {
+      if (desc && !ex.data.description) {
+        try { await sb.from('law_graph_nodes').update({ description: desc }).eq('id', ex.data.id); } catch(e) {}
+      }
+      return ex.data.id;
+    }
+    var ins = await sb.from('law_graph_nodes').insert({ name: name, node_type: type, description: desc || null, source: src }).select('id').single();
+    if (ins.error) {
+      // unique 충돌(동시 생성) 시 재조회
+      var again = await sb.from('law_graph_nodes').select('id').eq('name', name).maybeSingle();
+      return (again.data && again.data.id) || null;
+    }
+    return ins.data.id;
+  }
+  var topicId = await getOrCreateNode(data.topic, 'topic', data.description || null);
+  if (!topicId) return {};
+  var validTypes = { law:1, decree:1, rules:1, notice:1, etc:1 };
+  var rels = data.relations.slice(0, 10);
+  for (var i = 0; i < rels.length; i++) {
+    var rel = rels[i];
+    if (!rel || !rel.law) continue;
+    var t = validTypes[rel.type] ? rel.type : guessLawNodeType(String(rel.law));
+    var lawId = await getOrCreateNode(rel.law, t, rel.law_desc || null);
+    if (!lawId || lawId === topicId) continue;
+    var desc = (rel.relation || '관련') + (rel.basis ? ' (' + rel.basis + ')' : '');
+    var exE = await sb.from('law_graph_edges').select('id,weight').eq('source_id', topicId).eq('target_id', lawId).eq('relation_type', '근거').maybeSingle();
+    if (exE.data && exE.data.id) {
+      try { await sb.from('law_graph_edges').update({ weight: (exE.data.weight || 1) + 1 }).eq('id', exE.data.id); } catch(e) {}
+    } else {
+      try { await sb.from('law_graph_edges').insert({ source_id: topicId, target_id: lawId, relation_type: '근거', description: desc, source: src, weight: 1 }); } catch(e) { console.warn('엣지 저장 실패(계속):', e); }
+    }
+  }
+  return { topicId: topicId };
+}
+
+// ── AI 보강: 현재 주제 그래프를 통째로 보여주고 "빠진 관계만" 추가 (기존 유지) ──
+async function enrichLawMapTopic() {
+  var topic = _lawMapFocusId ? _lawMapNodes.find(function(n) { return n.id === _lawMapFocusId; }) : null;
+  if (!topic || topic.node_type !== 'topic') { setLawMapStatus('주제를 먼저 선택하세요'); return; }
+  setLawMapStatus('🔄 기존 그래프 기준 누락 관계 탐색 중… (20~40초, 1회 과금)');
+  try {
+    var sub = lawmapNeighborhood(topic.id);
+    var curLines = sub.edges.filter(function(e) { return e.source_id === topic.id || e.target_id === topic.id; }).map(function(e) {
+      var a = _lawMapNodes.find(function(n) { return n.id === e.source_id; });
+      var b = _lawMapNodes.find(function(n) { return n.id === e.target_id; });
+      return (a ? a.name : '?') + ' → ' + (b ? b.name : '?') + ' : ' + (e.description || e.relation_type || '');
+    }).join('\n');
+    var chunks = await searchKeywords(topic.name, false);
+    var ctx = (chunks || []).slice(0, 6).map(function(c) {
+      return '[' + c.doc_name + (c.article_no ? ' ' + c.article_no : '') + ']\n' + (c.content || '').slice(0, 400);
+    }).join('\n\n');
+    var userMsg = '주제 "' + topic.name + '"의 현재 관계도:\n' + (curLines || '(없음)') +
+      '\n\n위 그래프에서 빠진 관련 법령·관계만 추가로 제시하세요. topic은 반드시 "' + topic.name + '" 그대로 사용하고, 이미 그래프에 있는 법령은 relations에 넣지 마세요.' +
+      (ctx ? '\n\n[참고 법령 원문]\n' + ctx : '');
+    var data = await callLawmapAI(userMsg);
+    data.topic = topic.name; // 주제명 강제 고정
+    await saveLawmapData(data, 'ai');
+    await loadLawMap(true);
+    var again = _lawMapNodes.find(function(n) { return n.name === topic.name && n.node_type === 'topic'; });
+    if (again) renderLawMapGraph(again.id);
+    setLawMapStatus('✨ 보강 완료 — 기존 관계는 유지, 신규만 추가됨');
+  } catch(e) {
+    setLawMapStatus('⚠️ 보강 실패: ' + lmEsc(e && e.message ? e.message : e));
+  }
+}
+
+// ── 노드 상세 카드: 설명 + 📖 주요 내용(OKF 요약 지연 조회) + 연결 관계 + 원문/자문 버튼 ──
+async function showLawMapNodeDetail(nodeId) {
+  var el = document.getElementById('lawmap-detail');
+  if (!el) return;
+  var n = _lawMapNodes.find(function(x) { return x.id === nodeId; });
+  if (!n) return;
+  var color = LAWMAP_COLORS[n.node_type] || '#999';
+  var rels = _lawMapEdges.filter(function(e) { return e.source_id === nodeId || e.target_id === nodeId; })
+    .slice(0, 20)
+    .map(function(e) {
+      var otherId = e.source_id === nodeId ? e.target_id : e.source_id;
+      var other = _lawMapNodes.find(function(x) { return x.id === otherId; });
+      if (!other) return '';
+      return '<li><b>' + lmEsc(other.name) + '</b> — ' + lmEsc(e.description || e.relation_type || '관련') + '</li>';
+    }).join('');
+  var html =
+    '<div style="font-weight:700;color:var(--text-primary)">' + lmEsc(n.name) +
+      ' <span style="font-size:10px;padding:1px 7px;border-radius:999px;background:' + color + '22;border:1px solid ' + color + '66;color:var(--text-secondary)">' + (LAWMAP_TYPE_LABEL[n.node_type] || n.node_type) + '</span></div>' +
+    (n.description ? '<div style="margin:4px 0 2px;color:var(--text-secondary)">' + lmEsc(n.description) + '</div>' : '');
+  if (n.node_type !== 'topic') {
+    html += '<div id="lawmap-okf" style="margin:6px 0"><span style="font-size:11px;color:var(--text-tertiary)">📖 주요 내용 불러오는 중…</span></div>';
+  }
+  html +=
+    '<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">연결 관계</div>' +
+    '<ul style="margin:2px 0 0 18px;padding:0;font-size:12px;color:var(--text-secondary)">' + (rels || '<li>연결 없음</li>') + '</ul>' +
+    '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' +
+      '<button class="btn" id="lawmap-doc-btn" style="font-size:11px;padding:3px 10px;display:none"><i class="ti ti-file-text"></i> 원문 보기</button>' +
+      '<button class="btn" id="lawmap-chat-btn" style="font-size:11px;padding:3px 10px"><i class="ti ti-message-circle"></i> AI 자문에 질문</button>' +
+    '</div>';
+  el.innerHTML = html;
+  var chatBtn = document.getElementById('lawmap-chat-btn');
+  if (chatBtn) chatBtn.addEventListener('click', function() { askLawMapToChat(n.name, n.node_type); });
+  // 원문 보기: doc_name 직접 연결 또는 document_chunks에서 이름으로 탐색
+  var docBtn = document.getElementById('lawmap-doc-btn');
+  if (docBtn && n.node_type !== 'topic') {
+    var docName = n.doc_name || null;
+    if (!docName && sb) {
+      try {
+        var dq = await sb.from('document_chunks').select('doc_name').ilike('doc_name', n.name + '%').limit(1);
+        if (dq.data && dq.data.length) docName = dq.data[0].doc_name;
+      } catch(e) {}
+    }
+    if (docName) {
+      docBtn.style.display = 'inline-flex';
+      docBtn.addEventListener('click', function() { openLawMapDoc(docName); });
+    }
+  }
+  if (n.node_type !== 'topic') fillLawMapMainContent(n);
+}
+
+// 📖 주요 내용: kb_documents(OKF 요약) → 없으면 노드 설명으로 대체
+async function fillLawMapMainContent(n) {
+  var box = document.getElementById('lawmap-okf');
+  if (!box || !sb) return;
+  try {
+    var r = await sb.from('kb_documents').select('title,description,body_md').eq('status', 'current').ilike('title', '%' + n.name + '%').limit(1);
+    var doc = (r.data && r.data[0]) || null;
+    if (doc) {
+      var body = (doc.body_md || '').slice(0, 1200);
+      box.innerHTML =
+        '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">📖 주요 내용 (요약 지식베이스)</summary>' +
+        '<div style="margin-top:5px;padding:7px 10px;border-left:3px solid ' + (LAWMAP_COLORS[n.node_type] || '#999') + '88;background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12px;line-height:1.65;color:var(--text-secondary);white-space:pre-wrap">' +
+        (doc.description ? lmEsc(doc.description) + '\n\n' : '') + lmEsc(body) + (doc.body_md && doc.body_md.length > 1200 ? '…' : '') +
+        '</div></details>';
+    } else {
+      box.innerHTML = n.description
+        ? '<div style="font-size:10.5px;color:var(--text-tertiary)">ℹ️ 요약 지식베이스(OKF) 미구축 법령 — 위 설명으로 대체 (원문 보기는 가능할 수 있음)</div>'
+        : '<div style="font-size:10.5px;color:var(--text-tertiary)">ℹ️ 요약 정보 없음 — 원문 보기 또는 AI 자문을 이용하세요</div>';
+    }
+  } catch(e) {
+    box.innerHTML = '<div style="font-size:10.5px;color:var(--text-tertiary)">주요 내용 조회 실패</div>';
+  }
+}
+
+// 원문 미리보기 모달 — document_chunks 앞부분 조문
+async function openLawMapDoc(docName) {
+  var modal = document.getElementById('lawmap-doc-modal');
+  var title = document.getElementById('lawmap-doc-title');
+  var body = document.getElementById('lawmap-doc-body');
+  if (!modal || !sb) return;
+  modal.style.display = 'flex';
+  title.innerHTML = '<i class="ti ti-file-text"></i> ' + lmEsc(docName);
+  body.textContent = '불러오는 중...';
+  try {
+    var r = await sb.from('document_chunks').select('content,article_no,chunk_index').eq('doc_name', docName).order('chunk_index', { ascending: true }).limit(6);
+    var rows = r.data || [];
+    if (!rows.length) { body.textContent = '원문 청크를 찾지 못했습니다.'; return; }
+    body.textContent = rows.map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + (c.content || ''); }).join('\n\n────────\n\n') +
+      '\n\n※ 앞부분 ' + rows.length + '개 청크 미리보기 — 전체 원문은 지식 베이스/AI 자문에서 확인';
+  } catch(e) {
+    body.textContent = '원문 조회 실패: ' + (e && e.message ? e.message : e);
+  }
+}
+
+function askLawMapToChat(name, nodeType) {
+  go('chat', null);
+  var inp = document.getElementById('chat-input');
+  if (inp) {
+    inp.value = nodeType === 'topic'
+      ? '"' + name + '" 관련 법령 체계와 실무 절차를 근거 조문과 함께 설명해줘.'
+      : '"' + name + '"의 주요 내용과 우리 팀(전파정책) 업무 관련 조항을 설명해줘.';
+    inp.focus();
+  }
+}
+
+// 채팅 미니 관계도 클릭 → 관계도 탭에서 해당 주제 포커스
+async function goLawMapTopicByName(topicName) {
+  go('lawmap', null);
+  if (!_lawMapLoaded) await loadLawMap();
+  else await loadLawMap(true); // 방금 자문에서 저장된 신규 관계 반영
+  var t = _lawMapNodes.find(function(n) { return n.node_type === 'topic' && n.name === topicName; });
+  if (t) {
+    var sel = document.getElementById('lawmap-topic-select');
+    if (sel) sel.value = t.id;
+    renderLawMapGraph(t.id);
+    setLawMapStatus('주제 <b>' + lmEsc(t.name) + '</b> — 관련 법령·계열 표시 중');
+    showLawMapNodeDetail(t.id);
+  }
+}
+
+// 자문 답변 하단용 정적 SVG 미니 관계도 (주제 중심 방사형, vis-network 불필요)
+function renderMiniLawMap(topic, relations) {
+  var rels = (relations || []).slice(0, 8);
+  if (!rels.length) return '';
+  var W = 560, H = rels.length <= 4 ? 210 : 250;
+  var cx = W / 2, cy = H / 2, R = Math.min(H / 2 - 40, 88);
+  var validTypes = { law:1, decree:1, rules:1, notice:1, etc:1 };
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;display:block" role="img">' +
+    '<defs><marker id="lmArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(128,128,128,.55)"/></marker></defs>';
+  var pts = rels.map(function(r, i) {
+    var ang = -Math.PI / 2 + (i * 2 * Math.PI / rels.length);
+    return { x: cx + R * Math.cos(ang), y: cy + R * Math.sin(ang) * 0.82, rel: r };
+  });
+  pts.forEach(function(p) {
+    var dx = p.x - cx, dy = p.y - cy, L = Math.sqrt(dx * dx + dy * dy) || 1;
+    var x1 = cx + dx / L * 30, y1 = cy + dy / L * 30, x2 = p.x - dx / L * 17, y2 = p.y - dy / L * 17;
+    svg += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="rgba(128,128,128,.5)" stroke-width="1.3" marker-end="url(#lmArr)"/>';
+  });
+  pts.forEach(function(p) {
+    var t = validTypes[p.rel.type] ? p.rel.type : guessLawNodeType(String(p.rel.law || ''));
+    var name = String(p.rel.law || '').slice(0, 14);
+    svg += '<circle cx="' + p.x + '" cy="' + p.y + '" r="12" fill="' + (LAWMAP_COLORS[t] || '#999') + '" fill-opacity=".9" stroke="rgba(0,0,0,.18)"/>';
+    svg += '<text x="' + p.x + '" y="' + (p.y + 24) + '" text-anchor="middle" font-size="10" fill="currentColor">' + lmEsc(name) + '</text>';
+  });
+  svg += '<circle cx="' + cx + '" cy="' + cy + '" r="26" fill="' + LAWMAP_COLORS.topic + '" fill-opacity=".92" stroke="rgba(0,0,0,.18)"/>';
+  svg += '<text x="' + cx + '" y="' + (cy + 4) + '" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">' + lmEsc(String(topic).slice(0, 8)) + '</text>';
+  svg += '</svg>';
+  return '<div class="lawmap-mini-svg">' + svg + '</div>';
 }
 
 // ════════════════════════════════════════════

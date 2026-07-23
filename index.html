@@ -6,7 +6,7 @@
 <title>전파정책 전문가 AI — SKT Comm센터 기술정책팀</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <link rel="stylesheet" href="styles.css?v=20260620a">
+  <link rel="stylesheet" href="styles.css?v=20260723a">
 
 </head>
 <body>
@@ -39,6 +39,7 @@
     <div class="nav-group">
       <div class="nav-label">지식 베이스</div>
       <div class="nav-item" onclick="go('law',this)"><i class="ti ti-file-text"></i>국내 법령·고시</div>
+      <div class="nav-item" onclick="go('lawmap',this)"><i class="ti ti-topology-star-3"></i>법령 관계도</div>
       <div class="nav-item" onclick="go('itu',this)"><i class="ti ti-world"></i>ITU-R 문서</div>
       <div class="nav-item" onclick="go('press',this)"><i class="ti ti-speakerphone"></i>정부 보도자료</div>
       <div class="nav-item" onclick="go('custom',this)"><i class="ti ti-pencil-plus"></i>추가 지식 입력</div>
@@ -306,6 +307,32 @@
         <div id="law-upload-list"></div>
 
         <div id="kb-doc-groups"><div style="color:var(--text-secondary);font-size:12px;padding:16px 0">불러오는 중...</div></div>
+      </div>
+
+      <!-- 법령 관계도 -->
+      <div class="panel" id="panel-lawmap">
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+          <input id="lawmap-q" type="text" placeholder="법령 관계가 궁금한 주제를 질문 — 예: 무선국 개설하면 어떤 비용이 드나?" style="flex:1;min-width:220px;padding:8px 12px;font-size:13px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none" onkeydown="if(event.key==='Enter')askLawMap()">
+          <button class="btn btn-primary" style="font-size:12px" onclick="askLawMap()"><i class="ti ti-search"></i> 관계도 찾기</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+          <select id="lawmap-topic-select" onchange="lawMapSelectTopic(this.value)" style="padding:5px 10px;font-size:12px;border:0.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;outline:none;max-width:260px">
+            <option value="">전체 인용망</option>
+          </select>
+          <span id="lawmap-status" style="font-size:11px;color:var(--text-secondary)"></span>
+          <button class="btn" id="lawmap-enrich-btn" style="margin-left:auto;font-size:11px;padding:3px 10px;display:none" onclick="enrichLawMapTopic()"><i class="ti ti-sparkles"></i> AI로 보강</button>
+          <button class="btn" style="font-size:11px;padding:3px 10px" onclick="loadLawMap(true)"><i class="ti ti-refresh"></i> 새로고침</button>
+        </div>
+        <div id="lawmap-graph" class="lawmap-graph"><div style="color:var(--text-secondary);font-size:12px;padding:16px">불러오는 중...</div></div>
+        <div class="lawmap-legend">
+          <span><i class="lawmap-dot" style="background:#5b7ff5"></i> 주제</span>
+          <span><i class="lawmap-dot" style="background:#2ea060"></i> 법률</span>
+          <span><i class="lawmap-dot" style="background:#1f9e9e"></i> 시행령·규칙</span>
+          <span><i class="lawmap-dot" style="background:#e08a3c"></i> 고시·행정규칙</span>
+          <span><i class="lawmap-dot" style="background:#d5486a"></i> 타분야·기타</span>
+          <span style="margin-left:auto;opacity:.7">화살표 굵기 = 인용·확인 횟수 · 노드 클릭 = 상세</span>
+        </div>
+        <div id="lawmap-detail" class="lawmap-detail"><span style="color:var(--text-secondary)">노드를 클릭하면 설명·주요 내용·근거 조문이 표시됩니다.</span></div>
       </div>
 
       <!-- ITU-R -->
@@ -754,6 +781,9 @@
       <button class="mobile-submenu-item" onclick="go('law',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
         <i class="ti ti-file-text"></i>국내 법령·고시
       </button>
+      <button class="mobile-submenu-item" onclick="go('lawmap',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
+        <i class="ti ti-topology-star-3"></i>법령 관계도
+      </button>
       <button class="mobile-submenu-item" onclick="go('itu',null);setBottomNav('bn-law');closeMobileSubMenu('law-sub')">
         <i class="ti ti-world"></i>ITU-R 문서
       </button>
@@ -802,6 +832,17 @@
       <button onclick="closePressDetail();go('chat');setTimeout(function(){var inp=document.getElementById('chat-input');if(inp){inp.value='&quot;'+document.getElementById('press-detail-title').textContent+'&quot; 보도자료의 주요 내용을 요약해 주세요.';inp.focus();}},300)" style="padding:7px 14px;background:var(--accent-purple);border:none;border-radius:var(--radius);color:#fff;cursor:pointer;font-size:13px"><i class="ti ti-robot"></i> AI 자문</button>
       <button onclick="closePressDetail()" style="padding:7px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-secondary);cursor:pointer;font-size:13px">닫기</button>
     </div>
+  </div>
+</div>
+
+<!-- 법령 관계도: 원문 미리보기 모달 -->
+<div id="lawmap-doc-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1500;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--bg-primary);border-radius:var(--radius-lg);width:100%;max-width:760px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;border:0.5px solid var(--border-light)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:0.5px solid var(--border-light);flex-shrink:0;gap:12px">
+      <div id="lawmap-doc-title" style="font-size:14px;font-weight:600;color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><i class="ti ti-file-text"></i> 원문</div>
+      <button class="btn" onclick="document.getElementById('lawmap-doc-modal').style.display='none'"><i class="ti ti-x"></i>닫기</button>
+    </div>
+    <div id="lawmap-doc-body" style="overflow-y:auto;padding:14px 18px;font-size:13px;line-height:1.75;color:var(--text-secondary);white-space:pre-wrap"></div>
   </div>
 </div>
 
@@ -863,6 +904,6 @@
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined'){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 <script src="system_prompt.js?v=20260612c"></script>
-<script src="app.js?v=20260723a"></script>
+<script src="app.js?v=20260723d"></script>
 </body>
 </html>

@@ -357,3 +357,59 @@ textarea:focus { border-color: var(--accent); }
 .mobile-submenu-item:active {
   background: var(--bg-tertiary);
 }
+
+/* ── 법령 관계도 (lawmap) ───────────────────────────── */
+.lawmap-graph {
+  height: calc(100vh - 320px);
+  min-height: 340px;
+  border: 0.5px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+.lawmap-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  margin: 6px 2px;
+}
+.lawmap-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.lawmap-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.lawmap-detail {
+  border: 0.5px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  min-height: 44px;
+  background: var(--bg-primary);
+}
+/* 자문 답변 하단 미니 관계도 */
+.lawmap-mini {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--border-light);
+  cursor: pointer;
+}
+.lawmap-mini-head {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.lawmap-mini-head i { font-size: 12px; color: var(--accent); }
+.lawmap-mini-head span { opacity: 0.75; }
+.lawmap-mini-svg {
+  border: 0.5px solid var(--border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-width: 560px;
+  color: var(--text-secondary); /* SVG 라벨 currentColor */
+}
+.lawmap-mini-link { font-size: 11px; color: var(--accent); margin-top: 4px; }
+.lawmap-mini:hover .lawmap-mini-link { text-decoration: underline; }
