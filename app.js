@@ -5965,39 +5965,51 @@ async function showLawMapNodeDetail(nodeId) {
     docBtn.style.display = 'inline-flex';
     docBtn.addEventListener('click', function() { openLawMapDoc(docName); });
   }
-  // 주제 맥락이 있으면 근거 조문 원문 발췌를 우선 표시, 법령 전체 요약은 접어 둠
+  // 주제 맥락이 있으면 근거 조문 원문 발췌를 먼저 표시. 법령 전체 요약(OKF)은 항상 펼쳐서 표시.
   if (focusTopic && topicEdge) fillLawMapArticle(n, topicEdge.description || '', docName);
-  fillLawMapMainContent(n, !(focusTopic && topicEdge));
+  fillLawMapMainContent(n, true);
 }
 
-// 📌 근거 조문 발췌: 엣지 설명의 "제N조"를 document_chunks에서 찾아 해당 조문만 표시
+// 📌 근거 조문 발췌: 엣지 설명의 "제N조"(제24~25조 범위 포함)를 document_chunks에서 찾아 해당 조문만 표시
 async function fillLawMapArticle(n, basisText, docName) {
   var box = document.getElementById('lawmap-article');
   if (!box || !sb || !docName) return;
-  var m = (basisText || '').match(/제(\d+)조(의\d+)?/);
+  // 제24조 / 제24조의2 / 제24~25조 / 제24-25조 모두 파싱
+  var m = (basisText || '').match(/제\s*(\d+)\s*조?(?:의\s*(\d+))?\s*(?:[~∼\-]\s*(?:제\s*)?(\d+))?/);
   if (!m) return;
-  var bare = m[1] + '조' + (m[2] || '');   // 문서마다 article_no가 '제19조(...)' 또는 '19조(...)' 두 형태
-  var artKey = '제' + bare;
+  var start = parseInt(m[1], 10);
+  var end = m[3] ? parseInt(m[3], 10) : start;
+  if (isNaN(start)) return;
+  if (isNaN(end) || end < start || end - start > 4) end = start;   // 비정상 범위는 시작 조문만
+  // 대상 조문 키 목록 (제N조 / N조 두 형태 대응, 제24조의2 우선)
+  var wants = [];
+  var firstBare = start + '조' + (m[2] ? '의' + m[2] : '');
+  wants.push(firstBare);
+  for (var a = start + (m[2] ? 0 : 1); a <= end; a++) { if (('' + a) !== ('' + start) || !m[2]) wants.push(a + '조'); }
+  wants = wants.filter(function(v, i, arr) { return arr.indexOf(v) === i; });
   try {
-    var r = await sb.from('document_chunks').select('content,article_no')
-      .eq('doc_name', docName)
-      .or('article_no.ilike.' + artKey + '%,article_no.ilike.' + bare + '%')
-      .order('chunk_index', { ascending: true }).limit(3);
-    var rows = (r.data || []).filter(function(c) {
-      var a = (c.article_no || '').replace(/^제/, '');
-      return a === bare || a.indexOf(bare + '(') === 0;   // 제19조의2가 제19조에 섞이지 않게
+    var r = await sb.from('document_chunks').select('content,article_no,chunk_index')
+      .eq('doc_name', docName).order('chunk_index', { ascending: true }).limit(400);
+    var all = r.data || [];
+    var picked = [];
+    wants.forEach(function(w) {
+      all.forEach(function(c) {
+        var a = (c.article_no || '').replace(/^제/, '');
+        if ((a === w || a.indexOf(w + '(') === 0) && picked.indexOf(c) === -1) picked.push(c);
+      });
     });
-    if (!rows.length) return;
-    var text = rows.map(function(c) { return c.content || ''; }).join('\n').slice(0, 900);
+    if (!picked.length) return;
+    picked.sort(function(x, y) { return (x.chunk_index || 0) - (y.chunk_index || 0); });
+    var labels = picked.map(function(c) { return c.article_no; }).filter(function(v, i, arr) { return v && arr.indexOf(v) === i; }).slice(0, 3);
+    var text = picked.slice(0, 4).map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + (c.content || ''); }).join('\n\n').slice(0, 1400);
     box.innerHTML =
-      '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">📌 근거 조문 — ' + lmEsc(rows[0].article_no || artKey) + '</summary>' +
+      '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">📌 근거 조문 — ' + lmEsc(labels.join(', ')) + '</summary>' +
       '<div style="margin-top:5px;padding:7px 10px;border-left:3px solid ' + LAWMAP_COLORS.topic + '88;background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12px;line-height:1.65;color:var(--text-secondary);white-space:pre-wrap">' +
-      lmEsc(text) + (text.length >= 900 ? '…' : '') + '</div></details>';
+      lmEsc(text) + (text.length >= 1400 ? '…' : '') + '</div></details>';
   } catch(e) {}
 }
 
-// 📖 법령 전체 요약: kb_documents(OKF) → 없으면 노드 설명으로 대체.
-// openByDefault=false(주제 맥락 있음)면 접힌 상태 — 주제와 무관한 법령 전체 내용이 카드에 쏟아지지 않게
+// 📖 법령 전체 요약: kb_documents(OKF) → 없으면 노드 설명으로 대체. openByDefault면 펼쳐서 표시.
 async function fillLawMapMainContent(n, openByDefault) {
   var box = document.getElementById('lawmap-okf');
   if (!box || !sb) return;
