@@ -5995,7 +5995,7 @@ async function showLawMapNodeDetail(nodeId) {
 //  ① 명시된 조문(엣지 설명의 "제N조", 범위·의M 포함)
 //  ② 위임 연결: 시행령·시행규칙이면 상위법의 근거 조문(parentBasis 제N조)을 "법 제N조"로 인용하는 조문
 //  ③ 최후 폴백: 법령 내부 키워드+시맨틱 하이브리드 검색
-var LAWMAP_ART_BOILER = /(목적|정의|적용\s*범위|다른\s*법령|개정|폐지|경과조치|시행일|약칭)/;
+var LAWMAP_ART_BOILER = /(목적|정의|적용\s*범위|다른\s*법령|개정|폐지|경과조치|시행일|약칭|권한의\s*위임|위임[ㆍ·]\s*위탁)/;
 function lawmapArtNoMatch(c, wants) {
   var aa = (c.article_no || '').replace(/^제/, '');
   return wants.some(function(w) { return aa === w || aa.indexOf(w + '(') === 0; });
@@ -6025,27 +6025,24 @@ async function fillLawMapArticle(n, basisText, docName, topicName, parentBasis) 
     var w1 = lawmapArtNums(basisText);
     if (w1.wants.length) all.forEach(function(c) { if (lawmapArtNoMatch(c, w1.wants) && picked.indexOf(c) === -1) picked.push(c); });
 
-    // ② 위임 연결: 상위법 근거 조문(parentBasis)을 "법 제N조"로 인용하는 하위법령 조문 (결정론적)
+    // 위임 연결 후보군: 시행령·시행규칙이 상위법 근거 조문(parentBasis)을 "법 제N조"로 인용하는 조문 집합.
+    //  이 집합으로 후보를 '구조적으로' 좁히고(아래 하이브리드가 그 안에서 주제 관련성으로 순위 매김).
+    var delegSet = null;
     if (!picked.length && parentBasis) {
       var pnums = lawmapArtNums(parentBasis).nums;
       if (pnums.length) {
-        var delegRe = new RegExp('법\\s*제\\s*(?:' + pnums.join('|') + ')\\s*조');   // "법 제9조"(의M 포함 접두)
-        var byDeleg = {};
+        var delegRe = new RegExp('법\\s*제\\s*(?:' + pnums.join('|') + ')\\s*조');
+        var cand = {};
         all.forEach(function(c) {
           var art = c.article_no || '';
           if (!art || LAWMAP_ART_BOILER.test(art)) return;
-          var hits = ((c.content || '').match(new RegExp(delegRe.source, 'g')) || []).length;
-          if (hits > 0) {
-            var rec = byDeleg[art] || (byDeleg[art] = { art: art, chunks: [], hits: 0, ci: c.chunk_index || 0 });
-            rec.chunks.push(c); rec.hits += hits;
-          }
+          if (delegRe.test(c.content || '')) cand[art] = true;
         });
-        var dl = Object.keys(byDeleg).map(function(k) { return byDeleg[k]; }).sort(function(a, b) { return b.hits - a.hits || a.ci - b.ci; });
-        if (dl.length) { picked = dl[0].chunks; mode = '관련'; searchMode = 'deleg'; }
+        if (Object.keys(cand).length) delegSet = cand;
       }
     }
 
-    // ③ 최후 폴백 → 법령 내부 하이브리드(키워드 + 시맨틱) 검색으로 관련 조문 추정
+    // ② 관련 조문 → (위임 후보군이 있으면 그 안에서) 키워드+시맨틱 하이브리드로 순위
     if (!picked.length) {
       mode = '관련';
       var qEl = document.getElementById('lawmap-q');
@@ -6087,19 +6084,21 @@ async function fillLawMapArticle(n, basisText, docName, topicName, parentBasis) 
         }
       } catch(e) { console.warn('관계도 시맨틱 검색 실패(키워드로 진행):', e); }
 
-      // (c) 결합: 키워드 0~1 정규화 + 시맨틱(0~1) 가중합. 총칙·부칙은 제외
-      var recs = Object.keys(byArt).map(function(k) { return byArt[k]; });
+      // (c) 결합: 키워드 0~1 정규화 + 시맨틱(0~1) 가중합. 총칙·부칙 제외.
+      //     위임 후보군(delegSet)이 있으면 그 안에서만 순위 → 구조(위임)로 좁히고 관련성으로 고름.
+      var recs = Object.keys(byArt).map(function(k) { return byArt[k]; })
+        .filter(function(r) { return !LAWMAP_ART_BOILER.test(r.art) && (!delegSet || delegSet[r.art]); });
       var maxKw = recs.reduce(function(mx, r) { return Math.max(mx, r.kw); }, 0) || 1;
       recs.forEach(function(r) { r.combined = (r.kw / maxKw) * 0.45 + r.sem * 0.55; });
-      var arts = recs.filter(function(r) { return !LAWMAP_ART_BOILER.test(r.art) && r.combined > 0.05; })
+      var arts = recs.filter(function(r) { return r.combined > 0.02; })
         .sort(function(a, b) { return b.combined - a.combined || a.ci - b.ci; });
-      if (arts.length) picked = arts[0].chunks;
+      if (arts.length) { picked = arts[0].chunks; searchMode = delegSet ? 'deleg' : searchMode; }
     }
     if (!picked.length) return;
     picked.sort(function(x, y) { return (x.chunk_index || 0) - (y.chunk_index || 0); });
     var labels = picked.map(function(c) { return c.article_no; }).filter(function(v, i, arr) { return v && arr.indexOf(v) === i; }).slice(0, 3);
     var text = picked.slice(0, 4).map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + (c.content || ''); }).join('\n\n').slice(0, 1400);
-    var modeLabel = searchMode === 'deleg' ? '위임 근거' : (searchMode === 'hybrid' ? '키워드+의미 검색' : '키워드 매칭');
+    var modeLabel = searchMode === 'deleg' ? '위임 근거+관련성' : (searchMode === 'hybrid' ? '키워드+의미 검색' : '키워드 매칭');
     var title = mode === '근거' ? '📌 근거 조문' : ('📌 관련 조문(' + modeLabel + ')');
     box.innerHTML =
       '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">' + title + (labels.length ? ' — ' + lmEsc(labels.join(', ')) : '') + '</summary>' +
