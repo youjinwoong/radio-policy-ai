@@ -5622,27 +5622,21 @@ function renderLawMapGraph(focusId) {
     var sub = lawmapNeighborhood(_lawMapFocusId);
     nodes = sub.nodes; edges = sub.edges;
   } else {
-    // 전체 뷰: 시드 엣지 + 인용 엣지(weight≥임계)로 표시 노드를 정하고, 계열(하위법령) 엣지는
-    //   '양끝이 이미 포함된 경우에만' 유지. (계열 엣지를 무조건 남기면 국가회계법–시행령 쌍처럼
-    //   주변 관계가 잘린 고립 쌍이 딸려 들어와 '관계 없는 법'처럼 보였음.) 노드 220 이하 목표로 임계 상향.
-    var thresholds = [3, 4, 5, 6, 8, 12];
-    var keep, usedIds2;
-    for (var ti = 0; ti < thresholds.length; ti++) {
-      var th = thresholds[ti];
-      keep = new Set();
-      var inc = new Set();
-      _lawMapEdges.forEach(function(e) {
-        if (e.source === 'seed' || (e.source === 'citation' && (e.weight || 1) >= th)) {
-          keep.add(e.id); inc.add(e.source_id); inc.add(e.target_id);
-        }
-      });
-      _lawMapNodes.forEach(function(n) { if (n.node_type === 'topic') inc.add(n.id); });
-      _lawMapEdges.forEach(function(e) { if (e.source === 'family' && inc.has(e.source_id) && inc.has(e.target_id)) keep.add(e.id); });
-      usedIds2 = new Set();
-      _lawMapEdges.forEach(function(e) { if (keep.has(e.id)) { usedIds2.add(e.source_id); usedIds2.add(e.target_id); } });
-      if (usedIds2.size + _lawMapNodes.filter(function(n) { return n.node_type === 'topic' && !usedIds2.has(n.id); }).length <= 220) break;
-    }
+    // 전체 뷰: '전파정책 관련 법'만 — 주제 + 시드로 연결된 법 + 그 법의 계열(하위법령)로 코어를 정하고,
+    //   엣지는 시드 + (코어 내부의 계열·인용)만 표시. 지방세법처럼 세금 감면 조항에서 농지법·축산법 등
+    //   타 분야 법을 대량 인용하는 허브의 바깥 인용은 코어 밖이라 제외됨(그 법의 전체 인용은 노드 클릭 시).
+    var core = new Set();
+    _lawMapNodes.forEach(function(n) { if (n.node_type === 'topic') core.add(n.id); });
+    _lawMapEdges.forEach(function(e) { if (e.source === 'seed') { core.add(e.source_id); core.add(e.target_id); } });
+    _lawMapEdges.forEach(function(e) { if (e.source === 'family' && (core.has(e.source_id) || core.has(e.target_id))) { core.add(e.source_id); core.add(e.target_id); } });
+    var keep = new Set();
+    _lawMapEdges.forEach(function(e) {
+      if (e.source === 'seed') keep.add(e.id);
+      else if (core.has(e.source_id) && core.has(e.target_id)) keep.add(e.id);
+    });
     edges = _lawMapEdges.filter(function(e) { return keep.has(e.id); });
+    var usedIds2 = new Set();
+    edges.forEach(function(e) { usedIds2.add(e.source_id); usedIds2.add(e.target_id); });
     nodes = _lawMapNodes.filter(function(n) { return usedIds2.has(n.id) || n.node_type === 'topic'; });
   }
   // 보강 버튼: 주제 포커스일 때만 노출
