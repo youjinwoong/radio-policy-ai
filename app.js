@@ -6014,18 +6014,25 @@ async function fillLawMapArticle(n, basisText, docName, topicName) {
       var queryText = (topicName || '') + ' ' + (basisText || '') + ' ' + (qEl ? qEl.value : '');
       var isBoiler = function(art) { return /(목적|정의|적용\s*범위|다른\s*법령|개정|폐지|경과조치|시행일|약칭)/.test(art); };
 
-      // (a) 키워드: 조문 제목 ×5, 본문 ×1, 총칙·부칙 감점
+      // (a) 키워드: **조문 단위로 한 번만** 집계(청크 수에 비례하지 않게). 제목 매칭 ×5, 본문 ×1,
+      //     제목에 주제명이 통째로 들어가면(예: '주파수분배') 강한 가점 +15
       var terms = extractKeywords(queryText).filter(function(k) { return !LAWMAP_MATCH_STOP[k]; });
       (topicName || '').split(/[\s·]+/).forEach(function(w) { w = w.trim(); if (w.length >= 2 && !LAWMAP_MATCH_STOP[w] && terms.indexOf(w) === -1) terms.push(w); });
+      var qnsTopic = (topicName || '').replace(/\s+/g, '');
       var byArt = {};
       all.forEach(function(c) {
         var art = c.article_no || '';
         if (!art) return;
-        var rec = byArt[art] || (byArt[art] = { art: art, chunks: [], kw: 0, sem: 0, ci: c.chunk_index || 0 });
+        var rec = byArt[art] || (byArt[art] = { art: art, chunks: [], body: '', kw: 0, sem: 0, ci: c.chunk_index || 0 });
         rec.chunks.push(c);
-        terms.forEach(function(k) {
-          if (art.indexOf(k) !== -1) rec.kw += 5;
-          if ((c.content || '').indexOf(k) !== -1) rec.kw += 1;
+        rec.body += ' ' + (c.content || '');
+      });
+      Object.keys(byArt).forEach(function(k) {
+        var rec = byArt[k];
+        if (qnsTopic.length >= 3 && rec.art.replace(/\s+/g, '').indexOf(qnsTopic) !== -1) rec.kw += 15;  // 제목 구절 일치
+        terms.forEach(function(t) {
+          if (rec.art.indexOf(t) !== -1) rec.kw += 5;   // 제목 매칭(조문당 1회)
+          if (rec.body.indexOf(t) !== -1) rec.kw += 1;  // 본문 매칭(조문당 1회)
         });
       });
 
