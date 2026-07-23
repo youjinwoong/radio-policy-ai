@@ -5998,14 +5998,18 @@ async function showLawMapNodeDetail(nodeId) {
 var LAWMAP_ART_BOILER = /(목적|정의|적용\s*범위|다른\s*법령|개정|폐지|경과조치|시행일|약칭|권한의\s*위임|위임[ㆍ·]\s*위탁)/;
 
 // PDF 추출 시 조문 본문에 섞여 들어간 편집 흔적 제거 (표시 전용 — 저장 데이터는 건드리지 않음)
-//  · [N페이지] 페이지 구분 표시  · "법제처 N 국가법령정보센터" 쪽 하단 footer  · 과다 공백/개행
-function lawmapCleanText(s) {
-  return String(s == null ? '' : s)
+//  · [N페이지] 페이지 구분 표시  · "법제처 N 국가법령정보센터" 쪽 하단 footer
+//  · 페이지마다 반복되는 법령명 머리글(예: 단독 줄 "전파법")  · 과다 공백/개행
+function lawmapCleanText(s, lawName) {
+  var t = String(s == null ? '' : s)
     .replace(/\[\s*\d+\s*페이지\s*\]/g, '')
-    .replace(/법제처\s*\d*\s*국가법령정보센터/g, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+    .replace(/법제처\s*\d*\s*국가법령정보센터/g, '');
+  var title = (lawName || '').trim();
+  var lines = t.split('\n').filter(function(ln) {
+    var v = ln.trim();
+    return !(title && v === title);   // 줄 전체가 법령명(반복 머리글)이면 제거
+  });
+  return lines.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 function lawmapArtNoMatch(c, wants) {
   var aa = (c.article_no || '').replace(/^제/, '');
@@ -6105,7 +6109,7 @@ async function fillLawMapArticle(n, basisText, docName, topicName, parentBasis) 
     if (!picked.length) return;
     picked.sort(function(x, y) { return (x.chunk_index || 0) - (y.chunk_index || 0); });
     var labels = picked.map(function(c) { return c.article_no; }).filter(function(v, i, arr) { return v && arr.indexOf(v) === i; }).slice(0, 3);
-    var text = picked.slice(0, 4).map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + lawmapCleanText(c.content); }).join('\n\n').slice(0, 1400);
+    var text = picked.slice(0, 4).map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + lawmapCleanText(c.content, n.name); }).join('\n\n').slice(0, 1400);
     var modeLabel = searchMode === 'deleg' ? '위임 근거+관련성' : (searchMode === 'hybrid' ? '키워드+의미 검색' : '키워드 매칭');
     var title = mode === '근거' ? '📌 근거 조문' : ('📌 관련 조문(' + modeLabel + ')');
     box.innerHTML =
@@ -6152,7 +6156,8 @@ async function openLawMapDoc(docName) {
     var r = await sb.from('document_chunks').select('content,article_no,chunk_index').eq('doc_name', docName).order('chunk_index', { ascending: true }).limit(6);
     var rows = r.data || [];
     if (!rows.length) { body.textContent = '원문 청크를 찾지 못했습니다.'; return; }
-    body.textContent = rows.map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + lawmapCleanText(c.content); }).join('\n\n────────\n\n') +
+    var docTitle = docName.split('(')[0].trim();   // "전파법(법률)(...)" → "전파법"
+    body.textContent = rows.map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + lawmapCleanText(c.content, docTitle); }).join('\n\n────────\n\n') +
       '\n\n※ 앞부분 ' + rows.length + '개 청크 미리보기 — 전체 원문은 지식 베이스/AI 자문에서 확인';
   } catch(e) {
     body.textContent = '원문 조회 실패: ' + (e && e.message ? e.message : e);
