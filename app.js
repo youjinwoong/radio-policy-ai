@@ -6006,40 +6006,56 @@ async function fillLawMapArticle(n, basisText, docName, topicName) {
         });
       });
     }
-    // ② 조문 미지정(또는 매칭 실패) → 법령 내부 키워드 검색으로 관련 조문 추정
+    // ② 조문 미지정(또는 매칭 실패) → 법령 내부 하이브리드(키워드 + 시맨틱) 검색으로 관련 조문 추정
+    var searchMode = 'kw';   // 라벨용: 키워드만 vs 키워드+의미
     if (!picked.length) {
       mode = '관련';
       var qEl = document.getElementById('lawmap-q');
-      var terms = extractKeywords((topicName || '') + ' ' + (basisText || '') + ' ' + (qEl ? qEl.value : ''))
-        .filter(function(k) { return !LAWMAP_MATCH_STOP[k]; });
-      // 주제명 자체 단어(예: '주파수','분배')도 매칭어에 포함 — 조문 제목 매칭용
+      var queryText = (topicName || '') + ' ' + (basisText || '') + ' ' + (qEl ? qEl.value : '');
+      var isBoiler = function(art) { return /(목적|정의|적용\s*범위|다른\s*법령|개정|폐지|경과조치|시행일|약칭)/.test(art); };
+
+      // (a) 키워드: 조문 제목 ×5, 본문 ×1, 총칙·부칙 감점
+      var terms = extractKeywords(queryText).filter(function(k) { return !LAWMAP_MATCH_STOP[k]; });
       (topicName || '').split(/[\s·]+/).forEach(function(w) { w = w.trim(); if (w.length >= 2 && !LAWMAP_MATCH_STOP[w] && terms.indexOf(w) === -1) terms.push(w); });
-      if (terms.length) {
-        // 조문 단위로 집계: 제목(article_no) 매칭 ×5, 본문 매칭 ×1. 목적·정의 등 총칙 보일러플레이트는 감점
-        var byArt = {};
-        all.forEach(function(c) {
-          var art = c.article_no || '';
-          if (!art) return;
-          var rec = byArt[art] || (byArt[art] = { art: art, chunks: [], score: 0, ci: c.chunk_index || 0 });
-          rec.chunks.push(c);
-          var title = art, body = c.content || '';
-          terms.forEach(function(k) {
-            if (title.indexOf(k) !== -1) rec.score += 5;
-            if (body.indexOf(k) !== -1) rec.score += 1;
-          });
-          if (/(목적|정의|적용\s*범위|다른\s*법령|개정|폐지|경과조치|시행일|약칭)/.test(art)) rec.score -= 20;   // 총칙·부칙 보일러플레이트 배제
+      var byArt = {};
+      all.forEach(function(c) {
+        var art = c.article_no || '';
+        if (!art) return;
+        var rec = byArt[art] || (byArt[art] = { art: art, chunks: [], kw: 0, sem: 0, ci: c.chunk_index || 0 });
+        rec.chunks.push(c);
+        terms.forEach(function(k) {
+          if (art.indexOf(k) !== -1) rec.kw += 5;
+          if ((c.content || '').indexOf(k) !== -1) rec.kw += 1;
         });
-        var arts = Object.keys(byArt).map(function(k) { return byArt[k]; })
-          .filter(function(r) { return r.score > 0; })
-          .sort(function(a, b) { return b.score - a.score || a.ci - b.ci; });
-        if (arts.length) picked = arts[0].chunks;
-      }
+      });
+
+      // (b) 시맨틱: 질의 임베딩 → 문서 한정 pgvector 검색 (실패 시 키워드만)
+      try {
+        var emb = await getQueryEmbedding(queryText);
+        if (emb) {
+          var sres = await sb.rpc('match_chunks_semantic_in_doc', { query_embedding: emb, p_doc_name: docName, match_count: 15 });
+          (sres.data || []).forEach(function(row) {
+            var art = row.article_no || '';
+            if (!art || !byArt[art]) return;
+            byArt[art].sem = Math.max(byArt[art].sem, row.similarity || 0);   // 조문 내 최고 유사도
+          });
+          searchMode = 'hybrid';
+        }
+      } catch(e) { console.warn('관계도 시맨틱 검색 실패(키워드로 진행):', e); }
+
+      // (c) 결합: 키워드 0~1 정규화 + 시맨틱(0~1) 가중합. 총칙·부칙은 제외
+      var recs = Object.keys(byArt).map(function(k) { return byArt[k]; });
+      var maxKw = recs.reduce(function(mx, r) { return Math.max(mx, r.kw); }, 0) || 1;
+      recs.forEach(function(r) { r.combined = (r.kw / maxKw) * 0.45 + r.sem * 0.55; });
+      var arts = recs.filter(function(r) { return !isBoiler(r.art) && r.combined > 0.05; })
+        .sort(function(a, b) { return b.combined - a.combined || a.ci - b.ci; });
+      if (arts.length) picked = arts[0].chunks;
     }
     if (!picked.length) return;
     picked.sort(function(x, y) { return (x.chunk_index || 0) - (y.chunk_index || 0); });
     var labels = picked.map(function(c) { return c.article_no; }).filter(function(v, i, arr) { return v && arr.indexOf(v) === i; }).slice(0, 3);
     var text = picked.slice(0, 4).map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + (c.content || ''); }).join('\n\n').slice(0, 1400);
-    var title = mode === '근거' ? '📌 근거 조문' : '📌 관련 조문(키워드 매칭)';
+    var title = mode === '근거' ? '📌 근거 조문' : ('📌 관련 조문(' + (searchMode === 'hybrid' ? '키워드+의미 검색' : '키워드 매칭') + ')');
     box.innerHTML =
       '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">' + title + (labels.length ? ' — ' + lmEsc(labels.join(', ')) : '') + '</summary>' +
       '<div style="margin-top:5px;padding:7px 10px;border-left:3px solid ' + LAWMAP_COLORS.topic + '88;background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12px;line-height:1.65;color:var(--text-secondary);white-space:pre-wrap">' +
