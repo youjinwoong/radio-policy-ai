@@ -5708,34 +5708,49 @@ function lawMapSelectTopic(id) {
   }
 }
 
-// ── 질문 → ①로컬 매칭(비용 0) → ②없으면 AI 생성 제안 ──
+// ── 질문 → ①주제 로컬 매칭(비용 0) → ②없으면 AI 생성 제안 ──
+// 매칭은 **주제(topic) 노드로만** 한정 — 관계도는 주제 중심이라 법령·고시 노드에 매칭하면
+// 질문과 무관한 그래프가 뜬다. '관련·법령·규정' 등 흔한 도메인 단어는 매칭에서 제외(오탐 방지).
+var LAWMAP_MATCH_STOP = { '관련':1, '법령':1, '법률':1, '규정':1, '기준':1, '제도':1, '해당':1, '경우':1,
+  '어디':1, '무엇':1, '방법':1, '절차':1, '내용':1, '사항':1, '관계':1, '전파':1, '통신':1, '무선':1,
+  '주기':1, '대상':1, '요건':1, '현황':1, '개요':1 };
+
+// 주제명을 의미 단어로 분해 (공백·가운뎃점·괄호 기준, 불용어·1글자 제거)
+function lawmapTopicWords(name) {
+  return name.split(/[\s·,()\/]+/)
+    .map(function(w) { return w.replace(/[^가-힣A-Za-z0-9]/g, ''); })
+    .filter(function(w) { return w.length >= 2 && !LAWMAP_MATCH_STOP[w]; });
+}
+
 async function askLawMap() {
   var input = document.getElementById('lawmap-q');
   var q = (input && input.value || '').trim();
   if (!q) return;
   if (!sb) { setLawMapStatus('⚠️ Supabase 연결이 필요합니다 (설정 탭)'); return; }
   if (!_lawMapLoaded) await loadLawMap();
-  var kws = extractKeywords(q);
+  // 양방향 매칭: ① 주제명의 핵심 단어가 질문에 실제로 들어있어야 함(질문 공백 제거 후 부분일치)
+  //             ② 질문 키워드가 주제 설명에 들어가면 가점(동점 해소)
+  var qns = q.replace(/\s+/g, '').toLowerCase();
+  var kws = extractKeywords(q).filter(function(k) { return !LAWMAP_MATCH_STOP[k]; });
   var best = null, bestScore = 0;
-  _lawMapNodes.forEach(function(n) {
-    var hay = (n.name + ' ' + (n.description || '')).toLowerCase();
-    var s = 0;
-    kws.forEach(function(k) {
-      var kk = k.toLowerCase();
-      if (n.name.toLowerCase().indexOf(kk) !== -1) s += 2;
-      else if (hay.indexOf(kk) !== -1) s += 1;
-    });
-    if (n.node_type === 'topic') s *= 1.5;
+  _lawMapNodes.filter(function(n) { return n.node_type === 'topic'; }).forEach(function(n) {
+    var words = lawmapTopicWords(n.name);
+    var nameHits = words.filter(function(w) { return qns.indexOf(w.toLowerCase()) !== -1; });
+    if (nameHits.length === 0) return;   // 주제의 핵심 단어가 질문에 없으면 후보 아님(오탐 차단)
+    var s = nameHits.length * 3;
+    var desc = (n.description || '').toLowerCase();
+    kws.forEach(function(k) { if (desc.indexOf(k.toLowerCase()) !== -1) s += 1; });
     if (s > bestScore) { bestScore = s; best = n; }
   });
-  if (best && bestScore >= 2) {
+  if (best && bestScore >= 3) {
     var sel = document.getElementById('lawmap-topic-select');
-    if (sel) sel.value = (best.node_type === 'topic') ? best.id : '';
+    if (sel) sel.value = best.id;
     renderLawMapGraph(best.id);
-    setLawMapStatus('✔ 기존 관계망 매칭 (<b>' + lmEsc(best.name) + '</b>) — API 호출 없음 · 찾던 주제가 아니면 <button class="btn" style="font-size:11px;padding:2px 8px" onclick="generateLawMapTopic()"><i class="ti ti-sparkles"></i> AI로 새로 생성</button>');
+    setLawMapStatus('✔ 기존 주제 매칭 (<b>' + lmEsc(best.name) + '</b>) — API 호출 없음 · 찾던 주제가 아니면 <button class="btn" style="font-size:11px;padding:2px 8px" onclick="generateLawMapTopic()"><i class="ti ti-sparkles"></i> AI로 새로 생성</button>');
     showLawMapNodeDetail(best.id);
   } else {
-    setLawMapStatus('일치하는 주제가 없습니다 — <button class="btn btn-primary" style="font-size:11px;padding:2px 10px" onclick="generateLawMapTopic()"><i class="ti ti-sparkles"></i> AI로 관계도 생성 (1회 과금)</button>');
+    // 엉뚱한 그래프를 그리지 않음 — 현재 화면 유지하고 생성만 제안
+    setLawMapStatus('“' + lmEsc(q.slice(0, 30)) + '”에 맞는 주제가 관계망에 없습니다 — <button class="btn btn-primary" style="font-size:11px;padding:2px 10px" onclick="generateLawMapTopic()"><i class="ti ti-sparkles"></i> AI로 관계도 생성 (1회 과금)</button>');
   }
 }
 
