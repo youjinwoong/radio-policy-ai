@@ -5965,45 +5965,65 @@ async function showLawMapNodeDetail(nodeId) {
     docBtn.style.display = 'inline-flex';
     docBtn.addEventListener('click', function() { openLawMapDoc(docName); });
   }
-  // 주제 맥락이 있으면 근거 조문 원문 발췌를 먼저 표시. 법령 전체 요약(OKF)은 항상 펼쳐서 표시.
-  if (focusTopic && topicEdge) fillLawMapArticle(n, topicEdge.description || '', docName);
+  // 주제 맥락이 있으면 근거/관련 조문 원문 발췌를 먼저 표시. 법령 전체 요약(OKF)은 항상 펼쳐서 표시.
+  if (focusTopic && topicEdge) fillLawMapArticle(n, topicEdge.description || '', docName, focusTopic.name);
   fillLawMapMainContent(n, true);
 }
 
-// 📌 근거 조문 발췌: 엣지 설명의 "제N조"(제24~25조 범위 포함)를 document_chunks에서 찾아 해당 조문만 표시
-async function fillLawMapArticle(n, basisText, docName) {
+// 조문 발췌: ① 엣지 설명에 "제N조"(범위·의M 포함) 있으면 그 조문 ② 없으면 그 법령 안에서
+// 주제·질문 키워드로 가장 관련 있는 조문을 찾아 표시 (예: 전파법 시행령의 '정기검사 주기' 조문)
+async function fillLawMapArticle(n, basisText, docName, topicName) {
   var box = document.getElementById('lawmap-article');
   if (!box || !sb || !docName) return;
-  // 제24조 / 제24조의2 / 제24~25조 / 제24-25조 모두 파싱
-  var m = (basisText || '').match(/제\s*(\d+)\s*조?(?:의\s*(\d+))?\s*(?:[~∼\-]\s*(?:제\s*)?(\d+))?/);
-  if (!m) return;
-  var start = parseInt(m[1], 10);
-  var end = m[3] ? parseInt(m[3], 10) : start;
-  if (isNaN(start)) return;
-  if (isNaN(end) || end < start || end - start > 4) end = start;   // 비정상 범위는 시작 조문만
-  // 대상 조문 키 목록 (제N조 / N조 두 형태 대응, 제24조의2 우선)
-  var wants = [];
-  var firstBare = start + '조' + (m[2] ? '의' + m[2] : '');
-  wants.push(firstBare);
-  for (var a = start + (m[2] ? 0 : 1); a <= end; a++) { if (('' + a) !== ('' + start) || !m[2]) wants.push(a + '조'); }
-  wants = wants.filter(function(v, i, arr) { return arr.indexOf(v) === i; });
   try {
     var r = await sb.from('document_chunks').select('content,article_no,chunk_index')
-      .eq('doc_name', docName).order('chunk_index', { ascending: true }).limit(400);
+      .eq('doc_name', docName).order('chunk_index', { ascending: true }).limit(500);
     var all = r.data || [];
-    var picked = [];
-    wants.forEach(function(w) {
-      all.forEach(function(c) {
-        var a = (c.article_no || '').replace(/^제/, '');
-        if ((a === w || a.indexOf(w + '(') === 0) && picked.indexOf(c) === -1) picked.push(c);
+    if (!all.length) return;
+
+    var picked = [], mode = '근거';
+    // ① 명시된 조문 (제24조 / 제24조의2 / 제24~25조 / 제24-25조)
+    var m = (basisText || '').match(/제\s*(\d+)\s*조?(?:의\s*(\d+))?\s*(?:[~∼\-]\s*(?:제\s*)?(\d+))?/);
+    if (m) {
+      var start = parseInt(m[1], 10);
+      var end = m[3] ? parseInt(m[3], 10) : start;
+      if (isNaN(end) || end < start || end - start > 4) end = start;
+      var wants = [start + '조' + (m[2] ? '의' + m[2] : '')];
+      for (var a = start + (m[2] ? 0 : 1); a <= end; a++) { wants.push(a + '조'); }
+      wants = wants.filter(function(v, i, arr) { return arr.indexOf(v) === i; });
+      wants.forEach(function(w) {
+        all.forEach(function(c) {
+          var aa = (c.article_no || '').replace(/^제/, '');
+          if ((aa === w || aa.indexOf(w + '(') === 0) && picked.indexOf(c) === -1) picked.push(c);
+        });
       });
-    });
+    }
+    // ② 조문 미지정(또는 매칭 실패) → 법령 내부 키워드 검색으로 관련 조문 추정
+    if (!picked.length) {
+      mode = '관련';
+      var qEl = document.getElementById('lawmap-q');
+      var terms = extractKeywords((topicName || '') + ' ' + (basisText || '') + ' ' + (qEl ? qEl.value : ''))
+        .filter(function(k) { return !LAWMAP_MATCH_STOP[k]; });
+      if (terms.length) {
+        var scored = all.map(function(c) {
+          var t = c.content || '', s = 0;
+          terms.forEach(function(k) { if (t.indexOf(k) !== -1) s++; });
+          return { c: c, s: s };
+        }).filter(function(x) { return x.s > 0; }).sort(function(x, y) { return y.s - x.s; });
+        if (scored.length) {
+          var topArt = scored[0].c.article_no;
+          if (topArt) picked = all.filter(function(c) { return c.article_no === topArt; });
+          if (!picked.length) picked = [scored[0].c];
+        }
+      }
+    }
     if (!picked.length) return;
     picked.sort(function(x, y) { return (x.chunk_index || 0) - (y.chunk_index || 0); });
     var labels = picked.map(function(c) { return c.article_no; }).filter(function(v, i, arr) { return v && arr.indexOf(v) === i; }).slice(0, 3);
     var text = picked.slice(0, 4).map(function(c) { return (c.article_no ? '【' + c.article_no + '】\n' : '') + (c.content || ''); }).join('\n\n').slice(0, 1400);
+    var title = mode === '근거' ? '📌 근거 조문' : '📌 관련 조문(키워드 매칭)';
     box.innerHTML =
-      '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">📌 근거 조문 — ' + lmEsc(labels.join(', ')) + '</summary>' +
+      '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">' + title + (labels.length ? ' — ' + lmEsc(labels.join(', ')) : '') + '</summary>' +
       '<div style="margin-top:5px;padding:7px 10px;border-left:3px solid ' + LAWMAP_COLORS.topic + '88;background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12px;line-height:1.65;color:var(--text-secondary);white-space:pre-wrap">' +
       lmEsc(text) + (text.length >= 1400 ? '…' : '') + '</div></details>';
   } catch(e) {}
