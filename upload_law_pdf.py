@@ -26,6 +26,30 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
 
+def law_title_from_doc_name(doc_name: str) -> str:
+    """doc_name → 반복 머리글 제거용 법령명. '전파법(법률)(...)' → '전파법'"""
+    base = re.sub(r'\.(pdf|txt|md)$', '', (doc_name or '').strip())
+    return base.split('(')[0].strip()
+
+
+def clean_pdf_artifacts(text: str, law_title: str = "") -> str:
+    """국가법령정보센터 PDF 추출 시 본문에 섞이는 편집 흔적 제거 (대시보드 lawmapCleanText와 동일 규칙).
+      · [N페이지] 페이지 구분 표시  · '법제처 N 국가법령정보센터' 쪽 하단 footer
+      · 페이지마다 반복되는 법령명 머리글(줄 전체가 법령명)  · 과다 공백/개행
+    """
+    if not text:
+        return text
+    text = re.sub(r'\[\s*\d+\s*페이지\s*\]', '', text)
+    # footer는 '법제처 N 국가법령정보센터'가 표준이나 청킹 경계에서 'N 국가법령정보센터'/'국가법령정보센터'로 잘리기도 함
+    text = re.sub(r'(?:법제처\s*)?\d*\s*국가법령정보센터', '', text)
+    title = (law_title or '').strip()
+    if title:
+        text = '\n'.join(ln for ln in text.split('\n') if ln.strip() != title)
+    text = re.sub(r'[ \t]+\n', '\n', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 def extract_text_from_pdf(pdf_path: str) -> str:
     try:
         import pdfplumber
@@ -166,6 +190,12 @@ def main():
     else:
         text = extract_text_from_pdf(pdf_path)
     print(f"  추출된 텍스트: {len(text):,}자")
+
+    # PDF 편집 흔적(페이지 표시·법제처 footer·반복 머리글) 제거 — 저장 전 정리 (배경역사 #28)
+    before = len(text)
+    text = clean_pdf_artifacts(text, law_title_from_doc_name(doc_name))
+    if before != len(text):
+        print(f"  PDF 편집 흔적 정리: {before:,} → {len(text):,}자")
 
     if len(text) < 100:
         print("오류: 텍스트가 너무 짧습니다.")
