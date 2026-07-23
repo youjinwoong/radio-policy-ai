@@ -5849,14 +5849,32 @@ async function enrichLawMapTopic() {
   }
 }
 
-// ── 노드 상세 카드: 설명 + 📖 주요 내용(OKF 요약 지연 조회) + 연결 관계 + 원문/자문 버튼 ──
+// ── 노드 상세 카드: 주제 맥락 인식형 ──
+// 주제 포커스 중 법령 노드 클릭 → ① 이 주제에서의 역할 ② 근거 조문 원문 발췌 ③ 현재 그래프 내부 관계만.
+// 법령 전체 요약(OKF)은 접힌 상태로만 제공 (주제와 무관한 전체 내용이 쏟아지지 않게)
 async function showLawMapNodeDetail(nodeId) {
   var el = document.getElementById('lawmap-detail');
   if (!el) return;
   var n = _lawMapNodes.find(function(x) { return x.id === nodeId; });
   if (!n) return;
   var color = LAWMAP_COLORS[n.node_type] || '#999';
-  var rels = _lawMapEdges.filter(function(e) { return e.source_id === nodeId || e.target_id === nodeId; })
+
+  // 주제 포커스 맥락: 포커스 주제와 이 노드를 잇는 엣지 (역할·근거 조문 출처)
+  var focusTopic = null, topicEdge = null;
+  if (_lawMapFocusId && _lawMapFocusId !== nodeId) {
+    var f = _lawMapNodes.find(function(x) { return x.id === _lawMapFocusId; });
+    if (f && f.node_type === 'topic') {
+      focusTopic = f;
+      topicEdge = _lawMapEdges.find(function(e) {
+        return (e.source_id === f.id && e.target_id === nodeId) || (e.target_id === f.id && e.source_id === nodeId);
+      }) || null;
+    }
+  }
+
+  // 연결 관계: 포커스 중이면 화면에 보이는 서브그래프 내부 엣지만 (전체 인용 관계가 쏟아지지 않게)
+  var scopeEdges = _lawMapEdges;
+  if (_lawMapFocusId) scopeEdges = lawmapNeighborhood(_lawMapFocusId).edges;
+  var rels = scopeEdges.filter(function(e) { return e.source_id === nodeId || e.target_id === nodeId; })
     .slice(0, 20)
     .map(function(e) {
       var otherId = e.source_id === nodeId ? e.target_id : e.source_id;
@@ -5864,15 +5882,22 @@ async function showLawMapNodeDetail(nodeId) {
       if (!other) return '';
       return '<li><b>' + lmEsc(other.name) + '</b> — ' + lmEsc(e.description || e.relation_type || '관련') + '</li>';
     }).join('');
+
   var html =
     '<div style="font-weight:700;color:var(--text-primary)">' + lmEsc(n.name) +
-      ' <span style="font-size:10px;padding:1px 7px;border-radius:999px;background:' + color + '22;border:1px solid ' + color + '66;color:var(--text-secondary)">' + (LAWMAP_TYPE_LABEL[n.node_type] || n.node_type) + '</span></div>' +
-    (n.description ? '<div style="margin:4px 0 2px;color:var(--text-secondary)">' + lmEsc(n.description) + '</div>' : '');
+      ' <span style="font-size:10px;padding:1px 7px;border-radius:999px;background:' + color + '22;border:1px solid ' + color + '66;color:var(--text-secondary)">' + (LAWMAP_TYPE_LABEL[n.node_type] || n.node_type) + '</span></div>';
+  if (focusTopic && topicEdge) {
+    html += '<div style="margin:5px 0;padding:6px 10px;border-left:3px solid ' + LAWMAP_COLORS.topic + ';background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12.5px;color:var(--text-primary)">🎯 <b>' + lmEsc(focusTopic.name) + '</b>에서의 역할: ' + lmEsc(topicEdge.description || topicEdge.relation_type) + '</div>';
+  }
+  if (n.description) {
+    html += '<div style="margin:4px 0 2px;color:var(--text-secondary)">' + lmEsc(n.description) + '</div>';
+  }
   if (n.node_type !== 'topic') {
-    html += '<div id="lawmap-okf" style="margin:6px 0"><span style="font-size:11px;color:var(--text-tertiary)">📖 주요 내용 불러오는 중…</span></div>';
+    html += '<div id="lawmap-article" style="margin:6px 0"></div>';   // 📌 근거 조문 발췌 (주제 맥락 있을 때)
+    html += '<div id="lawmap-okf" style="margin:6px 0"><span style="font-size:11px;color:var(--text-tertiary)">📖 요약 확인 중…</span></div>';
   }
   html +=
-    '<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">연결 관계</div>' +
+    '<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">연결 관계' + (_lawMapFocusId ? ' <span style="opacity:.7">(현재 그래프 범위)</span>' : '') + '</div>' +
     '<ul style="margin:2px 0 0 18px;padding:0;font-size:12px;color:var(--text-secondary)">' + (rels || '<li>연결 없음</li>') + '</ul>' +
     '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' +
       '<button class="btn" id="lawmap-doc-btn" style="font-size:11px;padding:3px 10px;display:none"><i class="ti ti-file-text"></i> 원문 보기</button>' +
@@ -5881,26 +5906,56 @@ async function showLawMapNodeDetail(nodeId) {
   el.innerHTML = html;
   var chatBtn = document.getElementById('lawmap-chat-btn');
   if (chatBtn) chatBtn.addEventListener('click', function() { askLawMapToChat(n.name, n.node_type); });
-  // 원문 보기: doc_name 직접 연결 또는 document_chunks에서 이름으로 탐색
-  var docBtn = document.getElementById('lawmap-doc-btn');
-  if (docBtn && n.node_type !== 'topic') {
-    var docName = n.doc_name || null;
-    if (!docName && sb) {
-      try {
-        var dq = await sb.from('document_chunks').select('doc_name').ilike('doc_name', n.name + '%').limit(1);
-        if (dq.data && dq.data.length) docName = dq.data[0].doc_name;
-      } catch(e) {}
-    }
-    if (docName) {
-      docBtn.style.display = 'inline-flex';
-      docBtn.addEventListener('click', function() { openLawMapDoc(docName); });
-    }
+
+  if (n.node_type === 'topic') return;
+
+  // 원문 doc_name 확정: 노드 연결 → 없으면 document_chunks에서 이름으로 탐색 (조문 발췌·원문 버튼 공용)
+  var docName = n.doc_name || null;
+  if (!docName && sb) {
+    try {
+      var dq = await sb.from('document_chunks').select('doc_name').ilike('doc_name', n.name + '%').limit(1);
+      if (dq.data && dq.data.length) docName = dq.data[0].doc_name;
+    } catch(e) {}
   }
-  if (n.node_type !== 'topic') fillLawMapMainContent(n);
+  var docBtn = document.getElementById('lawmap-doc-btn');
+  if (docBtn && docName) {
+    docBtn.style.display = 'inline-flex';
+    docBtn.addEventListener('click', function() { openLawMapDoc(docName); });
+  }
+  // 주제 맥락이 있으면 근거 조문 원문 발췌를 우선 표시, 법령 전체 요약은 접어 둠
+  if (focusTopic && topicEdge) fillLawMapArticle(n, topicEdge.description || '', docName);
+  fillLawMapMainContent(n, !(focusTopic && topicEdge));
 }
 
-// 📖 주요 내용: kb_documents(OKF 요약) → 없으면 노드 설명으로 대체
-async function fillLawMapMainContent(n) {
+// 📌 근거 조문 발췌: 엣지 설명의 "제N조"를 document_chunks에서 찾아 해당 조문만 표시
+async function fillLawMapArticle(n, basisText, docName) {
+  var box = document.getElementById('lawmap-article');
+  if (!box || !sb || !docName) return;
+  var m = (basisText || '').match(/제(\d+)조(의\d+)?/);
+  if (!m) return;
+  var bare = m[1] + '조' + (m[2] || '');   // 문서마다 article_no가 '제19조(...)' 또는 '19조(...)' 두 형태
+  var artKey = '제' + bare;
+  try {
+    var r = await sb.from('document_chunks').select('content,article_no')
+      .eq('doc_name', docName)
+      .or('article_no.ilike.' + artKey + '%,article_no.ilike.' + bare + '%')
+      .order('chunk_index', { ascending: true }).limit(3);
+    var rows = (r.data || []).filter(function(c) {
+      var a = (c.article_no || '').replace(/^제/, '');
+      return a === bare || a.indexOf(bare + '(') === 0;   // 제19조의2가 제19조에 섞이지 않게
+    });
+    if (!rows.length) return;
+    var text = rows.map(function(c) { return c.content || ''; }).join('\n').slice(0, 900);
+    box.innerHTML =
+      '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">📌 근거 조문 — ' + lmEsc(rows[0].article_no || artKey) + '</summary>' +
+      '<div style="margin-top:5px;padding:7px 10px;border-left:3px solid ' + LAWMAP_COLORS.topic + '88;background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12px;line-height:1.65;color:var(--text-secondary);white-space:pre-wrap">' +
+      lmEsc(text) + (text.length >= 900 ? '…' : '') + '</div></details>';
+  } catch(e) {}
+}
+
+// 📖 법령 전체 요약: kb_documents(OKF) → 없으면 노드 설명으로 대체.
+// openByDefault=false(주제 맥락 있음)면 접힌 상태 — 주제와 무관한 법령 전체 내용이 카드에 쏟아지지 않게
+async function fillLawMapMainContent(n, openByDefault) {
   var box = document.getElementById('lawmap-okf');
   if (!box || !sb) return;
   try {
@@ -5909,7 +5964,7 @@ async function fillLawMapMainContent(n) {
     if (doc) {
       var body = (doc.body_md || '').slice(0, 1200);
       box.innerHTML =
-        '<details open><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">📖 주요 내용 (요약 지식베이스)</summary>' +
+        '<details' + (openByDefault ? ' open' : '') + '><summary style="cursor:pointer;font-size:12px;color:var(--accent, #5b7ff5)">📖 법령 전체 요약 보기 (요약 지식베이스)</summary>' +
         '<div style="margin-top:5px;padding:7px 10px;border-left:3px solid ' + (LAWMAP_COLORS[n.node_type] || '#999') + '88;background:var(--bg-secondary);border-radius:0 6px 6px 0;font-size:12px;line-height:1.65;color:var(--text-secondary);white-space:pre-wrap">' +
         (doc.description ? lmEsc(doc.description) + '\n\n' : '') + lmEsc(body) + (doc.body_md && doc.body_md.length > 1200 ? '…' : '') +
         '</div></details>';

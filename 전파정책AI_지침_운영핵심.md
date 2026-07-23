@@ -159,12 +159,12 @@ C:\Users\SKTelecom\Desktop\frequence\radio-policy-ai\
 - 세션에서 주제 수동 추가 패턴: 노드 `insert ... on conflict (name) do nothing` → 엣지 `insert ... select` name 조인 + `on conflict do nothing` (source='seed'). 2026-07-23 시드 30주제가 예시.
 - vis-network는 CDN(unpkg, 9.1.9 고정) **지연 로드** — lawmap 탭 첫 진입 시에만. 다른 탭 성능 무관.
 - 전체 뷰는 과밀 방지 적응형 필터(노드 300 이하까지 인용 weight 임계 2→3→5→8→12 상향). 주제 포커스 뷰는 직접 이웃+계열(하위법령) 1단계만 확장(허브 법령 경유 폭발 방지).
-- 노드 상세 카드: 설명 + 📖 주요 내용(kb_documents OKF 요약 지연 조회, 없으면 설명 대체) + 원문 보기(document_chunks 모달) + AI 자문 프리필.
+- 노드 상세 카드는 **주제 맥락 인식형**: 주제 포커스 중 법령 클릭 → ① 🎯 이 주제에서의 역할(엣지 설명) ② 📌 근거 조문 원문 발췌(엣지의 "제N조"를 document_chunks에서 조회 — article_no가 문서마다 '제19조(...)'/'19조(...)' 두 형태라 양쪽 매칭 필수) ③ 연결 관계는 현재 그래프 범위만. 법령 전체 요약(OKF)은 접힌 상태로만 제공(주제와 무관한 전체 내용 쏟아짐 방지 — 운영자 피드백). 원문 보기(모달)·AI 자문 프리필 버튼.
 
 ## 대시보드 (GitHub Pages)
 
 - URL: https://youjinwoong.github.io/radio-policy-ai/
-- **수정 배포 시 index.html 캐시 버스터 `app.js?v=`·`styles.css?v=` 갱신 필수 (현재 `app.js?v=20260723d` / `styles.css?v=20260723a`)** — CSS 고칠 때 styles.css 버스터도 갱신해야 사용자 브라우저가 새로 받음
+- **수정 배포 시 index.html 캐시 버스터 `app.js?v=`·`styles.css?v=` 갱신 필수 (현재 `app.js?v=20260723f` / `styles.css?v=20260723a`)** — CSS 고칠 때 styles.css 버스터도 갱신해야 사용자 브라우저가 새로 받음
 - 아이콘은 Tabler Icons webfont(ti ti-*) — 존재하는 이름만(없으면 빈칸 렌더).
 - 메뉴: [모니터링] 보도자료·뉴스 / Daily Briefing / 기술 용어 · [자문] AI 자문 / 보고서 초안 제안 · [법안 동향] 국회 법안 / 행정부 입법예고·법령 개정 / 법령 DIFF 분석 · [지식 베이스] 국내 법령·고시 / **법령 관계도(lawmap)** / ITU-R / 정부 보도자료 / 추가 지식 입력 / 설정 / 운영 상태(크롤·브리핑·heartbeat 한눈 점검)
 - 뉴스 중요도: 화면 라벨 "🔴 중요/🟡 보통/🟢 참고", 내부값·DB·코드는 '긴급/보통/참고'. 수정 시 news_feed 갱신+importance_feedback 기록+당일 브리핑 🔴 동기화. 잠금=15일 삭제 제외, 삭제=영구+deleted_news 기록.
