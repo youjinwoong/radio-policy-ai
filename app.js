@@ -6048,11 +6048,9 @@ async function fillLawMapArticle(n, basisText, docName, topicName, parentBasis) 
       var qEl = document.getElementById('lawmap-q');
       var queryText = (topicName || '') + ' ' + (basisText || '') + ' ' + (parentBasis || '') + ' ' + (qEl ? qEl.value : '');
 
-      // (a) 키워드: **조문 단위로 한 번만** 집계(청크 수에 비례하지 않게). 제목 매칭 ×5, 본문 ×1,
-      //     제목에 주제명이 통째로 들어가면(예: '주파수분배') 강한 가점 +15
+      // (a) 키워드: **조문 단위로 한 번만** 집계(청크 수 편향 제거). 제목 매칭 ×5, 본문 ×1.
       var terms = extractKeywords(queryText).filter(function(k) { return !LAWMAP_MATCH_STOP[k]; });
       (topicName || '').split(/[\s·]+/).forEach(function(w) { w = w.trim(); if (w.length >= 2 && !LAWMAP_MATCH_STOP[w] && terms.indexOf(w) === -1) terms.push(w); });
-      var qnsTopic = (topicName || '').replace(/\s+/g, '');
       var byArt = {};
       all.forEach(function(c) {
         var art = c.article_no || '';
@@ -6063,7 +6061,6 @@ async function fillLawMapArticle(n, basisText, docName, topicName, parentBasis) 
       });
       Object.keys(byArt).forEach(function(k) {
         var rec = byArt[k];
-        if (qnsTopic.length >= 3 && rec.art.replace(/\s+/g, '').indexOf(qnsTopic) !== -1) rec.kw += 15;  // 제목 구절 일치
         terms.forEach(function(t) {
           if (rec.art.indexOf(t) !== -1) rec.kw += 5;   // 제목 매칭(조문당 1회)
           if (rec.body.indexOf(t) !== -1) rec.kw += 1;  // 본문 매칭(조문당 1회)
