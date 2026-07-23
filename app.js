@@ -5622,32 +5622,36 @@ function renderLawMapGraph(focusId) {
     var sub = lawmapNeighborhood(_lawMapFocusId);
     nodes = sub.nodes; edges = sub.edges;
   } else {
-    // 전체 뷰: 약한 인용은 숨겨 과밀 방지 — 노드 300개 이하가 될 때까지 인용 임계값 상향
-    // (주제 포커스 뷰에서는 약한 인용 포함 전부 표시됨)
-    var thresholds = [2, 3, 5, 8, 12];
+    // 전체 뷰: 읽을 수 있는 '핵심 골격'만 — 노드 90개 이하가 될 때까지 인용 임계값 상향
+    // (라벨이 미세해지지 않도록 과밀 방지. 세부 인용은 노드를 클릭해 드릴다운)
+    var thresholds = [2, 3, 5, 8, 12, 20, 30];
     for (var ti = 0; ti < thresholds.length; ti++) {
       var th = thresholds[ti];
       edges = _lawMapEdges.filter(function(e) { return e.source !== 'citation' || (e.weight || 1) >= th; });
       var usedIds = new Set();
       edges.forEach(function(e) { usedIds.add(e.source_id); usedIds.add(e.target_id); });
       nodes = _lawMapNodes.filter(function(n) { return usedIds.has(n.id) || n.node_type === 'topic'; });
-      if (nodes.length <= 300) break;
+      if (nodes.length <= 90) break;
     }
   }
   // 보강 버튼: 주제 포커스일 때만 노출
   var enrichBtn = document.getElementById('lawmap-enrich-btn');
   if (enrichBtn) enrichBtn.style.display = (focusNode && focusNode.node_type === 'topic') ? 'inline-flex' : 'none';
 
-  var textColor = (getComputedStyle(document.documentElement).getPropertyValue('--text-primary') || '').trim() || '#333';
+  var css = getComputedStyle(document.documentElement);
+  var textColor = (css.getPropertyValue('--text-primary') || '').trim() || '#333';
+  var bgColor = (css.getPropertyValue('--bg-primary') || '').trim() || '#fff';
   var visNodes = nodes.map(function(n) {
     return {
       id: n.id,
       label: lawmapWrapLabel(n.name),
       shape: 'dot',
-      size: n.node_type === 'topic' ? 24 : 14,
+      size: n.node_type === 'topic' ? 22 : 12,
       color: { background: LAWMAP_COLORS[n.node_type] || '#999', border: 'rgba(0,0,0,0.22)',
                highlight: { background: LAWMAP_COLORS[n.node_type] || '#999', border: textColor } },
-      font: { color: textColor, size: 12 }
+      // 라벨에 배경색 외곽선 → 엣지·다른 노드 위에서도 글자가 읽힘
+      font: { color: textColor, size: n.node_type === 'topic' ? 15 : 13, strokeWidth: 4, strokeColor: bgColor,
+              vadjust: 0, bold: n.node_type === 'topic' }
     };
   });
   var visEdges = edges.map(function(e) {
@@ -5655,7 +5659,7 @@ function renderLawMapGraph(focusId) {
       id: e.id, from: e.source_id, to: e.target_id,
       arrows: { to: { enabled: true, scaleFactor: 0.5 } },
       width: Math.min(1 + Math.log((e.weight || 1)) / Math.LN2 * 0.7, 4),
-      color: { color: '#8a8f98', opacity: 0.55, highlight: '#5b7ff5' },
+      color: { color: '#8a8f98', opacity: 0.5, highlight: '#5b7ff5' },
       title: (e.relation_type || '') + (e.description ? ' — ' + e.description : ''),
       smooth: { type: 'continuous' }
     };
@@ -5664,14 +5668,20 @@ function renderLawMapGraph(focusId) {
   var data = { nodes: new vis.DataSet(visNodes), edges: new vis.DataSet(visEdges) };
   var options = {
     physics: {
-      barnesHut: { gravitationalConstant: -2600, springLength: 130, springConstant: 0.03, avoidOverlap: 0.15 },
-      stabilization: { iterations: 150 }
+      barnesHut: { gravitationalConstant: -3000, springLength: 150, springConstant: 0.04, avoidOverlap: 0.4 },
+      stabilization: { iterations: 250, updateInterval: 25, fit: true },
+      minVelocity: 0.75
     },
-    interaction: { hover: true, tooltipDelay: 120 },
-    layout: { improvedLayout: visNodes.length <= 150 }
+    nodes: { scaling: { label: { enabled: true, min: 11, max: 20 } } },
+    interaction: { hover: true, tooltipDelay: 120, hideEdgesOnDrag: visNodes.length > 60 },
+    layout: { improvedLayout: visNodes.length <= 120 }
   };
   if (_lawMapNet) { try { _lawMapNet.destroy(); } catch(e) {} }
   _lawMapNet = new vis.Network(el, data, options);
+  // 안정화가 끝나면 physics를 꺼서 노드가 계속 흔들리지 않게 함 (전체 인용망 '춤추는' 현상 방지)
+  _lawMapNet.once('stabilizationIterationsDone', function() {
+    try { _lawMapNet.setOptions({ physics: false }); _lawMapNet.fit({ animation: false }); } catch(e) {}
+  });
   _lawMapNet.on('click', function(p) {
     if (!(p.nodes && p.nodes.length)) return;
     var id = p.nodes[0];
